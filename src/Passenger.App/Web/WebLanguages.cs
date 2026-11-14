@@ -31,6 +31,10 @@ public enum WebServerKind
 
     /// <summary>Godot's own GDScript server, in its editor, reached over TCP (<see cref="Godot.GodotScripts"/>).</summary>
     GDScript,
+
+    /// <summary>Passenger's own Visual Basic server (src/Passenger.VisualBasic), a helper program on Passenger's runtime,
+    /// given each Visual Basic project's design-time builds (<see cref="WebLanguages.VisualBasicProjects"/>).</summary>
+    VisualBasic,
 }
 
 /// <summary>A web language server lost, as the status bar says it, with what starts it again when it was left stopped for
@@ -187,6 +191,7 @@ public sealed class WebLanguages : IAsyncDisposable
             LanguageService.Dockerfile => WebServerKind.Dockerfile,
             LanguageService.Yaml => WebServerKind.Yaml,
             LanguageService.GDScript => WebServerKind.GDScript,
+            LanguageService.VisualBasic => WebServerKind.VisualBasic,
             _ => null,
         };
         return kind is { } server ? (server, language.IdOf(path)) : null;
@@ -201,6 +206,7 @@ public sealed class WebLanguages : IAsyncDisposable
         WebServerKind.Dockerfile => "Dockerfile",
         WebServerKind.Yaml => "YAML",
         WebServerKind.GDScript => "GDScript",
+        WebServerKind.VisualBasic => "Visual Basic",
         _ => "JSON",
     };
 
@@ -406,6 +412,27 @@ public sealed class WebLanguages : IAsyncDisposable
         }
         Eslint.FilesChanged(paths);
         Checks.FilesChanged(paths);
+        VisualBasicFilesChanged(paths);
+    }
+
+    /// <summary>Visual Basic's server told of its files changed on disk, which it reads again where they are not open, and
+    /// given its projects again where one's files or what it builds from changed.</summary>
+    private void VisualBasicFilesChanged(IReadOnlyCollection<string> paths)
+    {
+        if (disposed || !servers.TryGetValue(new ServerPlace(WebServerKind.VisualBasic, null), out NodeServer? server) || server.Session is not { } running)
+        {
+            return;
+        }
+        string[] code = [.. paths.Where(p => Language.ForPath(p) == Language.VisualBasic)];
+        if (code.Length > 0)
+        {
+            IdeErrors.Observe(running.Server.NotifyAsync(LspMethods.DidChangeWatchedFiles,
+                new { changes = code.Select(p => new { uri = DocumentUris.FromPath(p), type = (int)FileChangeType.Changed }).ToArray() }));
+        }
+        if (code.Length > 0 || paths.Any(p => PathNames.HasExtension(p, [".vbproj", ".props", ".targets"])))
+        {
+            ProjectsChanged();
+        }
     }
 
     /// <summary>Settings changed: ESLint configured otherwise starts again on the files it covers then, and every banner
@@ -578,7 +605,7 @@ public sealed class WebLanguages : IAsyncDisposable
             Package = Path.Combine(Modules, Package(kind), "package.json"),
             Missing = () => Missing(kind),
             Command = node => Starting(kind, node),
-            Elsewhere = kind == WebServerKind.GDScript ? () => GodotStart(place) : null,
+            Elsewhere = kind == WebServerKind.GDScript ? () => GodotStart(place) : kind == WebServerKind.VisualBasic ? VisualBasicStart : null,
             Configure = language => ConfigureAsync(kind, language),
             Listen = started => started.Server.TypeScriptVersion += (_, _) => UiThread.Post(() => StateChanged?.Invoke(this, EventArgs.Empty)),
             Started = started => Started(place, started),
@@ -604,6 +631,43 @@ public sealed class WebLanguages : IAsyncDisposable
         (string? setting, IReadOnlyDictionary<string, string> environment) = (settings().GodotExecutable, GodotEnvironment);
         bool headless = godotAsked.Contains(place) || GodotHeadlessAtOpen;
         return cancel => Godot.GodotScripts.StartAsync(place.Project, setting, environment, LogFolder, headless, cancel);
+    }
+
+    /// <summary>The notification that gives Visual Basic's server its projects, each with its design-time builds as the
+    /// project host's JSON, or none for a project to forget.</summary>
+    private const string VisualBasicProjectsMethod = "passenger/projects";
+
+    /// <summary>Visual Basic's server, carried beside the app as the debug adapter is.</summary>
+    public static string VisualBasicServer => Path.Combine(AppContext.BaseDirectory, "visualbasic", "Passenger.VisualBasic.dll");
+
+    /// <summary>The folder's Visual Basic projects, each with its design-time builds or, where it has none, without: what
+    /// Visual Basic's server is given as it starts and again as they change. Null where nothing builds projects.</summary>
+    public Func<Task<IReadOnlyList<(string Path, string? Infos)>>>? VisualBasicProjects { get; init; }
+
+    /// <summary>Visual Basic's server started on Passenger's own runtime, its heap kept small as Roslyn's server's is.</summary>
+    private Func<CancellationToken, Task<LanguageSession>> VisualBasicStart() => cancel => LanguageSession.StartAsync(
+        new ServerStart(ChildProcesses.ConservingMemory(ChildProcesses.HelperCommand(VisualBasicServer, [], folder)), folder, LogFolder, ClientCapabilities.Web), cancel);
+
+    /// <summary>Visual Basic's server given the projects as they are now; it passes over those whose builds it has.</summary>
+    private async Task GiveVisualBasicProjectsAsync(LanguageServer server)
+    {
+        if (VisualBasicProjects is { } asked)
+        {
+            IReadOnlyList<(string Path, string? Infos)> projects = await asked();
+            IdeErrors.Write($"Visual Basic's language server given {Plural.Of(projects.Count, "project")} for {folder}"
+                + $"{(projects.Any(p => p.Infos is null) ? $", {projects.Count(p => p.Infos is null)} of them not built" : string.Empty)}");
+            await server.NotifyAsync(VisualBasicProjectsMethod, new { projects = projects.Select(p => new { path = p.Path, infos = p.Infos }).ToArray() });
+        }
+    }
+
+    /// <summary>The folder's projects changed, or what one builds from: Visual Basic's server, when it runs, is given them again.</summary>
+    public void ProjectsChanged()
+    {
+        UiThread.Check();
+        if (!disposed && servers.TryGetValue(new ServerPlace(WebServerKind.VisualBasic, null), out NodeServer? server) && server.Session is { } running)
+        {
+            IdeErrors.Observe(GiveVisualBasicProjectsAsync(running.Server));
+        }
     }
 
     /// <summary>Godot's server of a script's project asked for, for what Passenger's own reading of it has no answer for:
@@ -641,13 +705,18 @@ public sealed class WebLanguages : IAsyncDisposable
         {
             Announce(open);
         }
+        if (place.Kind == WebServerKind.VisualBasic)
+        {
+            // Again now it runs: the folder's projects found while it started were told to no server.
+            IdeErrors.Observe(GiveVisualBasicProjectsAsync(started.Server));
+        }
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Why a server cannot start that this build is to blame for: its package, or the Dockerfile server's preload,
     /// is not beside the app.</summary>
     private static string? Missing(WebServerKind kind) =>
-        kind == WebServerKind.GDScript ? null
+        kind is WebServerKind.GDScript or WebServerKind.VisualBasic ? null
         : !File.Exists(Script(kind)) ? $"its language server is missing from the app's folder ({Script(kind)})"
         : kind == WebServerKind.Dockerfile && !File.Exists(DockerHubTags.Preload) ? $"Passenger's part of its language server is missing from the app's folder ({DockerHubTags.Preload})"
         : null;
@@ -791,8 +860,13 @@ public sealed class WebLanguages : IAsyncDisposable
             hold.Holding.SetResult(server.ProcessId);
             await hold.Until;
         }
-        // Godot's server reads no settings of the client's.
-        if (kind != WebServerKind.GDScript)
+        // Its projects before its files, so none is first read as a file of no project.
+        if (kind == WebServerKind.VisualBasic)
+        {
+            await GiveVisualBasicProjectsAsync(server);
+        }
+        // Godot's server reads no settings of the client's, nor does Visual Basic's.
+        else if (kind != WebServerKind.GDScript)
         {
             await Configure(kind, server);
         }

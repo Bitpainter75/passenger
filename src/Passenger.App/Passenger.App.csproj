@@ -91,6 +91,11 @@
          helper host's), so a publish builds it for its system but carries no runtime of its own. -->
     <ProjectReference Include="../Passenger.DebugAdapter/Passenger.DebugAdapter.csproj" ReferenceOutputAssembly="false" Private="false"
                       GlobalPropertiesToRemove="SelfContained;PublishReadyToRun" />
+    <!-- Built first and carried under visualbasic/, never linked: Visual Basic's language server runs in its own process on
+         the runtime Passenger runs on (Web/WebLanguages.cs), and is managed code alone, so it is built for none of the
+         systems the app is published for. -->
+    <ProjectReference Include="../Passenger.VisualBasic/Passenger.VisualBasic.csproj" ReferenceOutputAssembly="false" Private="false"
+                      GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishReadyToRun" />
     <!-- Built first, for a publish's system on its runtime pack, and carried beside the app, never linked: Passenger's helpers
          run in it (ChildProcesses.HelperCommand). -->
     <ProjectReference Include="../Passenger.Helper/Passenger.Helper.csproj" ReferenceOutputAssembly="false" Private="false"
@@ -154,7 +159,7 @@
     <None Include="../../docs/release-notes/*.md" Link="release-notes/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
-  <Target Name="NoticeInputs" DependsOnTargets="ResolvePackageAssets;ResolveRuntimePackAssets;IncludeDebugAdapter;IncludeProjectHost">
+  <Target Name="NoticeInputs" DependsOnTargets="ResolvePackageAssets;ResolveRuntimePackAssets;IncludeDebugAdapter;IncludeProjectHost;IncludeVisualBasicServer">
     <MSBuild Projects="../../tools/Passenger.Notices/Passenger.Notices.csproj" Targets="GetTargetPath"
              RemoveProperties="RuntimeIdentifier;SelfContained;PublishReadyToRun" BuildInParallel="$(BuildInParallel)">
       <Output TaskParameter="TargetOutputs" ItemName="NoticesTool" />
@@ -177,7 +182,7 @@
       <!-- The runtime a self-contained app carries, from its runtime pack. -->
       <NoticePackage Include="@(RuntimePackAsset->'%(NuGetPackageId)/%(NuGetPackageVersion)')" Condition="'$(SelfContained)' == 'true'" />
       <NoticeDebuggerDeps Include="$(DebugAdapterFolder)*.deps.json" />
-      <NoticeHostDeps Include="$(ProjectHostFolder)*.deps.json" />
+      <NoticeHostDeps Include="$(ProjectHostFolder)*.deps.json;$(VisualBasicServerFolder)*.deps.json" />
       <NoticesServerPackage Include="@(NoticesServer->WithMetadataValue('Kind', 'package'))" />
       <NoticeServerDeps Include="%(NoticesServerPackage.Folder)**/*.deps.json" />
       <NoticeWebStamp Include="@(NoticesWeb->'%(Stamp)')" />
@@ -308,6 +313,23 @@
     <ItemGroup>
       <ProjectHostFile Include="$(ProjectHostFolder)*" />
       <None Include="@(ProjectHostFile)" Link="host/%(ProjectHostFile.Filename)%(ProjectHostFile.Extension)"
+            CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Visual Basic's language server becomes this project's output items under visualbasic/: the server and the Roslyn
+       packages it carries. -->
+  <Target Name="IncludeVisualBasicServer" BeforeTargets="AssignTargetPaths">
+    <MSBuild Projects="../Passenger.VisualBasic/Passenger.VisualBasic.csproj" Targets="GetTargetPath"
+             RemoveProperties="RuntimeIdentifier;SelfContained;PublishReadyToRun" BuildInParallel="$(BuildInParallel)">
+      <Output TaskParameter="TargetOutputs" ItemName="VisualBasicServerAssembly" />
+    </MSBuild>
+    <PropertyGroup>
+      <VisualBasicServerFolder>@(VisualBasicServerAssembly->'%(RootDir)%(Directory)')</VisualBasicServerFolder>
+    </PropertyGroup>
+    <ItemGroup>
+      <VisualBasicServerFile Include="$(VisualBasicServerFolder)*" Exclude="$(VisualBasicServerFolder)*.runtimeconfig.dev.json" />
+      <None Include="@(VisualBasicServerFile)" Link="visualbasic/%(VisualBasicServerFile.Filename)%(VisualBasicServerFile.Extension)"
             CopyToOutputDirectory="PreserveNewest" Visible="false" />
     </ItemGroup>
   </Target>

@@ -8,7 +8,8 @@ using Passenger.Text;
 namespace Passenger.Languages;
 
 /// <summary>What answers for a language's files beyond the editor: the C# language server (C# and Razor), Passenger's
-/// XAML, an MSBuild evaluation, one of the web languages' servers, Godot's for GDScript, or nothing.</summary>
+/// XAML, an MSBuild evaluation, one of the web languages' servers, Godot's for GDScript, Passenger's own server for Visual
+/// Basic, or nothing.</summary>
 public enum LanguageService
 {
     None,
@@ -22,6 +23,7 @@ public enum LanguageService
     Dockerfile,
     Yaml,
     GDScript,
+    VisualBasic,
 }
 
 /// <summary>A file name a language claims, matched without regard to case: a name, or one <c>*</c> standing for any run
@@ -168,10 +170,10 @@ public sealed class Language
     public static readonly Language Razor = new(LanguageIds.Razor, "Razor", ["*" + RazorFiles.Component, "*" + RazorFiles.Page], block: ("@*", "*@"),
         grammar: new("text.aspnetcorerazor", "aspnetcorerazor.tmLanguage.json", Tags.Html), service: LanguageService.CSharp, literals: LiteralLines.Preformatted);
 
-    /// <summary>Visual Basic, coloured by Passenger's own grammar, folded by its blocks and commented with an apostrophe; no
-    /// language server answers for it yet.</summary>
+    /// <summary>Visual Basic, coloured by Passenger's own grammar, folded by its blocks, commented with an apostrophe and
+    /// answered by Passenger's own language server (src/Passenger.VisualBasic).</summary>
     public static readonly Language VisualBasic = new("vb", "Visual Basic", ["*.vb"], line: "'",
-        grammar: new("source.vbnet", "visualbasic.tmLanguage.json"), folds: FoldScan.VisualBasic);
+        grammar: new("source.vbnet", "visualbasic.tmLanguage.json"), folds: FoldScan.VisualBasic, service: LanguageService.VisualBasic);
 
     /// <summary>XAML, MSBuild's files and the rest of XML are one markup to the editor, each named and answered as its own.</summary>
     public static readonly Language Xaml = XmlKind("xaml", "XAML", ["*.axaml", "*.paml", "*.xaml"], LanguageService.Xaml);

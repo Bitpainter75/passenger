@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Passenger's language server for Visual Basic: Roslyn's Visual Basic compiler and features from nuget.org, at the
+       version Passenger's C# parser is at, behind the Language Server Protocol in a process of its own. Roslyn's carried
+       server holds no Visual Basic, and no package of its build is on nuget.org. The app carries it under visualbasic/. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Passenger.VisualBasic</RootNamespace>
+    <!-- Run by Passenger's helper host, on the runtime Passenger runs on, or by any dotnet whose runtime is as new. -->
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.VisualBasic.Features" />
+    <ProjectReference Include="../Passenger.Core/Passenger.Core.csproj" />
+  </ItemGroup>
+</Project>

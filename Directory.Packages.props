@@ -105,6 +105,9 @@
     <!-- The unit tests' workspaces, at the compiler's version above: what the extension inside Roslyn's server keeps by a
          solution's documents, held to each workspace apart. -->
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
+    <!-- Visual Basic's language server (src/Passenger.VisualBasic), at the compiler's version above, as every Roslyn
+         package names the others by exact version. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.VisualBasic.Features" Version="5.9.0" />
     <PackageVersion Include="ModelContextProtocol.Core" Version="2.3.1" />
     <!-- The NuGet window's package sources, read by NuGet's own code, so they match the CLI's. -->
     <PackageVersion Include="NuGet.Configuration" Version="7.9.0" />

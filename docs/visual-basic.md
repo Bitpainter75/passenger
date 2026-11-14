@@ -22,9 +22,19 @@ event's accessors from the line that opens them to their `End` (the placeholder 
 on past its line, `#Region` to `#End Region`, the `Imports`, a documentation comment and the comments a file begins
 with. Collapse to Definitions, the fold settings and the folds a folder remembers treat them as C#'s.
 
-**What was there before.** A `.vbproj` was already a project to Passenger: the workspace finds it, a solution takes it
-with Visual Basic's project type, MSBuild's design-time build reads it, and Build and Run go through MSBuild as a C#
-project's do. None of that was changed, and none of it has a test with a Visual Basic project yet.
+**Language help (stage 2).** Passenger's own language server for Visual Basic (`src/Passenger.VisualBasic`) answers
+for every `.vb` file:
+
+- the compiler's errors and warnings as you type, underlined and counted as C#'s are;
+- completion, with each item's signature and documentation;
+- hover, Go to Declaration, Find Usages and the highlights of the name at the caret;
+- Rename, across the project's files, open or not;
+- File Structure, and Reformat Code in the file's own indentation.
+
+**Visual Basic projects are projects.** A folder is walked for `.vbproj` as for `.csproj`, so a Visual Basic project
+opened by its folder is in the Solution view, has its run configuration, and builds and runs through MSBuild as a C#
+project does. Before, only a solution that named a `.vbproj` knew it; a folder holding one showed "No
+configurations". Roslyn's C# server is never given a Visual Basic project.
 
 ## How it is built
 
@@ -35,7 +45,10 @@ project's do. None of that was changed, and none of it has a test with a Visual 
 | A Markdown block | `EmbeddedAs` in `Language.cs`, `meta.embedded.block.vs_net` in `ScopeColours.cs` | VS Code's Markdown grammar names Visual Basic `source.asp.vb.net` |
 | The apostrophe | `TextEditing.Type`'s `comment`, given the editor's `LineCommentPrefix` | the editor names no language |
 | The folds | `VisualBasicFolds` behind `FoldScan.VisualBasic` (`src/Passenger.Languages/Markup`) | a scan of lines off the UI thread, as XML's and JSON's: no parser is carried for it yet |
-| The tests | `FileColoursTests` (a file's kinds, its comment, the apostrophe, Markdown), `EditingTests` (typing), `FoldingTests` (the folds) | |
+| The language server | `src/Passenger.VisualBasic`, carried under `visualbasic/` beside the app | a process of its own on Passenger's runtime (`ChildProcesses.HelperCommand`), as the debug adapter is |
+| Its place in the App | `WebServerKind.VisualBasic` in `Web/WebLanguages.cs` | it speaks the standard protocol, so everything the web languages' servers give a file (`WebDocument`, `WebAssist`) it gives a `.vb` file |
+| Its projects | `ProjectSession.VisualBasicBuildsAsync`, `WebLanguages.VisualBasicProjects` | the project host's design-time builds, which already read `VbcCommandLineArgs` |
+| The tests | `FileColoursTests` (a file's kinds, its comment, the apostrophe, Markdown), `EditingTests` (typing), `FoldingTests` (the folds), `VisualBasicTests` (the server through the window) | |
 
 **Why a grammar of Passenger's own.** Every other grammar here is VS Code's, unchanged. VS Code's grammar for `.vb`
 (`extensions/vb`, converted from textmate/asp.vb.net.tmbundle) is classic ASP's: it knows no `Imports`, `Namespace`,
@@ -57,48 +70,71 @@ auto-property, an interface's member, a `MustOverride` one. Statement blocks (`I
 line scan gets wrong: a declaration inside a string over several lines, and a lambda whose line is longer than 512
 characters.
 
+## The language server
+
+**Why a server of Passenger's own.** Passenger's C# help is Roslyn's language server (`roslyn-language-server.<rid>`,
+`RoslynServerVersion` in `Directory.Packages.props`). The package at 5.13.0-1.26514.10 holds
+`Microsoft.CodeAnalysis.CSharp*.dll` and no `Microsoft.CodeAnalysis.VisualBasic*.dll`. Visual Basic's Features and
+Workspaces assemblies reach into Roslyn's internals, so they must be of the server's very build, and nuget.org, the only
+source Passenger restores from, has them at no build a server package matches. The .NET team's own feed (`dotnet-tools`
+on Azure DevOps) does carry them at the server's build; that was looked at and set aside, as it breaks the rule that
+packages come from nuget.org alone and ties Visual Basic to every move of the server's version, for a language
+Microsoft no longer evolves.
+
+**Which Roslyn.** Every stable `Microsoft.CodeAnalysis.VisualBasic.Features` on nuget.org from 4.0.0 to 5.12.0 was
+looked at (2026-11-14):
+
+| Version | Built for | What decides |
+|---|---|---|
+| 4.0.0 to 4.8.0 | net6.0, net7.0, netstandard2.0 | older than the Roslyn Passenger compiles with; a second Roslyn beside the app's |
+| 4.9.2 to 4.14.0 | net8.0, net9.0, netstandard2.0 | the same |
+| 5.0.0, 5.3.0, 5.6.0 | net8.0 to net10.0 | the same |
+| **5.9.0** | net10.0, netstandard2.0 | **the version `Microsoft.CodeAnalysis.CSharp` is pinned at**: one Roslyn in the lock files and the notices |
+| 5.12.0 | net10.0, netstandard2.0 | newer than the pin, which Passenger's analyzers hold to the SDK's compiler |
+
+Each version names every other Roslyn package by exact version, and package versions are central
+(`Directory.Packages.props`), so the choice is the pin's: 5.9.0. Little is lost by it: Visual Basic's language has had
+no new version since 16.9 (2021), so a newer Roslyn brings its compiler fixes and its reading of newer .NET's
+metadata, not language. When the C# pin moves, this one moves with it.
+
+**How it works.** The server is a small program over Roslyn's public workspace API, about 1,000 lines:
+
+- `Wire`: the protocol's framing over the standard streams.
+- `Projects`: one `AdhocWorkspace`. A project arrives as the project host's design-time builds (the JSON Roslyn's
+  server is given for C#), one a target framework; its `VbcCommandLineArgs` are parsed by
+  `VisualBasicCommandLineParser`, so options, imports, root namespace, defines and references are the build's own. An
+  open file's text is the client's, another's the disk's. A `.vb` file of no project is read against the runtime's own
+  assemblies, so it still has errors of syntax and completion.
+- `Server`: the loop. A notification is acted on in turn; a request is answered off the loop from the solution as it
+  stood when it came, and `$/cancelRequest` cancels it. Diagnostics are pushed 300 ms after typing rests, naming the
+  text's version.
+- `Answers`, `Outline`: completion (`CompletionService`), hover (`QuickInfoService`), declarations and usages
+  (`SymbolFinder`), rename (`Renamer`), formatting (`Formatter`), a file's symbols from its syntax.
+
+The App starts it when a `.vb` file opens, gives it the folder's `.vbproj` builds before its files (`passenger/projects`)
+and again as the workspace, a `.vb` file or a project's inputs change, and tells it of files changed on disk. It runs
+with `ConservingMemory`, as Roslyn's server does, and ends with the IDE.
+
 ## What does not work yet
 
-Nothing answers for a Visual Basic file beyond the editor: no completion, no errors, no Go to Declaration, no rename,
-no Find Usages, no formatting, no `End If` written for you. The debugger stops at breakpoints in Visual
-Basic code as far as the PDB carries it (untested), but evaluates expressions as C#.
-
-## What stands in the way
-
-**Roslyn's server carries no Visual Basic, and nuget.org has none that fits it.** Passenger's C# help is Roslyn's
-language server (`roslyn-language-server.<rid>`, `RoslynServerVersion` in `Directory.Packages.props`). The package at
-5.13.0-1.26514.10 holds `Microsoft.CodeAnalysis.CSharp*.dll` and no `Microsoft.CodeAnalysis.VisualBasic*.dll`. Visual
-Basic's Features and Workspaces assemblies reach into Roslyn's internals, so they must be of the server's very build,
-and nuget.org, the only source Passenger restores from, carries them at 5.9.0 and 5.12.0 but at no build a server
-package matches (the servers there are 5.11.0, 5.12.0-1.x and 5.13.0-1.x). So stage 2 cannot simply add assemblies to
-the carried server. The ways left, each a decision for the project's owner:
-
-- **A language service of Passenger's own for Visual Basic**, a helper process holding Roslyn's public workspace API
-  from nuget.org at one version (`Microsoft.CodeAnalysis.VisualBasic.Features`, `.Workspaces.MSBuild`): completion,
-  diagnostics, navigation, rename and Find Usages are all public API there. It keeps every rule (nuget.org alone, MIT)
-  and costs the most work: a second server beside Roslyn's, with its own project loading.
-- **Visual Basic's assemblies of the server's build from the .NET team's own feed** (`dotnet-tools` on Azure DevOps),
-  which breaks the rule that packages come from nuget.org alone, and still leaves open whether the server composes them
-  and loads a `.vbproj`.
-- **Waiting** for a server package and Visual Basic packages of one build on nuget.org.
-
-The in-process parser is no obstacle: `Microsoft.CodeAnalysis.VisualBasic` 5.9.0, the version Passenger's C# parser is
-at, is on nuget.org. Passenger's extension inside the server already exports its handlers for both
-languages (`ExportCSharpVisualBasicLspServiceFactory`), and `ServerPlaces` already counts `.vb` among Roslyn's files.
-
-**The App asks for C# by name.** `Language.CSharp` is compared in 19 places and `".cs"` is written in 56 files; the
-in-process parser that folds, indents and helps typing is C#'s alone (`CSharpParsing`).
-
-**The debugger's expressions are C#'s.** `CilExpressionCompiler` reads a method's debug information with
-`isVisualBasicMethod: false`; Visual Basic needs Roslyn's Visual Basic expression compiler beside the C# one.
+- **Signature help, semantic colours, code actions and quick fixes, inlay hints**: Roslyn's services for them are
+  internal or need more than one request's worth of work; colours stay the grammar's.
+- **Analyzers**: only the compiler's diagnostics are said; the SDK's analyzers a project names are not run.
+- **A declaration in a referenced assembly**: Go to Declaration answers for source alone.
+- **A Visual Basic project that references a C# project** reads it by the assembly it last built, so a change there
+  shows after a build; Rename and Find Usages do not cross the two languages.
+- **A solution mixing C# and Visual Basic** is untested. Roslyn's server is told of no `.vbproj`, but the C# service
+  still counts it among the workspace's projects.
+- **The block ends written as you type, indentation after a block's first line, New Item's templates and the Tests
+  window's finder** are C#'s alone.
+- **The debugger** stops at breakpoints in Visual Basic code as far as the PDB carries it (untested) and evaluates
+  expressions as C#: `CilExpressionCompiler` reads a method's debug information with `isVisualBasicMethod: false`.
 
 ## The stages
 
-1. **The language** (done): the entry, the grammar, comments, typing, tests.
-2. **Language help** (blocked on the decision above): `.vb` files answered for by a Roslyn workspace, with completion,
-   diagnostics, navigation, rename, Find Usages and semantic colours.
-3. **The editor's own help**: folding (done); still to do, the block ends written as you type, indentation, Reformat
-   Code, New Item's templates and the Tests window's finder.
+1. **The language** (done): the entry, the grammar, comments, typing.
+2. **Language help** (done, with the gaps above): Passenger's own server on Roslyn 5.9.0.
+3. **The editor's own help**: folding (done); still to do, the block ends, indentation, templates and the test finder.
 4. **The debugger**: expressions in Watches, hover and conditional breakpoints compiled as Visual Basic.
 
 ## Building on a machine that has only the .NET 10 SDK

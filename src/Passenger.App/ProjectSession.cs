@@ -245,8 +245,9 @@ public sealed class ProjectSession : IAsyncDisposable
         session.Web = new Web.WebLanguages(folder, setup.Settings, setup.Engine)
         {
             DockerHub = setup.DockerHub, GodotEnvironment = setup.GodotEnvironment ?? new Dictionary<string, string>(), Stylesheets = session.Stylesheets,
-            GodotHeadlessAtOpen = setup.GodotHeadlessAtOpen,
+            GodotHeadlessAtOpen = setup.GodotHeadlessAtOpen, VisualBasicProjects = session.VisualBasicBuildsAsync,
         };
+        session.WorkspaceChanged += (_, _) => session.Web?.ProjectsChanged();
         // A compose file's check reads what each .NET service's project reads, once the language server has loaded it.
         session.Web.Checks.Code = () => new Containers.ComposeCode(session.Projects, session.CSharp is { IsReady: true } csharp ? csharp.Session : null);
         session.Web.Checks.GapsChanged += (_, _) => session.CSharp?.ComposeGapsChanged();
@@ -1003,8 +1004,9 @@ public sealed class ProjectSession : IAsyncDisposable
     /// <summary>The projects the language server loads, those it loads first (<see cref="ActiveProjectsAsync"/>) apart.</summary>
     private async Task<(IReadOnlyList<string> First, IReadOnlyList<string> All)> LoadOrderAsync()
     {
-        IReadOnlyList<string> first = await ActiveProjectsAsync();
-        return (first, [.. Projects.Where(p => p.Exists).Select(p => p.Path).Distinct(StringComparer.Ordinal)]);
+        // Roslyn's server holds no Visual Basic: those projects are Visual Basic's own server's (VisualBasicBuildsAsync).
+        IReadOnlyList<string> first = [.. (await ActiveProjectsAsync()).Where(p => !WorkspaceModel.IsVisualBasic(p))];
+        return (first, [.. Projects.Where(p => p.Exists && !WorkspaceModel.IsVisualBasic(p.Path)).Select(p => p.Path).Distinct(StringComparer.Ordinal)]);
     }
 
     /// <summary>Projects evaluated (or evaluated again) landed in the workspace: what the Solution view shows of them, and
@@ -1393,6 +1395,18 @@ public sealed class ProjectSession : IAsyncDisposable
         WorkspaceChanged?.Invoke(this, EventArgs.Empty);
         // Each project whose evaluation no longer stands (its file or an import changed) is evaluated again.
         Evaluate();
+    }
+
+    /// <summary>The workspace's Visual Basic projects, each with its design-time builds as the project host gives them, or
+    /// without where it could not be built: what Visual Basic's server loads.</summary>
+    private async Task<IReadOnlyList<(string Path, string? Infos)>> VisualBasicBuildsAsync()
+    {
+        List<(string Path, string? Infos)> builds = [];
+        foreach (string path in (Workspace?.Projects ?? []).Where(p => p.Exists).Select(p => p.Path).Where(WorkspaceModel.IsVisualBasic))
+        {
+            builds.Add((path, (await DesignTimeBuilds.Feed.InfoAsync(path, default)).Info.Infos));
+        }
+        return builds;
     }
 
     /// <summary>What the folder's watcher saw, for the C# language server: told through its service, or kept for the one the
