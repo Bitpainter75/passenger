@@ -79,15 +79,6 @@
           "Microsoft.CodeAnalysis.Common": "[5.9.0]"
         }
       },
-      "Microsoft.CodeAnalysis.VisualBasic": {
-        "type": "Transitive",
-        "resolved": "5.9.0",
-        "contentHash": "Z+MbJE5QLzgU1gt7q7HSQQ2LN6n3gewv/Evfp/Ya8VXd5pGeyFVEQpXbDsM6tuJJZ5eOQ/6q2wBV3rqMzpKG7g==",
-        "dependencies": {
-          "Microsoft.CodeAnalysis.Analyzers": "5.9.0-1.26328.17",
-          "Microsoft.CodeAnalysis.Common": "[5.9.0]"
-        }
-      },
       "Microsoft.CodeAnalysis.VisualBasic.Workspaces": {
         "type": "Transitive",
         "resolved": "5.9.0",
@@ -188,6 +179,16 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Diagnostics.NETCore.Client": "[0.2.750501, )"
+        }
+      },
+      "Microsoft.CodeAnalysis.VisualBasic": {
+        "type": "CentralTransitive",
+        "requested": "[5.9.0, )",
+        "resolved": "5.9.0",
+        "contentHash": "Z+MbJE5QLzgU1gt7q7HSQQ2LN6n3gewv/Evfp/Ya8VXd5pGeyFVEQpXbDsM6tuJJZ5eOQ/6q2wBV3rqMzpKG7g==",
+        "dependencies": {
+          "Microsoft.CodeAnalysis.Analyzers": "5.9.0-1.26328.17",
+          "Microsoft.CodeAnalysis.Common": "[5.9.0]"
         }
       },
       "Microsoft.Diagnostics.NETCore.Client": {

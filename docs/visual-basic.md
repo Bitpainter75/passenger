@@ -49,6 +49,12 @@ compiler's own places: checked on 2026-11-14 with xunit 2 (4 tests run, 3 passed
 `.vb` file). They are found by the test runner once the project has been built (Run or Discover), not read from the
 source before, as C#'s are.
 
+**Debugging (stage 4).** Visual Basic code debugs as C# does: breakpoints, stepping, frames and variables (shown in
+C#'s words: `this`, `null`, `int[]`). In a frame of Visual Basic code an expression is read as Visual Basic, in
+Watches, the evaluate box, a hover and a breakpoint's condition: `rows(1)`, `Me.Name`, `label Is Nothing`,
+`open AndAlso total > 3`, `total = 6` (a comparison), `names(0) & "!"`, `If(label, "none")`, `CType(total, Long)`,
+`TypeOf x Is T`, `New List(Of Integer) From {1, 2}`, `$"{Name}: {total:D3}"`. A C# expression still evaluates there.
+
 **Visual Basic projects are projects.** A folder is walked for `.vbproj` as for `.csproj`, so a Visual Basic project
 opened by its folder is in the Solution view, has its run configuration, and builds and runs through MSBuild as a C#
 project does. Before, only a solution that named a `.vbproj` knew it; a folder holding one showed "No
@@ -67,7 +73,8 @@ configurations". Roslyn's C# server is never given a Visual Basic project.
 | The language server | `src/Passenger.VisualBasic`, carried under `visualbasic/` beside the app | a process of its own on Passenger's runtime (`ChildProcesses.HelperCommand`), as the debug adapter is |
 | Its place in the App | `WebServerKind.VisualBasic` in `Web/WebLanguages.cs` | it speaks the standard protocol, so everything the web languages' servers give a file (`WebDocument`, `WebAssist`) it gives a `.vb` file |
 | Its projects | `ProjectSession.VisualBasicBuildsAsync`, `WebLanguages.VisualBasicProjects` | the project host's design-time builds, which already read `VbcCommandLineArgs` |
-| The tests | `FileColoursTests` (a file's kinds, its comment, the apostrophe, Markdown), `EditingTests` (typing), `FoldingTests` (the folds), `VisualBasicBlocksTests` (Enter), `VisualBasicTests` (the server and the templates through the window) | |
+| The debugger's expressions | `VisualBasicExpressions` in `src/Passenger.Debugger`, asked by `CilExpressionCompiler.TryCompile` | Roslyn publishes no expression compiler for Visual Basic, and nuget.org's is C#'s alone |
+| The tests | `FileColoursTests` (a file's kinds, its comment, the apostrophe, Markdown), `EditingTests` (typing), `FoldingTests` (the folds), `VisualBasicBlocksTests` (Enter), `VisualBasicExpressionsTests` (the debugger's reading), `VisualBasicTests` (the server and the templates through the window) | |
 
 **Why a grammar of Passenger's own.** Every other grammar here is VS Code's, unchanged. VS Code's grammar for `.vb`
 (`extensions/vb`, converted from textmate/asp.vb.net.tmbundle) is classic ASP's: it knows no `Imports`, `Namespace`,
@@ -155,15 +162,18 @@ with `ConservingMemory`, as Roslyn's server does, and ends with the IDE.
   block's first line (not at its end) only carries the indentation.
 - **Tests before a first build** are not listed: the Tests window's reading of source is C#'s alone, so a Visual Basic
   project's tests come with its first run or Discover. NUnit and MSTest in Visual Basic are untested.
-- **The debugger** stops at breakpoints in Visual Basic code as far as the PDB carries it (untested) and evaluates
-  expressions as C#: `CilExpressionCompiler` reads a method's debug information with `isVisualBasicMethod: false`.
+- **The debugger's expressions** are Visual Basic said in C#, not compiled as Visual Basic, so a few differ: `/` on two
+  integers divides as C# does (2, not 2.5), `Not` on an integer is no bitwise complement, `=` on two objects compares
+  references, and a query, a lambda, `Like`, a date literal and `AddressOf` have no reading. Values are shown in C#'s
+  words. A `DebuggerDisplay` of a Visual Basic type is read as C#. No test debugs a Visual Basic program yet: the
+  expressions were checked by hand at a breakpoint (21 of them, 2026-11-14) and their reading by unit tests.
 
 ## The stages
 
 1. **The language** (done): the entry, the grammar, comments, typing.
 2. **Language help** (done, with the gaps above): Passenger's own server on Roslyn 5.9.0.
 3. **The editor's own help**: folding, block ends and the type templates (done); tests are found by the runner.
-4. **The debugger**: expressions in Watches, hover and conditional breakpoints compiled as Visual Basic.
+4. **The debugger** (done, with the gaps above): a Visual Basic expression read in C# for the expression compiler.
 
 ## Building on a machine that has only the .NET 10 SDK
 
@@ -189,6 +199,7 @@ What was done instead: the .NET 11 SDK installed beside the system's, touching n
 curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
 bash dotnet-install.sh --channel 11.0 --install-dir ~/.dotnet11
 bash dotnet-install.sh --channel 10.0 --runtime dotnet --install-dir ~/.dotnet11   # for Passenger's net10.0 parts
+bash dotnet-install.sh --channel 10.0 --runtime aspnetcore --install-dir ~/.dotnet11   # for the tests' web apps
 export DOTNET_ROOT=~/.dotnet11 PATH=~/.dotnet11:$PATH                              # in this repository's shell only
 ```
 
@@ -196,3 +207,16 @@ The second line matters: `Passenger.Host`, the Roslyn extension and the tests' d
 .NET 10 runtime in the same folder as the SDK that runs them. On Arch and CachyOS the system's `dotnet-sdk` (10) and
 the AUR's `dotnet-sdk-bin` (11) conflict, which is why the SDK is not installed through pacman; once `extra` carries
 .NET 11, `dotnet-sdk` becomes 11 with `dotnet-sdk-10.0` beside it, and `~/.dotnet11` can be deleted.
+
+## How the debugger reads an expression
+
+The expression compiler Passenger carries is Roslyn's C# one, packed from Roslyn's source by a third party; Roslyn's
+Visual Basic one is published nowhere. So in a frame whose PDB names a Visual Basic document, an expression that
+parses as Visual Basic (Roslyn's own parser, `Microsoft.CodeAnalysis.VisualBasic` 5.9.0) is written again in C# and
+compiled by the C# compiler against the frame, which is language-neutral below the syntax: the frame's locals,
+`Me` as `this`, the module's metadata.
+
+`name(1)` is a call or an index in Visual Basic and only one of them in C#, so an expression has several readings:
+every call as a call first, then one as an index, then two (the first three calls with arguments, so eight readings at
+most). The first that binds is the answer; where none does, the expression is tried as C# as written, and an error is
+the first reading's. Visual Basic is tried first, so `a = b` compares where C# would assign.

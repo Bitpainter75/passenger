@@ -121,10 +121,61 @@ internal sealed class CilExpressionCompiler(ManagedDebugger debugger)
     public CompiledEvaluationMethod? TryCompile(string expression, CompiledExpressionEvaluationContext context, out string? errorMessage) =>
         TryCompile(expression, context, out errorMessage, out _, out _);
 
-    /// <summary>Compiles an expression in the frame or type context, or says why not, with its errors' ids (CS8331), and
+    /// <summary>The language a PDB names for a document of Visual Basic.</summary>
+    private static readonly Guid VisualBasicLanguage = new("3a12d0b8-c26c-11d0-b442-00a0244a1dd2");
+
+    /// <summary>Compiles an expression in the frame or type context (<see cref="CompileAs"/>). In a frame of Visual Basic code
+    /// one that reads as Visual Basic is compiled as its readings in C# first (<see cref="VisualBasicExpressions"/>), so
+    /// <c>a = b</c> compares there, and as C# written only where none of them binds, whose errors are then the first reading's.</summary>
+    public CompiledEvaluationMethod? TryCompile(string expression, CompiledExpressionEvaluationContext context, out string? errorMessage, out ImmutableArray<string> errors,
+        out ImmutableArray<string> missingAssemblies)
+    {
+        (string? Message, ImmutableArray<string> Errors, ImmutableArray<string> Missing)? first = null;
+        if (context.RootValue is null && InVisualBasic(context))
+        {
+            foreach (string reading in VisualBasicExpressions.ToCSharp(expression))
+            {
+                if (CompileAs(reading, context, out errorMessage, out errors, out missingAssemblies) is { } read)
+                {
+                    return read;
+                }
+                first ??= (errorMessage, errors, missingAssemblies);
+            }
+        }
+        CompiledEvaluationMethod? compiled = CompileAs(expression, context, out errorMessage, out errors, out missingAssemblies);
+        if (compiled is null && first is var (message, ids, missing))
+        {
+            (errorMessage, errors, missingAssemblies) = (message, ids, missing);
+        }
+        return compiled;
+    }
+
+    /// <summary>Whether a frame's method was compiled from Visual Basic, as its PDB says of the document it is in.</summary>
+    private bool InVisualBasic(CompiledExpressionEvaluationContext context)
+    {
+        ICorDebugILFrame frame = debugger.GetIlFrameForThreadIdAndStackDepth(context.ThreadId, context.StackDepth);
+        mdMethodDef token = frame.Function.Token;
+        MetadataReader? pdb = debugger.GetModuleInfoForModule(frame.Function.Module).MetadataReader.DebugOf(token, ModuleMetadataReader.VersionOf(frame) ?? 1)?.Reader;
+        if (pdb is null)
+        {
+            return false;
+        }
+        try
+        {
+            MethodDebugInformation method = pdb.GetMethodDebugInformation(((MethodDefinitionHandle)MetadataTokens.Handle(token)).ToDebugInformationHandle());
+            DocumentHandle document = method.Document.IsNil ? method.GetSequencePoints().Select(p => p.Document).FirstOrDefault(d => !d.IsNil) : method.Document;
+            return !document.IsNil && pdb.GetDocument(document).Language is { IsNil: false } language && pdb.GetGuid(language) == VisualBasicLanguage;
+        }
+        catch (BadImageFormatException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Compiles a C# expression in the frame or type context, or says why not, with its errors' ids (CS8331), and
     /// which assemblies it needs that the program has not loaded (System.Linq, for a LINQ method on a list where the program
     /// has used none yet), to be loaded and the expression compiled again. One nested too deep for the parser is refused.</summary>
-    public CompiledEvaluationMethod? TryCompile(string expression, CompiledExpressionEvaluationContext context, out string? errorMessage, out ImmutableArray<string> errors,
+    private CompiledEvaluationMethod? CompileAs(string expression, CompiledExpressionEvaluationContext context, out string? errorMessage, out ImmutableArray<string> errors,
         out ImmutableArray<string> missingAssemblies)
     {
         errorMessage = null;

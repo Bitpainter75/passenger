@@ -2256,7 +2256,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
     });
 
     [McpServerTool(Name = McpTools.DebugEvaluate, Title = "Evaluate an expression", Destructive = true), Description(
-        "Evaluates a C# expression, which may call the program's methods, in a frame of the stopped thread (by default the " +
+        "Evaluates a C# expression (in Visual Basic code a Visual Basic one too), which may call the program's methods, in a frame of the stopped thread (by default the " +
         "stop's, whose locals debug_state lists), as the Debug window's evaluate box does; a result with members has a " +
         "reference debug_state opens. With value, a C# expression, assigns it to expression (a local, member or element) as " +
         "Set Value does, answering what it now is. With letThreadsRun, one that said it probably needs another thread runs " +
