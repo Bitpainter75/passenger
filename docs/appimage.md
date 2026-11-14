@@ -31,7 +31,7 @@ What the script does:
    that processor the AppImage then runs and draws its window off-screen, unpacked by the runtime itself
    (`APPIMAGE_EXTRACT_AND_RUN`), so the check passes in a container that has no FUSE.
 
-A linux-x64 AppImage of 0.3.4 is 173 MB.
+A linux-x64 AppImage of 0.3.4 is 178 MB.
 
 ## Running it
 

@@ -1,8 +1,8 @@
 # Visual Basic in Passenger
 
-Where Visual Basic (.NET) stands in Passenger, what was changed to get there, and what is still to do. Upstream's
-request is Zaneris/passenger#1552 ("F# and VB.NET"), which the owner put in the Backlog as not planned; this work lives
-on the `vb-net` branch of the fork.
+Where Visual Basic (.NET) stands in this Passenger, what was changed to get there, and what is still to do. Upstream
+(Zaneris/passenger) put Visual Basic in its Backlog as not planned (#1552, "F# and VB.NET"); this fork carries it as
+its own, with no pull request upstream.
 
 ## What works
 

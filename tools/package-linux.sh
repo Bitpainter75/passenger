@@ -59,7 +59,8 @@ done
 for part in "$app.desktop" "$app.xml" "$app.png" "$app.svg" app/Passenger.dll app/libSkiaSharp.so app/libHarfBuzzSharp.so \
     app/libporta_pty.so app/LICENSE.txt app/THIRD-PARTY-NOTICES.txt app/roslyn/Microsoft.CodeAnalysis.LanguageServer.dll \
     app/roslyn-extension/Passenger.Roslyn.Extension.dll app/debugger/Passenger.DebugAdapter.dll app/debugger/libdbgshim.so \
-    app/passenger-helper.dll app/passenger-helper.deps.json app/passenger-helper.runtimeconfig.json; do
+    app/passenger-helper.dll app/passenger-helper.deps.json app/passenger-helper.runtimeconfig.json \
+    app/visualbasic/Passenger.VisualBasic.dll app/visualbasic/Microsoft.CodeAnalysis.VisualBasic.Features.dll; do
     [ -f "$shipped/$part" ] || fail "the archive has no $part"
 done
 grep -q '^StartupWMClass=Passenger$' "$shipped/$app.desktop" || fail "the desktop entry does not match the window's class, Passenger"

@@ -93,7 +93,8 @@ for part in "$app.desktop" "$app.png" "usr/share/applications/$app.desktop" "usr
     "usr/share/icons/hicolor/256x256/apps/$app.png" "usr/share/icons/hicolor/scalable/apps/$app.svg" \
     app/Passenger.dll app/libSkiaSharp.so app/libHarfBuzzSharp.so app/libporta_pty.so app/LICENSE.txt app/THIRD-PARTY-NOTICES.txt \
     app/roslyn/Microsoft.CodeAnalysis.LanguageServer.dll app/roslyn-extension/Passenger.Roslyn.Extension.dll \
-    app/debugger/Passenger.DebugAdapter.dll app/debugger/libdbgshim.so app/passenger-helper.dll; do
+    app/debugger/Passenger.DebugAdapter.dll app/debugger/libdbgshim.so app/passenger-helper.dll \
+    app/visualbasic/Passenger.VisualBasic.dll app/visualbasic/Microsoft.CodeAnalysis.VisualBasic.Features.dll; do
     [ -f "$check/$part" ] || fail "the AppImage has no $part"
 done
 [ -L "$check/.DirIcon" ] && [ -f "$check/.DirIcon" ] || fail "the AppImage's .DirIcon names no icon"
