@@ -876,8 +876,8 @@ public sealed class FileColoursTests : FileColoursFolder
     }
 
     /// <summary>A Visual Basic file's tokens show as their kinds, whatever case its words are written in, a Markdown file's
-    /// vb block as the file's; it comments a line with an apostrophe, and an apostrophe typed starts a comment, never a pair
-    /// of quotes.</summary>
+    /// vb block as the file's; it comments a line with an apostrophe, an apostrophe typed starts a comment, never a pair
+    /// of quotes, and Enter after a line that opens a block writes the block's end.</summary>
     [AvaloniaFact]
     public void A_Visual_Basic_file_shows_its_tokens_as_their_kinds_and_an_apostrophe_typed_starts_a_comment()
     {
@@ -907,6 +907,19 @@ public sealed class FileColoursTests : FileColoursFolder
         editor.Selections = SelectionSet.Single(editor.Document.Snapshot.ToString().IndexOf("\n\n#Region", StringComparison.Ordinal) + 1);
         window.KeyTextInput("'");
         Assert.Contains("Imports System.Text\n'\n#Region", editor.Document.Snapshot.ToString(), StringComparison.Ordinal);
+
+        // Enter after a line that opens a block goes a level in and writes the block's end, once.
+        Ui.PlaceAfter(editor, "Inherits Counter");
+        Ui.Press(window, "ENTER");
+        window.KeyTextInput("Sub Open()");
+        Ui.Press(window, "ENTER");
+        Assert.Contains("\n    Sub Open()\n        \n    End Sub\n", editor.Document.Snapshot.ToString(), StringComparison.Ordinal);
+        window.KeyTextInput("If closed Then");
+        Ui.Press(window, "ENTER");
+        Ui.Press(window, "UP");
+        Ui.Press(window, "END");
+        Ui.Press(window, "ENTER");
+        Assert.Contains("\n        If closed Then\n            \n            \n        End If\n    End Sub\n", editor.Document.Snapshot.ToString(), StringComparison.Ordinal);
 
         editor = Open(window, "NOTES.md", "# Notes\n\n```vb\n' The sum.\nFunction Total() As Integer\n    Return 42\nEnd Function\n```\n");
         Assert.Equal(TokenKind.Comment, KindOf(editor, "' The sum."));

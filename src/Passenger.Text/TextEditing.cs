@@ -301,12 +301,13 @@ public static class TextEditing
         return replacements.Count == 0 ? null : Build(Union(replacements), selections, kind);
     }
 
-    /// <summary>Enter: a line break carrying the line's indentation, one level more after an opening
-    /// bracket, and the closer pushed to its own line when the caret sat between a pair. Spaces right
-    /// after the caret go, up to the next caret, so the new line starts at its indentation; from inside the
-    /// indentation, that is the whole line's, which the text moved down keeps. In <paramref name="markup"/> the tags
-    /// decide instead: a level in after a start tag, its end tag pushed to a line of its own at the element's.</summary>
-    public static EditPlan NewLine(TextSnapshot text, SelectionSet selections, string eol, IndentOptions indent, MarkupKind markup = MarkupKind.None)
+    /// <summary>Enter: a line break carrying the line's indentation, one level more after an opening bracket, the closer
+    /// pushed to its own line when the caret sat between a pair. Spaces after the caret go, up to the next caret; from inside
+    /// the indentation that is the whole line's, which the text moved down keeps. In <paramref name="markup"/> the tags
+    /// decide instead (a level in after a start tag, its end tag on a line of its own); by <paramref name="blocks"/>, the end
+    /// of a line that opens a block goes a level in, the block's end written below where it has none.</summary>
+    public static EditPlan NewLine(TextSnapshot text, SelectionSet selections, string eol, IndentOptions indent, MarkupKind markup = MarkupKind.None,
+        BlockOpener? blocks = null)
     {
         List<Replacement> replacements = [];
         for (int i = 0; i < selections.Count; i++)
@@ -332,6 +333,12 @@ public static class TextEditing
             {
                 string inserted = eol + tags.Indent + (tags.EndTagIndent is { } endTag ? eol + endTag : string.Empty);
                 int caret = eol.Length + tags.Indent.Length;
+                replacements.Add(new Replacement(s.Start, end, inserted, caret, caret, i));
+            }
+            else if (blocks is not null && s.IsEmpty && end == endLine.End && before > line.Start && blocks(text, line.Line) is { } block)
+            {
+                string inserted = eol + lineIndent + indent.Unit + (block.End is { } written ? eol + lineIndent + written : string.Empty);
+                int caret = eol.Length + lineIndent.Length + indent.Unit.Length;
                 replacements.Add(new Replacement(s.Start, end, inserted, caret, caret, i));
             }
             else if (opener >= 0 && next == Closers[opener])

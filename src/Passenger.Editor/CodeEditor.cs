@@ -359,6 +359,10 @@ public sealed partial class CodeEditor : Control
     /// <summary>What a line comment starts with in this document's language, or null for none.</summary>
     public string? LineCommentPrefix { get; set; } = "//";
 
+    /// <summary>How this document's language reads the block a line opens, which Enter indents and ends; null for one whose
+    /// blocks are brackets or tags.</summary>
+    public BlockOpener? Blocks { get; set; }
+
     /// <summary>What a block comment starts and ends with in this document's language, or null for none. A language with
     /// no line comment comments a line with it.</summary>
     public (string Start, string End)? BlockComment { get; set; } = ("/*", "*/");

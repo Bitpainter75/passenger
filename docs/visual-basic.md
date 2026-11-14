@@ -22,6 +22,12 @@ event's accessors from the line that opens them to their `End` (the placeholder 
 on past its line, `#Region` to `#End Region`, the `Imports`, a documentation comment and the comments a file begins
 with. Collapse to Definitions, the fold settings and the folds a folder remembers treat them as C#'s.
 
+**Block ends (stage 3).** Enter at the end of a line that opens a block puts the caret a level in and writes the
+block's end below: `End Sub`, `End Function`, `End Class`, `End If` (after a line ending in `Then`), `Next`, `Loop`,
+`End Select`, `End Try`, `End With`, `End Using`, `End SyncLock`, `End While`, `End Get`, `End Set`, `#End Region`,
+and the `End Sub` or `End Function` of a lambda that goes on past its line. A block that has its end is only indented,
+and one typed inside another of its kind gets its own end.
+
 **Language help (stage 2).** Passenger's own language server for Visual Basic (`src/Passenger.VisualBasic`) answers
 for every `.vb` file:
 
@@ -44,11 +50,12 @@ configurations". Roslyn's C# server is never given a Visual Basic project.
 | The grammar | `src/Passenger.Languages/TextMate/Grammars/visualbasic.tmLanguage.json` | Passenger's own: see below |
 | A Markdown block | `EmbeddedAs` in `Language.cs`, `meta.embedded.block.vs_net` in `ScopeColours.cs` | VS Code's Markdown grammar names Visual Basic `source.asp.vb.net` |
 | The apostrophe | `TextEditing.Type`'s `comment`, given the editor's `LineCommentPrefix` | the editor names no language |
-| The folds | `VisualBasicFolds` behind `FoldScan.VisualBasic` (`src/Passenger.Languages/Markup`) | a scan of lines off the UI thread, as XML's and JSON's: no parser is carried for it yet |
+| The folds | `VisualBasicFolds` behind `FoldScan.VisualBasic` (`src/Passenger.Languages/Markup`) | a scan of lines off the UI thread, as XML's and JSON's: the editor's process carries no Visual Basic parser |
+| Block ends | `VisualBasicBlocks` (`src/Passenger.Text`), `Language.Blocks`, `CodeEditor.Blocks`, `TextEditing.NewLine`'s `blocks` | the editor names no language; the line reading is shared with the folds |
 | The language server | `src/Passenger.VisualBasic`, carried under `visualbasic/` beside the app | a process of its own on Passenger's runtime (`ChildProcesses.HelperCommand`), as the debug adapter is |
 | Its place in the App | `WebServerKind.VisualBasic` in `Web/WebLanguages.cs` | it speaks the standard protocol, so everything the web languages' servers give a file (`WebDocument`, `WebAssist`) it gives a `.vb` file |
 | Its projects | `ProjectSession.VisualBasicBuildsAsync`, `WebLanguages.VisualBasicProjects` | the project host's design-time builds, which already read `VbcCommandLineArgs` |
-| The tests | `FileColoursTests` (a file's kinds, its comment, the apostrophe, Markdown), `EditingTests` (typing), `FoldingTests` (the folds), `VisualBasicTests` (the server through the window) | |
+| The tests | `FileColoursTests` (a file's kinds, its comment, the apostrophe, Markdown), `EditingTests` (typing), `FoldingTests` (the folds), `VisualBasicBlocksTests` (Enter), `VisualBasicTests` (the server through the window) | |
 
 **Why a grammar of Passenger's own.** Every other grammar here is VS Code's, unchanged. VS Code's grammar for `.vb`
 (`extensions/vb`, converted from textmate/asp.vb.net.tmbundle) is classic ASP's: it knows no `Imports`, `Namespace`,
@@ -69,6 +76,11 @@ closes the nearest open block of its kind, dropping those opened since that have
 auto-property, an interface's member, a `MustOverride` one. Statement blocks (`If`, `For`, `Try`) do not fold. What a
 line scan gets wrong: a declaration inside a string over several lines, and a lambda whose line is longer than 512
 characters.
+
+**How a block's end is decided.** The line is read as the folds read it. Its end is written where the file has fewer
+ends of that kind than lines that open one, counted over the whole file, so a block typed in a balanced file always
+gets its end and one that has it never gets a second. An interface's members, a `MustOverride` member, a `Declare`
+and a property (which may be an auto-property) open nothing; a property's `Get` and `Set` do.
 
 ## The language server
 
@@ -125,8 +137,9 @@ with `ConservingMemory`, as Roslyn's server does, and ends with the IDE.
   shows after a build; Rename and Find Usages do not cross the two languages.
 - **A solution mixing C# and Visual Basic** is untested. Roslyn's server is told of no `.vbproj`, but the C# service
   still counts it among the workspace's projects.
-- **The block ends written as you type, indentation after a block's first line, New Item's templates and the Tests
-  window's finder** are C#'s alone.
+- **A property's whole body** is not written for you (`End Property` with its `Get` and `Set`), and Enter inside a
+  block's first line (not at its end) only carries the indentation.
+- **New Item's templates and the Tests window's finder** are C#'s alone.
 - **The debugger** stops at breakpoints in Visual Basic code as far as the PDB carries it (untested) and evaluates
   expressions as C#: `CilExpressionCompiler` reads a method's debug information with `isVisualBasicMethod: false`.
 
@@ -134,7 +147,7 @@ with `ConservingMemory`, as Roslyn's server does, and ends with the IDE.
 
 1. **The language** (done): the entry, the grammar, comments, typing.
 2. **Language help** (done, with the gaps above): Passenger's own server on Roslyn 5.9.0.
-3. **The editor's own help**: folding (done); still to do, the block ends, indentation, templates and the test finder.
+3. **The editor's own help**: folding and block ends (done); still to do, templates and the test finder.
 4. **The debugger**: expressions in Watches, hover and conditional breakpoints compiled as Visual Basic.
 
 ## Building on a machine that has only the .NET 10 SDK

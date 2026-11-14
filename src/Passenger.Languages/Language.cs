@@ -121,8 +121,9 @@ public sealed class Language
         (string Start, string End)? block = null, int indent = 4, GrammarFile? grammar = null, Func<TextDocument, IFoldFinder>? folds = null,
         LanguageService service = LanguageService.None, MarkupKind markup = MarkupKind.None, bool reindentsPaste = true, bool parsed = false, bool tabs = false,
         bool spacesAlone = false, HashSet<string>? blockWords = null, Func<TextSnapshot, IReadOnlySet<int>>? literals = null,
-        Func<TextSnapshot, IReadOnlySet<int>>? continued = null, Func<ReadOnlySpan<char>, IReadOnlySet<int>>? blockless = null)
+        Func<TextSnapshot, IReadOnlySet<int>>? continued = null, Func<ReadOnlySpan<char>, IReadOnlySet<int>>? blockless = null, BlockOpener? blocks = null)
     {
+        Blocks = blocks;
         Id = id;
         Name = name;
         this.patterns = patterns;
@@ -173,7 +174,8 @@ public sealed class Language
     /// <summary>Visual Basic, coloured by Passenger's own grammar, folded by its blocks, commented with an apostrophe and
     /// answered by Passenger's own language server (src/Passenger.VisualBasic).</summary>
     public static readonly Language VisualBasic = new("vb", "Visual Basic", ["*.vb"], line: "'",
-        grammar: new("source.vbnet", "visualbasic.tmLanguage.json"), folds: FoldScan.VisualBasic, service: LanguageService.VisualBasic);
+        grammar: new("source.vbnet", "visualbasic.tmLanguage.json"), folds: FoldScan.VisualBasic, service: LanguageService.VisualBasic,
+        blocks: VisualBasicBlocks.Opened);
 
     /// <summary>XAML, MSBuild's files and the rest of XML are one markup to the editor, each named and answered as its own.</summary>
     public static readonly Language Xaml = XmlKind("xaml", "XAML", ["*.axaml", "*.paml", "*.xaml"], LanguageService.Xaml);
@@ -260,6 +262,9 @@ public sealed class Language
         line: "//", block: ("/*", "*/"));
 
     public static readonly Language Script = new("script", "Script", ["*.toml", "*.ps1", "*.rb", "justfile"], line: "#");
+
+    /// <summary>How the language reads the block a line opens, for Enter at its end; null for one of brackets or tags.</summary>
+    public BlockOpener? Blocks { get; }
 
     /// <summary>VS Code's id for the language, which a language server is told unless a file's pattern names another.</summary>
     [IdentifierOf(typeof(LanguageIds))]

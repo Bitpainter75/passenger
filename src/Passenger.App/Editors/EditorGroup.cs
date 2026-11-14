@@ -491,6 +491,7 @@ public sealed class EditorGroup : DockPanel
         }
         (SelectionSet selections, Vector scroll) = views.TryGetValue(document, out (SelectionSet Selections, Vector Scroll) view) ? view : (document.Selections, document.Scroll);
         Editor.LineCommentPrefix = document.Language.LineComment;
+        Editor.Blocks = document.Language.Blocks;
         Editor.BlockComment = document.Language.BlockComment;
         Editor.Markup = document.Language.Markup;
         Editor.Indent = document.Indentation.Options;
@@ -764,6 +765,7 @@ public sealed class EditorGroup : DockPanel
                 ShowBanner(document);
                 AttachFind();
                 Editor.LineCommentPrefix = document.Language.LineComment;
+                Editor.Blocks = document.Language.Blocks;
                 Editor.BlockComment = document.Language.BlockComment;
                 Editor.Markup = document.Language.Markup;
                 Editor.ReindentsPaste = document.Language.ReindentsPaste;

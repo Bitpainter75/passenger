@@ -13,12 +13,6 @@ internal static class VisualBasicFolds
     /// <summary>How much of a line is read: a block's words stand at its start, and a lambda's past this is not folded.</summary>
     private const int Read = 512;
 
-    private static readonly string[] Modifiers =
-    [
-        "Public", "Private", "Protected", "Friend", "Shared", "Shadows", "Overloads", "Overrides", "Overridable", "NotOverridable", "MustOverride",
-        "MustInherit", "NotInheritable", "Partial", "ReadOnly", "WriteOnly", "Default", "Async", "Iterator", "Widening", "Narrowing", "Custom",
-    ];
-
     /// <summary>The words that open a block with an <c>End</c> of their own, as that <c>End</c> names them.</summary>
     private static readonly string[] Blocks =
     [
@@ -28,7 +22,6 @@ internal static class VisualBasicFolds
 
     private const int Interface = 4;
     private const int Sub = 6;
-    private const int Function = 7;
     private const int Property = 9;
     private const int Event = 10;
     private const int Get = 11;
@@ -68,7 +61,7 @@ internal static class VisualBasicFolds
             ReadOnlySpan<char> rest = ((ReadOnlySpan<char>)whole).TrimStart();
             Run now = rest.StartsWith("'''") ? Run.DocComment
                 : rest.StartsWith("'") && !code ? Run.Header
-                : Word(rest).Equals("Imports", StringComparison.OrdinalIgnoreCase) ? Run.Imports
+                : VisualBasicBlocks.Word(rest).Equals("Imports", StringComparison.OrdinalIgnoreCase) ? Run.Imports
                 : Run.None;
             if (now != run)
             {
@@ -129,12 +122,12 @@ internal static class VisualBasicFolds
 
         void Directive(ReadOnlySpan<char> rest, LineSpan line)
         {
-            ReadOnlySpan<char> word = Word(rest);
+            ReadOnlySpan<char> word = VisualBasicBlocks.Word(rest);
             if (word.Equals("Region", StringComparison.OrdinalIgnoreCase))
             {
                 Push(Region, line);
             }
-            else if (word.Equals("End", StringComparison.OrdinalIgnoreCase) && Word(rest[word.Length..].TrimStart()).Equals("Region", StringComparison.OrdinalIgnoreCase))
+            else if (word.Equals("End", StringComparison.OrdinalIgnoreCase) && VisualBasicBlocks.Word(rest[word.Length..].TrimStart()).Equals("Region", StringComparison.OrdinalIgnoreCase))
             {
                 End(Region, line);
             }
@@ -142,20 +135,20 @@ internal static class VisualBasicFolds
 
         void Statement(ReadOnlySpan<char> rest, LineSpan line)
         {
-            rest = PastAttributes(rest);
+            rest = VisualBasicBlocks.PastAttributes(rest);
             bool bodiless = false;
             bool custom = false;
-            ReadOnlySpan<char> word = Word(rest);
-            while (IndexOf(Modifiers, word) >= 0)
+            ReadOnlySpan<char> word = VisualBasicBlocks.Word(rest);
+            while (VisualBasicBlocks.IsModifier(word))
             {
                 bodiless |= word.Equals("MustOverride", StringComparison.OrdinalIgnoreCase);
                 custom |= word.Equals("Custom", StringComparison.OrdinalIgnoreCase);
                 rest = rest[word.Length..].TrimStart();
-                word = Word(rest);
+                word = VisualBasicBlocks.Word(rest);
             }
             if (word.Equals("End", StringComparison.OrdinalIgnoreCase))
             {
-                int ended = IndexOf(Blocks, Word(rest[word.Length..].TrimStart()));
+                int ended = IndexOf(Blocks, VisualBasicBlocks.Word(rest[word.Length..].TrimStart()));
                 if (ended >= 0)
                 {
                     End(ended, line);
@@ -177,22 +170,11 @@ internal static class VisualBasicFolds
             {
                 Push(block, line);
             }
-            else if (Lambda(Code(rest)) is >= 0 and int lambda)
+            else if (VisualBasicBlocks.Lambda(VisualBasicBlocks.Code(rest)) is { } lambda)
             {
-                Push(lambda, line);
+                Push(IndexOf(Blocks, lambda), line);
             }
         }
-    }
-
-    /// <summary>The identifier a stretch starts with, or nothing.</summary>
-    private static ReadOnlySpan<char> Word(ReadOnlySpan<char> rest)
-    {
-        int end = 0;
-        while (end < rest.Length && (char.IsLetterOrDigit(rest[end]) || rest[end] == '_'))
-        {
-            end++;
-        }
-        return rest[..end];
     }
 
     private static int IndexOf(string[] words, ReadOnlySpan<char> word)
@@ -202,88 +184,6 @@ internal static class VisualBasicFolds
             if (word.Equals(words[i], StringComparison.OrdinalIgnoreCase))
             {
                 return i;
-            }
-        }
-        return -1;
-    }
-
-    /// <summary>A line past the attributes it starts with (<c>&lt;Test&gt; Public Sub …</c>), a string in one read as one.</summary>
-    private static ReadOnlySpan<char> PastAttributes(ReadOnlySpan<char> rest)
-    {
-        while (rest.Length > 0 && rest[0] == '<')
-        {
-            int nested = 0;
-            bool quoted = false;
-            int i = 0;
-            for (; i < rest.Length; i++)
-            {
-                char c = rest[i];
-                quoted ^= c == '"';
-                nested += quoted ? 0 : c == '<' ? 1 : c == '>' ? -1 : 0;
-                if (nested == 0)
-                {
-                    break;
-                }
-            }
-            if (i >= rest.Length)
-            {
-                return [];
-            }
-            rest = rest[(i + 1)..].TrimStart();
-        }
-        return rest;
-    }
-
-    /// <summary>A line's code: what stands before its comment, an apostrophe in a string being none.</summary>
-    private static ReadOnlySpan<char> Code(ReadOnlySpan<char> rest)
-    {
-        bool quoted = false;
-        for (int i = 0; i < rest.Length; i++)
-        {
-            quoted ^= rest[i] == '"';
-            if (rest[i] == '\'' && !quoted)
-            {
-                return rest[..i].TrimEnd();
-            }
-        }
-        return rest.TrimEnd();
-    }
-
-    /// <summary>The block a lambda that goes on past its line opens, <c>Sub</c> or <c>Function</c>, or -1: the line's last
-    /// one whose parameters end the line, a function's return type after them. One with its expression or statement on
-    /// the line ends there.</summary>
-    private static int Lambda(ReadOnlySpan<char> code)
-    {
-        for (int block = Sub; block <= Function; block++)
-        {
-            int at = code.LastIndexOf(Blocks[block], StringComparison.OrdinalIgnoreCase);
-            if (at < 0 || (at > 0 && (char.IsLetterOrDigit(code[at - 1]) || code[at - 1] is '_' or '.')))
-            {
-                continue;
-            }
-            ReadOnlySpan<char> after = code[(at + Blocks[block].Length)..].TrimStart();
-            if (after.Length == 0 || after[0] != '(')
-            {
-                continue;
-            }
-            int nested = 0;
-            int close = 0;
-            for (; close < after.Length; close++)
-            {
-                nested += after[close] == '(' ? 1 : after[close] == ')' ? -1 : 0;
-                if (nested == 0)
-                {
-                    break;
-                }
-            }
-            if (close >= after.Length)
-            {
-                continue;
-            }
-            ReadOnlySpan<char> tail = after[(close + 1)..].TrimStart();
-            if (tail.IsEmpty || (block == Function && Word(tail).Equals("As", StringComparison.OrdinalIgnoreCase)))
-            {
-                return block;
             }
         }
         return -1;
