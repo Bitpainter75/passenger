@@ -21,7 +21,7 @@ public sealed class VisualBasicTests : IClassFixture<VisualBasicTests.Project>
     }
 
     [AvaloniaFact]
-    public void A_Visual_Basic_file_marks_the_compilers_error_completes_a_member_goes_to_a_declaration_renames_a_local_and_reformats()
+    public void A_Visual_Basic_file_marks_the_compilers_error_completes_a_member_shows_its_signature_goes_to_a_declaration_renames_a_local_and_reformats()
     {
         MainWindow window = project.Open("Program.vb", languageServer: false);
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -44,7 +44,9 @@ public sealed class VisualBasicTests : IClassFixture<VisualBasicTests.Project>
         Ui.WaitFor(() => window.Assist.CompletionLabels.FirstOrDefault() == "WriteLine", "the list narrowed to WriteLine");
         Ui.Press(window, "ENTER");
         Assert.Equal("Console.WriteLine", editor.Document.Snapshot.GetLineText(editor.CaretPosition.Line).Trim());
-        window.KeyTextInput("()");
+        window.KeyTextInput("(");
+        Ui.WaitFor(() => window.Assist.SignatureText?.Contains("Console.WriteLine(", StringComparison.Ordinal) == true, "WriteLine's signature after its bracket");
+        window.KeyTextInput(")");
 
         Ui.PlaceAfter(editor, "Console.WriteLine(Tot");
         Ui.Press(window, Ui.Shortcut(AppActions.GoToDeclaration));

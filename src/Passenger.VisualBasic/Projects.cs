@@ -131,7 +131,7 @@ internal sealed class Projects
         ProjectId id = ProjectId.CreateNewId(path);
         ProjectInfo project = ProjectInfo.Create(id, VersionStamp.Create(), framework is null ? name : $"{name} ({framework})", parsed.CompilationName ?? name,
                 LanguageNames.VisualBasic, filePath: path, outputFilePath: (string?)info["outputFilePath"],
-                compilationOptions: parsed.CompilationOptions.WithAssemblyIdentityComparer(DesktopAssemblyIdentityComparer.Default), parseOptions: parsed.ParseOptions)
+                compilationOptions: parsed.CompilationOptions.WithAssemblyIdentityComparer(DesktopAssemblyIdentityComparer.Default), parseOptions: parsed.ParseOptions.WithDocumentationMode(DocumentationMode.Parse))
             .WithDocuments(Documents(id, info["documents"]))
             .WithAdditionalDocuments(Documents(id, info["additionalDocuments"]))
             .WithAnalyzerConfigDocuments(Documents(id, info["analyzerConfigDocuments"]));
@@ -219,6 +219,7 @@ internal sealed class Projects
             {
                 loose = ProjectId.CreateNewId(LooseName);
                 solution = solution.AddProject(ProjectInfo.Create(loose, VersionStamp.Create(), LooseName, LooseName, LanguageNames.VisualBasic,
+                    parseOptions: VisualBasicParseOptions.Default.WithDocumentationMode(DocumentationMode.Parse),
                     compilationOptions: new VisualBasicCompilationOptions(OutputKind.DynamicallyLinkedLibrary, optionInfer: true,
                         globalImports: GlobalImport.Parse("Microsoft.VisualBasic", "System", "System.Collections.Generic", "System.Linq", "System.Threading.Tasks")),
                     metadataReferences: Runtime()));

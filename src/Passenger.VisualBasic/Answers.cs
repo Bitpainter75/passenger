@@ -15,8 +15,8 @@ using Passenger.Core;
 namespace Passenger.VisualBasic;
 
 /// <summary>What the server answers, each request from the solution it was asked of, through Roslyn's public services:
-/// completion and its descriptions, hover, declarations, usages and their highlights, rename, a file's symbols, Reformat
-/// Code and a file's diagnostics. A request the server does not know is answered with nothing.</summary>
+/// completion and its descriptions, hover, a call's signatures, declarations, usages and their highlights, rename, a
+/// file's symbols, Reformat Code and a file's diagnostics. A request the server does not know is answered with nothing.</summary>
 internal sealed class Answers
 {
     /// <summary>The last completion's document and items, which a resolve of one of them reads its description from.</summary>
@@ -30,6 +30,7 @@ internal sealed class Answers
             ["textDocumentSync"] = new JsonObject { ["openClose"] = true, ["change"] = 2 },
             ["completionProvider"] = new JsonObject { ["resolveProvider"] = true, ["triggerCharacters"] = new JsonArray(".", " ", "(") },
             ["hoverProvider"] = true,
+            ["signatureHelpProvider"] = new JsonObject { ["triggerCharacters"] = new JsonArray("(", ",") },
             ["definitionProvider"] = true,
             ["referencesProvider"] = true,
             ["documentHighlightProvider"] = true,
@@ -58,6 +59,7 @@ internal sealed class Answers
         {
             "textDocument/completion" => await CompletionsAsync(document, text, at, parameters, cancel).ConfigureAwait(false),
             "textDocument/hover" => await HoverAsync(document, text, at, cancel).ConfigureAwait(false),
+            "textDocument/signatureHelp" => await Signatures.OfAsync(document, at, cancel).ConfigureAwait(false),
             "textDocument/definition" => await DeclarationsAsync(document, at, cancel).ConfigureAwait(false),
             "textDocument/references" => await UsagesAsync(document, at, (bool?)parameters?["context"]?["includeDeclaration"] ?? true, null, cancel).ConfigureAwait(false),
             "textDocument/documentHighlight" => await UsagesAsync(document, at, true, text, cancel).ConfigureAwait(false),

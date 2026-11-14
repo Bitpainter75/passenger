@@ -205,7 +205,7 @@ internal sealed partial class WebAssist(AssistContext context, PopupPlacement po
             IdeErrors.Observe(completion.Start(null));
         }
         // A script's call shows its signature after its bracket or comma; any file's closing bracket or semicolon hides it.
-        if (web.Kind is WebServerKind.TypeScript or WebServerKind.Html or WebServerKind.GDScript || last is ')' or ';')
+        if (web.Kind is WebServerKind.TypeScript or WebServerKind.Html or WebServerKind.GDScript or WebServerKind.VisualBasic || last is ')' or ';')
         {
             parameters.AfterTyped(last);
         }
@@ -219,7 +219,7 @@ internal sealed partial class WebAssist(AssistContext context, PopupPlacement po
         WebServerKind.Css or WebServerKind.Html or WebServerKind.Dockerfile => c == '-',
         WebServerKind.TypeScript => c == '$',
         WebServerKind.Yaml => c is '-' or '.',
-        WebServerKind.GDScript => false,
+        WebServerKind.GDScript or WebServerKind.VisualBasic => false,
         _ => c is '"' or '-' or '.' or '@' or '/',
     };
 

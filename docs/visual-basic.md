@@ -33,6 +33,8 @@ for every `.vb` file:
 
 - the compiler's errors and warnings as you type, underlined and counted as C#'s are;
 - completion, with each item's signature and documentation;
+- a call's signatures after its bracket and each comma, the overload the compiler chose first, with the documentation
+  of the method and of the parameter the caret is at;
 - hover, Go to Declaration, Find Usages and the highlights of the name at the caret;
 - Rename, across the project's files, open or not;
 - File Structure, and Reformat Code in the file's own indentation.
@@ -122,6 +124,8 @@ metadata, not language. When the C# pin moves, this one moves with it.
   text's version.
 - `Answers`, `Outline`: completion (`CompletionService`), hover (`QuickInfoService`), declarations and usages
   (`SymbolFinder`), rename (`Renamer`), formatting (`Formatter`), a file's symbols from its syntax.
+- `Signatures`: a call's signatures from the semantic model (a method group's overloads, a type's constructors, an
+  indexed property, a delegate's call), as Roslyn's own signature help is not public.
 
 The App starts it when a `.vb` file opens, gives it the folder's `.vbproj` builds before its files (`passenger/projects`)
 and again as the workspace, a `.vb` file or a project's inputs change, and tells it of files changed on disk. It runs
@@ -129,8 +133,8 @@ with `ConservingMemory`, as Roslyn's server does, and ends with the IDE.
 
 ## What does not work yet
 
-- **Signature help, semantic colours, code actions and quick fixes, inlay hints**: Roslyn's services for them are
-  internal or need more than one request's worth of work; colours stay the grammar's.
+- **Semantic colours, code actions and quick fixes, inlay hints**: Roslyn's services for them are internal or need
+  more than one request's worth of work; colours stay the grammar's.
 - **Analyzers**: only the compiler's diagnostics are said; the SDK's analyzers a project names are not run.
 - **A declaration in a referenced assembly**: Go to Declaration answers for source alone.
 - **A Visual Basic project that references a C# project** reads it by the assembly it last built, so a change there
