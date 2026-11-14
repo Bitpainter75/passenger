@@ -68,7 +68,7 @@ public sealed partial class CodeEditor
             TypedOverEndTag?.Invoke(this, EventArgs.Empty);
             return;
         }
-        Apply(TextEditing.Type(document.Snapshot, selections, typed));
+        Apply(TextEditing.Type(document.Snapshot, selections, typed, LineCommentPrefix));
         EditPlan? closing = ClosesTags ? TextEditing.CloseTag(document.Snapshot, selections, typed, Markup) : null;
         if (closing is not null)
         {

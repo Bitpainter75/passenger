@@ -875,6 +875,47 @@ public sealed class FileColoursTests : FileColoursFolder
         window.Close();
     }
 
+    /// <summary>A Visual Basic file's tokens show as their kinds, whatever case its words are written in, a Markdown file's
+    /// vb block as the file's; it comments a line with an apostrophe, and an apostrophe typed starts a comment, never a pair
+    /// of quotes.</summary>
+    [AvaloniaFact]
+    public void A_Visual_Basic_file_shows_its_tokens_as_their_kinds_and_an_apostrophe_typed_starts_a_comment()
+    {
+        MainWindow window = Window();
+        const string Code = "' Sums a day's orders.\nImports System.Text\n\n#Region \"Shop\"\nPublic Class Shop\n    Inherits Counter\n\n"
+            + "    Private closed As Boolean = False\n    Private ReadOnly notes As New StringBuilder()\n\n"
+            + "    Public Overrides Function Total(rows As List(Of Order)) As Integer\n        if rows.Count > 0 AndAlso Not closed Then\n"
+            + "            Return rows.Count + 42 + &HFF\n        End If\n        notes.Append(\"none \"\"left\"\" today\") ' Kept.\n"
+            + "        Return rows.End.Date\n    End Function\nEnd Class\n#End Region\n";
+        CodeEditor editor = Open(window, "Shop.vb", Code);
+        editor.Focus();
+        Assert.Equal("Visual Basic", window.LanguageShown);
+        (string Stretch, TokenKind Kind)[] expected = [("' Sums a day's orders.", TokenKind.Comment), ("Imports", TokenKind.Keyword), ("#Region", TokenKind.Keyword),
+            ("\"Shop\"", TokenKind.String), ("Public Class", TokenKind.Keyword), ("Shop\n", TokenKind.Class), ("Inherits", TokenKind.Keyword),
+            ("Counter", TokenKind.Class), ("Boolean", TokenKind.Keyword), ("False", TokenKind.Keyword), ("As New", TokenKind.Keyword),
+            ("StringBuilder", TokenKind.Class), ("Overrides Function", TokenKind.Keyword), ("Total", TokenKind.Method), ("List", TokenKind.Class),
+            ("Order", TokenKind.Class), ("if", TokenKind.Keyword), ("AndAlso Not", TokenKind.Keyword), ("42", TokenKind.Number), ("&HFF", TokenKind.Number),
+            ("\"none ", TokenKind.String), ("\"\"", TokenKind.StringEscape), (" today\"", TokenKind.String), ("' Kept.", TokenKind.Comment), (".End.Date", TokenKind.Text),
+            ("End Function", TokenKind.Keyword), ("#End Region", TokenKind.Keyword)];
+        string[] wrong = [.. expected.Select(e => (e.Stretch, e.Kind, Found: KindOf(editor, e.Stretch))).Where(e => e.Found != e.Kind)
+            .Select(e => $"{e.Stretch} as {e.Found?.ToString() ?? "several kinds"}, not {e.Kind}")];
+        Assert.True(wrong.Length == 0, $"Visual Basic's tokens are not coloured as their kinds: {string.Join("; ", wrong)}");
+
+        editor.Selections = SelectionSet.Single(Code.IndexOf("Return rows.Count", StringComparison.Ordinal));
+        Ui.Run(window, EditorActions.ToggleLineComment);
+        Assert.Contains("\n            ' Return rows.Count + 42 + &HFF\n", editor.Document.Snapshot.ToString(), StringComparison.Ordinal);
+        editor.Selections = SelectionSet.Single(editor.Document.Snapshot.ToString().IndexOf("\n\n#Region", StringComparison.Ordinal) + 1);
+        window.KeyTextInput("'");
+        Assert.Contains("Imports System.Text\n'\n#Region", editor.Document.Snapshot.ToString(), StringComparison.Ordinal);
+
+        editor = Open(window, "NOTES.md", "# Notes\n\n```vb\n' The sum.\nFunction Total() As Integer\n    Return 42\nEnd Function\n```\n");
+        Assert.Equal(TokenKind.Comment, KindOf(editor, "' The sum."));
+        Assert.Equal(TokenKind.Method, KindOf(editor, "Total"));
+        Assert.Equal(TokenKind.Keyword, KindOf(editor, "Integer"));
+        Assert.Equal(TokenKind.Number, KindOf(editor, "42"));
+        window.Close();
+    }
+
     [AvaloniaFact]
     public void Comment_with_line_comment_writes_each_languages_own_comment_and_block_comment_wraps_XML_in_its_own()
     {

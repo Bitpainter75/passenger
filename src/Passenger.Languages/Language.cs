@@ -75,10 +75,13 @@ public sealed class Language
     private static readonly List<Language> All = [];
 
     /// <summary>Scopes the grammars here embed for a language under another name than its own grammar's, each read by the
-    /// grammar its files are coloured by: JSON with comments and JSON Lines by JSON's (which reads comments), and HTML
-    /// inside another document (Markdown's) by HTML's.</summary>
+    /// grammar its files are coloured by: JSON with comments and JSON Lines by JSON's (which reads comments), HTML
+    /// inside another document (Markdown's) by HTML's, and the Visual Basic Markdown names by VS Code's grammar.</summary>
     private static readonly (string Scope, string Carried)[] EmbeddedAs =
-        [("source.json.comments", "source.json"), ("source.json.lines", "source.json"), ("text.html.derivative", "text.html.basic")];
+    [
+        ("source.json.comments", "source.json"), ("source.json.lines", "source.json"), ("text.html.derivative", "text.html.basic"),
+        ("source.asp.vb.net", "source.vbnet"),
+    ];
 
     /// <summary>Grammars carried only for another's includes, each by the scope it names: YAML's, a grammar for each version
     /// of YAML and one for YAML embedded in another document, which YAML's own grammar reads by.</summary>
@@ -164,6 +167,11 @@ public sealed class Language
 
     public static readonly Language Razor = new(LanguageIds.Razor, "Razor", ["*" + RazorFiles.Component, "*" + RazorFiles.Page], block: ("@*", "*@"),
         grammar: new("text.aspnetcorerazor", "aspnetcorerazor.tmLanguage.json", Tags.Html), service: LanguageService.CSharp, literals: LiteralLines.Preformatted);
+
+    /// <summary>Visual Basic, coloured by Passenger's own grammar and commented with an apostrophe; no language server
+    /// answers for it yet.</summary>
+    public static readonly Language VisualBasic = new("vb", "Visual Basic", ["*.vb"], line: "'",
+        grammar: new("source.vbnet", "visualbasic.tmLanguage.json"));
 
     /// <summary>XAML, MSBuild's files and the rest of XML are one markup to the editor, each named and answered as its own.</summary>
     public static readonly Language Xaml = XmlKind("xaml", "XAML", ["*.axaml", "*.paml", "*.xaml"], LanguageService.Xaml);

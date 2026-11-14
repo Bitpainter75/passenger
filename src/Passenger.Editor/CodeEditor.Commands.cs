@@ -247,7 +247,7 @@ public sealed partial class CodeEditor
     }
 
     /// <summary>Types text at every caret as if from the keyboard, the editor's typing help included.</summary>
-    public void Type(string typed) => Apply(TextEditing.Type(document.Snapshot, selections, typed));
+    public void Type(string typed) => Apply(TextEditing.Type(document.Snapshot, selections, typed, LineCommentPrefix));
 
     private int PageLines => Math.Max(1, (int)(Viewport.Height / metrics.LineHeight) - 1);
 
