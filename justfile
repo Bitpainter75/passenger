@@ -109,6 +109,13 @@ package-win rid="win-x64":
 package-linux rid="linux-x64":
     tools/package-linux.sh {{rid}}
 
+# Passenger for Linux as one file: artifacts/package/Passenger-linux-x64.AppImage or -arm64.AppImage, the AppImage
+# project's runtime (downloaded once, held to its SHA-256) before a squashfs image of the app, read back and checked.
+# Wherever squashfs-tools are: just package-appimage [linux-x64|linux-arm64]
+[unix]
+package-appimage rid="linux-x64":
+    tools/package-appimage.sh {{rid}}
+
 # Passenger's own icons (Passenger.icns, passenger.png, Passenger.ico) from Assets/passenger.svg; macOS, by sips.
 app-icon:
     tools/app-icon.sh

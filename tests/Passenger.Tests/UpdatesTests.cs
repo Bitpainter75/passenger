@@ -936,6 +936,38 @@ public sealed class UpdatesTests : McpRig, IClassFixture<UpdatesTests.DiskImages
         Assert.True(copy.InstalledVersion == Product.Version, $"A package manager's copy was changed, to {copy.InstalledVersion}");
     }
 
+    [AvaloniaFact]
+    [SupportedOSPlatform("linux")]
+    public void A_Linux_copy_run_from_an_AppImage_says_a_newer_AppImage_replaces_it_and_downloads_nothing()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), LinuxAlone);
+        using IDisposable theme = TestsTheme();
+        LinuxInstall copy = new(TestFolders.Create("installed-"));
+        string image = Path.Combine(copy.Home, "Applications", "Passenger-linux-x64.AppImage");
+        string newer = Bumped(1, 0);
+        IReadOnlyDictionary<string, byte[]> update = copy.Update(newer);
+        github.Answer = Release($"v{newer}", files: update);
+        // As the AppImage's runtime names the file a copy runs from: its mounted folder holds an archive's layout, install.sh left out.
+        MainWindow window = Started(new LinuxUpdater(copy.Install, copy.Staging, LinuxUpdater.InstallKind.Unpacked, mayAsk: false,
+            running: copy.InstalledVersion, appImage: image));
+        window.WatchForUpdates();
+        Ui.Settle();
+
+        Assert.True(Notice(window) == $"Passenger {newer} available", $"An AppImage's copy does not say v{newer} is out: {UpdatesSaid(window)}");
+        string tip = ToolTip.GetTip(window.FindControl<Button>("UpdateButton")!) as string ?? string.Empty;
+        Assert.True(tip.Contains("Passenger-linux-x64.AppImage, which nothing can write while it runs, so it is updated by hand: a newer AppImage put in its place.",
+            StringComparison.Ordinal), $"The notice does not say a newer AppImage replaces this copy: '{tip}'");
+        string page = $"https://github.com/Zaneris/passenger/releases/tag/v{newer}";
+        Assert.True(window.UpdateShown?.Link.AbsoluteUri == page, $"An AppImage's copy links {window.UpdateShown?.Link}, not only the release's page, {page}");
+        string[] downloaded = [.. update.Keys.Where(name => github.RequestsFor(name).Length > 0)];
+        Assert.True(downloaded.Length == 0, $"An AppImage's copy downloaded {string.Join(", ", downloaded)}");
+        Assert.False(copy.Holds(newer), $"An AppImage's copy made v{newer} ready to install");
+        window.Close();
+        Ended(window);
+        window.InstallUpdate();
+        Assert.True(copy.InstalledVersion == Product.Version, $"An AppImage's copy was changed, to {copy.InstalledVersion}");
+    }
+
     private static void Detach(string volume) => TestVolumes.Detach(volume, (tool, arguments) => Ran(tool, arguments, TimeSpan.FromMinutes(1).Scaled()));
 
     /// <summary>The person's window as the app makes it, its settings kept in the test's state folder, asking the stand-in

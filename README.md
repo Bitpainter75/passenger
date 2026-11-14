@@ -375,6 +375,7 @@ just publish osx-arm64     # a self-contained Release build (win-x64, win-arm64,
 just package-mac           # the macOS disk image, Apple Silicon; signed with PASSENGER_SIGN_IDENTITY, else ad hoc
 just package-win win-x64   # the Windows installer (or win-arm64), unsigned unless tools/package-win.sh's variables sign it
 just package-linux         # the Linux archive with its install.sh (linux-x64, or linux-arm64), as site/linux.html uses it
+just package-appimage      # the Linux AppImage, one file run as it is (linux-x64, or linux-arm64); needs squashfs-tools
 just container-tools       # the tools Passenger debugs and profiles with inside a Linux container, where a build finds them
 just notices               # fail naming any package THIRD_PARTY_NOTICES.md does not name
 ```
