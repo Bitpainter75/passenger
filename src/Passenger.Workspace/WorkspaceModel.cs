@@ -46,14 +46,17 @@ public sealed record WorkspaceModel(string Folder, SolutionModel? Solution, IRea
     private static readonly string[] ProjectExtensions = [".csproj", ".fsproj", ".vbproj", ".proj"];
 
     /// <summary>Whether a file opens as the workspace rather than in an editor: a solution (.sln, .slnx), a solution
-    /// filter (.slnf) or a C# project (.csproj).</summary>
+    /// filter (.slnf) or a C# or Visual Basic project (.csproj, .vbproj).</summary>
     public static bool Opens(string path) => IsSolution(path) || IsProject(path);
 
     /// <summary>Whether a file is a solution or a solution filter, either of which opens a solution.</summary>
     public static bool IsSolution(string path) => PathNames.HasExtension(path, SolutionExtensions);
 
-    /// <summary>Whether a file is a C# project, the one kind of project that opens as the workspace.</summary>
-    public static bool IsProject(string path) => Path.GetExtension(path).Equals(".csproj", StringComparison.OrdinalIgnoreCase);
+    /// <summary>Whether a file is a C# or a Visual Basic project, the kinds of project that open as the workspace.</summary>
+    public static bool IsProject(string path) => PathNames.HasExtension(path, [".csproj", ".vbproj"]);
+
+    /// <summary>Whether a project is Visual Basic's, which Passenger's own server answers for and Roslyn's never loads.</summary>
+    public static bool IsVisualBasic(string path) => PathNames.HasExtension(path, [".vbproj"]);
 
     /// <summary>Whether a file is a project file of any kind MSBuild evaluates as itself (<see cref="ProjectExtensions"/>),
     /// a C# project's among them.</summary>

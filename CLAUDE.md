@@ -235,6 +235,9 @@ Projects in `src/`; `find_symbol` finds the rest from the names here. A pointer'
   one, `MsysGpg`, its agent inheriting none of Passenger's handles, `StandardHandles.NotInherited`; every gpg found by
   `GpgPrograms`); signatures read for the rows shown, never by `%G?` in a read; a git that may ask ends with its folder
   (`GitQuestions`).
+- `Passenger.VisualBasic`: Passenger's own language server for Visual Basic (docs/visual-basic.md), Roslyn's public
+  workspace API at the C# parser's version, never Roslyn's server (it holds no Visual Basic); the App runs it as a web
+  language's server (`WebServerKind.VisualBasic`), fed the project host's builds.
 - `Passenger.Dap`, `Passenger.Debugger`, `Passenger.DebugAdapter`: Passenger's own debugger behind its own DAP.
   `Passenger.ContainerTools` runs inside a Linux container, carried only in the release's archives.
 - `Passenger.Profiler`: EventPipe and ClrMD (its Azure packages stay carried; its DAC stays loaded once used: unloading

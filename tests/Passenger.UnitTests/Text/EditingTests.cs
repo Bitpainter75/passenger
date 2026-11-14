@@ -26,6 +26,18 @@ public class EditingTests
     }
 
     [Theory]
+    [InlineData("x = 1 |", "'", "x = 1 '|")]
+    [InlineData("|", "'", "'|")]
+    [InlineData("a| b|", "'", "a'| b'|")]
+    [InlineData("it's '|'", "'", "it's ''|'")]
+    [InlineData("x = |", "\"", "x = \"|\"")]
+    public void A_quote_that_starts_the_languages_line_comment_is_typed_alone_and_other_quotes_still_pair(string before, string typed, string after)
+    {
+        (TextSnapshot text, SelectionSet selections) = Marked.Parse(before);
+        Assert.Equal(after, Marked.After(text, TextEditing.Type(text, selections, typed, comment: "'")));
+    }
+
+    [Theory]
     [InlineData("(|)", "|")]
     [InlineData("\"|\"", "|")]
     [InlineData("one\r\n|two", "one|two")]

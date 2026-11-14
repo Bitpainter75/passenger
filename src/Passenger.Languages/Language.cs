@@ -8,7 +8,8 @@ using Passenger.Text;
 namespace Passenger.Languages;
 
 /// <summary>What answers for a language's files beyond the editor: the C# language server (C# and Razor), Passenger's
-/// XAML, an MSBuild evaluation, one of the web languages' servers, Godot's for GDScript, or nothing.</summary>
+/// XAML, an MSBuild evaluation, one of the web languages' servers, Godot's for GDScript, Passenger's own server for Visual
+/// Basic, or nothing.</summary>
 public enum LanguageService
 {
     None,
@@ -22,6 +23,7 @@ public enum LanguageService
     Dockerfile,
     Yaml,
     GDScript,
+    VisualBasic,
 }
 
 /// <summary>A file name a language claims, matched without regard to case: a name, or one <c>*</c> standing for any run
@@ -75,10 +77,13 @@ public sealed class Language
     private static readonly List<Language> All = [];
 
     /// <summary>Scopes the grammars here embed for a language under another name than its own grammar's, each read by the
-    /// grammar its files are coloured by: JSON with comments and JSON Lines by JSON's (which reads comments), and HTML
-    /// inside another document (Markdown's) by HTML's.</summary>
+    /// grammar its files are coloured by: JSON with comments and JSON Lines by JSON's (which reads comments), HTML
+    /// inside another document (Markdown's) by HTML's, and the Visual Basic Markdown names by VS Code's grammar.</summary>
     private static readonly (string Scope, string Carried)[] EmbeddedAs =
-        [("source.json.comments", "source.json"), ("source.json.lines", "source.json"), ("text.html.derivative", "text.html.basic")];
+    [
+        ("source.json.comments", "source.json"), ("source.json.lines", "source.json"), ("text.html.derivative", "text.html.basic"),
+        ("source.asp.vb.net", "source.vbnet"),
+    ];
 
     /// <summary>Grammars carried only for another's includes, each by the scope it names: YAML's, a grammar for each version
     /// of YAML and one for YAML embedded in another document, which YAML's own grammar reads by.</summary>
@@ -164,6 +169,11 @@ public sealed class Language
 
     public static readonly Language Razor = new(LanguageIds.Razor, "Razor", ["*" + RazorFiles.Component, "*" + RazorFiles.Page], block: ("@*", "*@"),
         grammar: new("text.aspnetcorerazor", "aspnetcorerazor.tmLanguage.json", Tags.Html), service: LanguageService.CSharp, literals: LiteralLines.Preformatted);
+
+    /// <summary>Visual Basic, coloured by Passenger's own grammar, folded by its blocks, commented with an apostrophe and
+    /// answered by Passenger's own language server (src/Passenger.VisualBasic).</summary>
+    public static readonly Language VisualBasic = new("vb", "Visual Basic", ["*.vb"], line: "'",
+        grammar: new("source.vbnet", "visualbasic.tmLanguage.json"), folds: FoldScan.VisualBasic, service: LanguageService.VisualBasic);
 
     /// <summary>XAML, MSBuild's files and the rest of XML are one markup to the editor, each named and answered as its own.</summary>
     public static readonly Language Xaml = XmlKind("xaml", "XAML", ["*.axaml", "*.paml", "*.xaml"], LanguageService.Xaml);

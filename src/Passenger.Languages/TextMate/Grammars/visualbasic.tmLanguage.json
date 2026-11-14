@@ -1,0 +1,117 @@
+{
+	"$comment": "Passenger's own grammar for Visual Basic (.NET): comments, strings, numbers, directives, every reserved word, and the names a declaration or a type clause gives.",
+	"name": "Visual Basic",
+	"scopeName": "source.vbnet",
+	"patterns": [
+		{
+			"include": "#comment"
+		},
+		{
+			"include": "#directive"
+		},
+		{
+			"include": "#string"
+		},
+		{
+			"include": "#date"
+		},
+		{
+			"include": "#number"
+		},
+		{
+			"include": "#option"
+		},
+		{
+			"include": "#type-declaration"
+		},
+		{
+			"include": "#member-declaration"
+		},
+		{
+			"include": "#type-clause"
+		},
+		{
+			"include": "#keyword"
+		}
+	],
+	"repository": {
+		"comment": {
+			"name": "comment.line.apostrophe.vbnet",
+			"match": "(?i)(?:'|\\bREM\\b).*$"
+		},
+		"directive": {
+			"name": "keyword.control.directive.vbnet",
+			"match": "(?i)^\\s*#\\s*(?:End\\s+(?:If|Region|ExternalSource)|ElseIf|Else|If|Region|ExternalSource|Const|(?:Disable|Enable)\\s+Warning)\\b"
+		},
+		"string": {
+			"name": "string.quoted.double.vbnet",
+			"begin": "\\$?\\\"",
+			"end": "\\\"(?!\\\")[cC]?",
+			"patterns": [
+				{
+					"name": "constant.character.escape.vbnet",
+					"match": "\\\"\\\""
+				}
+			]
+		},
+		"date": {
+			"name": "constant.numeric.date.vbnet",
+			"match": "#\\s*\\d[^#\\n']*#"
+		},
+		"number": {
+			"name": "constant.numeric.vbnet",
+			"match": "(?i)(?:&[HOB][0-9A-F_]+|\\b\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:E[+-]?\\d+)?)(?:US|UI|UL|S|I|L|F|R|D)?\\b"
+		},
+		"option": {
+			"match": "(?i)^\\s*(Option)\\s+(Strict|Explicit|Infer|Compare)\\b(?:\\s+(On|Off|Binary|Text)\\b)?",
+			"captures": {
+				"1": {
+					"name": "keyword.other.vbnet"
+				},
+				"2": {
+					"name": "keyword.other.vbnet"
+				},
+				"3": {
+					"name": "keyword.other.vbnet"
+				}
+			}
+		},
+		"type-declaration": {
+			"match": "(?i)(?<![.\\[\\w])(Class|Module|Structure|Interface|Enum)\\s+([A-Za-z_]\\w*)",
+			"captures": {
+				"1": {
+					"name": "keyword.other.vbnet"
+				},
+				"2": {
+					"name": "entity.name.type.vbnet"
+				}
+			}
+		},
+		"member-declaration": {
+			"match": "(?i)(?<![.\\[\\w])(Sub|Function)\\s+(?!New\\b)([A-Za-z_]\\w*)",
+			"captures": {
+				"1": {
+					"name": "keyword.other.vbnet"
+				},
+				"2": {
+					"name": "entity.name.function.vbnet"
+				}
+			}
+		},
+		"type-clause": {
+			"match": "(?i)(?<![.\\[\\w])(As|Of|New|Inherits)\\s+(?!(?:New|With|Boolean|Byte|Char|Date|Decimal|Double|Integer|Long|Object|SByte|Short|Single|String|UInteger|ULong|UShort)\\b)(?:[A-Za-z_]\\w*\\.)*([A-Za-z_]\\w*)",
+			"captures": {
+				"1": {
+					"name": "keyword.other.vbnet"
+				},
+				"2": {
+					"name": "entity.name.type.vbnet"
+				}
+			}
+		},
+		"keyword": {
+			"name": "keyword.other.vbnet",
+			"match": "(?i)(?<![.\\[\\w])(?:GetXmlNamespace|NotInheritable|NotOverridable|RemoveHandler|MustOverride|MustInherit|Overridable|AddHandler|DirectCast|Implements|ParamArray|RaiseEvent|WithEvents|AddressOf|Interface|Namespace|Narrowing|Overloads|Overrides|Protected|Structure|WriteOnly|Continue|Delegate|Function|Inherits|Iterator|Operator|Optional|Property|ReadOnly|SyncLock|UInteger|Widening|AndAlso|Boolean|CUShort|Decimal|Declare|Default|Finally|GetType|Handles|Imports|Integer|MyClass|Nothing|Partial|Private|Shadows|TryCast|Variant|CSByte|CShort|Double|ElseIf|Friend|Global|Module|MyBase|NameOf|Object|Option|OrElse|Public|Resume|Return|Select|Shared|Single|Static|String|TypeOf|UShort|Alias|Async|Await|ByRef|ByVal|CBool|CByte|CChar|CDate|CType|CUInt|CULng|Catch|Class|Const|EndIf|Erase|Error|Event|False|GoSub|IsNot|ReDim|SByte|Short|Throw|ULong|Until|Using|While|Yield|Byte|CDbl|CDec|CInt|CLng|CObj|CSng|CStr|Call|Case|Char|Date|Each|Else|Enum|Exit|GoTo|Like|Long|Loop|Next|Step|Stop|Then|True|Wend|When|With|And|Dim|End|For|Get|Let|Lib|Mod|New|Not|Out|Set|Sub|Try|Xor|As|Do|If|In|Is|Me|Of|On|Or|To)\\b"
+		}
+	}
+}

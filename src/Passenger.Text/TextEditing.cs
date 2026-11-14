@@ -38,10 +38,11 @@ public static class TextEditing
 
     /// <summary>Typing with the editor's help: a bracket or quote typed over a selection wraps it, an
     /// opener before a space gets its closer, and a closer typed in front of the same closer steps
-    /// over it. Anything else is <see cref="Insert"/>.</summary>
-    public static EditPlan Type(TextSnapshot text, SelectionSet selections, string typed)
+    /// over it. Anything else is <see cref="Insert"/>, a quote that starts the language's line <paramref name="comment"/>
+    /// (Visual Basic's ') too: it opens no pair.</summary>
+    public static EditPlan Type(TextSnapshot text, SelectionSet selections, string typed, string? comment = null)
     {
-        if (typed.Length != 1)
+        if (typed.Length != 1 || typed == comment)
         {
             return Insert(text, selections, typed);
         }

@@ -134,6 +134,7 @@ internal static class ScopeColours
         ("meta.embedded.block.shellscript", TokenKind.Text),
         ("meta.embedded.block.typescript", TokenKind.Text),
         ("meta.embedded.block.typescriptreact", TokenKind.Text),
+        ("meta.embedded.block.vs_net", TokenKind.Text),
         ("meta.embedded.block.xml", TokenKind.Text),
         ("meta.embedded.block.yaml", TokenKind.Text),
 
