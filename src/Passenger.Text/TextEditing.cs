@@ -337,7 +337,10 @@ public static class TextEditing
             }
             else if (blocks is not null && s.IsEmpty && end == endLine.End && before > line.Start && blocks(text, line.Line) is { } block)
             {
-                string inserted = eol + lineIndent + indent.Unit + (block.End is { } written ? eol + lineIndent + written : string.Empty);
+                string outer = lineIndent.EndsWith(indent.Unit, StringComparison.Ordinal) ? lineIndent[..^indent.Unit.Length] : lineIndent;
+                string inserted = eol + lineIndent + indent.Unit
+                    + (block.End is { } written ? string.Concat(written.Split('\n').Select(ended => eol + lineIndent + ended)) : string.Empty)
+                    + (block.Outer is { } around ? eol + outer + around : string.Empty);
                 int caret = eol.Length + lineIndent.Length + indent.Unit.Length;
                 replacements.Add(new Replacement(s.Start, end, inserted, caret, caret, i));
             }

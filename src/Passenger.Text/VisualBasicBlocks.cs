@@ -1,8 +1,10 @@
 namespace Passenger.Text;
 
 /// <summary>What a line a caret breaks opened: a block, whose body is a level in, with the end to write below it where the
-/// block has none yet (<c>End Sub</c>), or null where its end is there already.</summary>
-public readonly record struct OpenedBlock(string? End);
+/// block has none yet (<c>End Sub</c>; several lines, each a line of <see cref="End"/>), or null where its end is there
+/// already, and what ends the block around it where the line is that block's first and it has no end either
+/// (<see cref="Outer"/>, a level out: a property's <c>End Property</c> below its <c>Get</c> and <c>Set</c>).</summary>
+public readonly record struct OpenedBlock(string? End, string? Outer = null);
 
 /// <summary>A language's reading of a line for Enter: the block the line opens, or null for a line that opens none.</summary>
 public delegate OpenedBlock? BlockOpener(TextSnapshot text, int line);
@@ -164,7 +166,89 @@ public static class VisualBasicBlocks
             }
             interfaces += opens == Ends[Interface] ? 1 : ends == Ends[Interface] ? -1 : 0;
         }
-        return opened is null ? null : new OpenedBlock(open[opened] > 0 ? opened : null);
+        if (opened is null || open[opened] <= 0)
+        {
+            return opened is null ? null : new OpenedBlock(null);
+        }
+        return Property(text, line, opened, buffer) ?? new OpenedBlock(opened);
+    }
+
+    /// <summary>A property's whole body where its first accessor is being opened: the line above is the property's and no
+    /// <c>End Property</c> follows before the next member. After <c>Get</c>, its end, then <c>Set</c> taking the property's
+    /// type and its end, unless the property is <c>ReadOnly</c>; after <c>Set</c>, its end; then <c>End Property</c>.</summary>
+    private static OpenedBlock? Property(TextSnapshot text, int line, string opened, Span<char> buffer)
+    {
+        if (opened != Ends[Get] && opened != Ends[Set])
+        {
+            return null;
+        }
+        int above = line - 1;
+        while (above >= 0 && Line(text, above, buffer).Trim().IsEmpty)
+        {
+            above--;
+        }
+        if (above < 0)
+        {
+            return null;
+        }
+        ReadOnlySpan<char> declared = Code(PastAttributes(Line(text, above, buffer).TrimStart()));
+        bool readOnly = false;
+        ReadOnlySpan<char> word = Word(declared);
+        while (IsModifier(word))
+        {
+            readOnly |= word.Equals("ReadOnly", StringComparison.OrdinalIgnoreCase);
+            declared = declared[word.Length..].TrimStart();
+            word = Word(declared);
+        }
+        if (!word.Equals("Property", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        // The type after the As that follows the name and its parameters, where the property names one.
+        ReadOnlySpan<char> named = declared[word.Length..].TrimStart();
+        ReadOnlySpan<char> after = named[Word(named).Length..].TrimStart();
+        if (after.Length > 0 && after[0] == '(')
+        {
+            int nested = 0;
+            int close = 0;
+            for (; close < after.Length; close++)
+            {
+                nested += after[close] == '(' ? 1 : after[close] == ')' ? -1 : 0;
+                if (nested == 0)
+                {
+                    break;
+                }
+            }
+            after = close < after.Length ? after[(close + 1)..].TrimStart() : [];
+        }
+        string? type = Word(after).Equals("As", StringComparison.OrdinalIgnoreCase) ? Typed(after[2..]) : null;
+        for (int below = line + 1; below < text.LineCount; below++)
+        {
+            (string? opens, string? ends) = Of(Line(text, below, buffer));
+            if (Line(text, below, buffer).TrimStart().StartsWith("End Property", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            if ((opens is not null && Array.IndexOf(Ends, opens) < Get) || (ends is not null && Array.IndexOf(Ends, ends) < Sub)
+                || Word(Code(PastAttributes(Line(text, below, buffer).TrimStart()))).Equals("Property", StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+        }
+        string end = opened == Ends[Get] && !readOnly ? $"{opened}\nSet(value{(type is null ? string.Empty : " As " + type)})\n{Ends[Set]}" : opened;
+        return new OpenedBlock(end, "End Property");
+    }
+
+    /// <summary>A property's type as written after its As, without the value or the interface members that follow it.</summary>
+    private static string? Typed(ReadOnlySpan<char> after)
+    {
+        foreach (string stop in (string[])[" = ", " Implements "])
+        {
+            int at = after.IndexOf(stop, StringComparison.OrdinalIgnoreCase);
+            after = at < 0 ? after : after[..at];
+        }
+        after = after.Trim();
+        return after.IsEmpty || after.StartsWith("New ", StringComparison.OrdinalIgnoreCase) ? null : after.ToString();
     }
 
     private static ReadOnlySpan<char> Line(TextSnapshot text, int index, Span<char> buffer)

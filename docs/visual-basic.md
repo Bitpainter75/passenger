@@ -26,12 +26,20 @@ with. Collapse to Definitions, the fold settings and the folds a folder remember
 block's end below: `End Sub`, `End Function`, `End Class`, `End If` (after a line ending in `Then`), `Next`, `Loop`,
 `End Select`, `End Try`, `End With`, `End Using`, `End SyncLock`, `End While`, `End Get`, `End Set`, `#End Region`,
 and the `End Sub` or `End Function` of a lambda that goes on past its line. A block that has its end is only indented,
-and one typed inside another of its kind gets its own end.
+and one typed inside another of its kind gets its own end. Enter after a property's `Get` writes the property's whole
+body: `End Get`, `Set(value As T)` with the property's type, `End Set` and `End Property` (no `Set` for a `ReadOnly`
+one), and after `Set` of a `WriteOnly` one its end and `End Property`.
 
 **Language help (stage 2).** Passenger's own language server for Visual Basic (`src/Passenger.VisualBasic`) answers
 for every `.vb` file:
 
-- the compiler's errors and warnings as you type, underlined and counted as C#'s are;
+- the compiler's errors and warnings as you type, underlined and counted as C#'s are, and the notes of the project's
+  analyzers (the SDK's, a package's) and of Roslyn's own for Visual Basic (an unused parameter, an import no code
+  needs, greyed), each at the severity the project's `.editorconfig` gives;
+- the compiler's colours over the grammar's: a call as a method, the name before a dot as its type, a structure, a
+  field, a parameter and a local each as what it is;
+- Show Context Actions: a fix for what is marked at the caret ("Change 'Lenght' to 'Length'") and the refactorings its
+  selection takes (Inline temporary variable, Introduce parameter, Extract method);
 - completion, with each item's signature and documentation;
 - a call's signatures after its bracket and each comma, the overload the compiler chose first, with the documentation
   of the method and of the parameter the caret is at;
@@ -128,7 +136,7 @@ Each version names every other Roslyn package by exact version, and package vers
 no new version since 16.9 (2021), so a newer Roslyn brings its compiler fixes and its reading of newer .NET's
 metadata, not language. When the C# pin moves, this one moves with it.
 
-**How it works.** The server is a small program over Roslyn's public workspace API, about 1,000 lines:
+**How it works.** The server is a small program over Roslyn's public workspace API, about 1,500 lines:
 
 - `Wire`: the protocol's framing over the standard streams.
 - `Projects`: one `AdhocWorkspace`. A project arrives as the project host's design-time builds (the JSON Roslyn's
@@ -141,6 +149,14 @@ metadata, not language. When the C# pin moves, this one moves with it.
   text's version.
 - `Answers`, `Outline`: completion (`CompletionService`), hover (`QuickInfoService`), declarations and usages
   (`SymbolFinder`), rename (`Renamer`), formatting (`Formatter`), a file's symbols from its syntax.
+- `Colours`: the protocol's semantic tokens from Roslyn's `Classifier`, a token on one line and none over another; the
+  App lays them over the grammar's colours with the highlighter C#'s server's go through (`SemanticHighlighter`).
+- `Checks`: a file's diagnostics, the compiler's and the analyzers'. Roslyn's own analyzers for Visual Basic are the
+  types of its two feature assemblies marked for the language, made once; a project's are the files its build names
+  (`/analyzer:`), loaded in a context of their own with Roslyn itself the server's.
+- `Fixes`: the protocol's code actions. Roslyn's fix and refactoring providers come from one composition of its parts
+  (`System.Composition`, the same that makes the workspace's services); an action is listed by its title and its edit
+  is computed when it is resolved.
 - `Signatures`: a call's signatures from the semantic model (a method group's overloads, a type's constructors, an
   indexed property, a delegate's call), as Roslyn's own signature help is not public.
 
@@ -150,16 +166,16 @@ with `ConservingMemory`, as Roslyn's server does, and ends with the IDE.
 
 ## What does not work yet
 
-- **Semantic colours, code actions and quick fixes, inlay hints**: Roslyn's services for them are internal or need
-  more than one request's worth of work; colours stay the grammar's.
-- **Analyzers**: only the compiler's diagnostics are said; the SDK's analyzers a project names are not run.
+- **Inlay hints, Fix All and a code action that does more than change texts** (one that adds a file or runs a
+  command is resolved with its texts' part alone).
+- **An analyzer compiled against a newer Roslyn than 5.9.0** may not load, and then says nothing; the SDK 11's
+  analyzers for Visual Basic load.
 - **A declaration in a referenced assembly**: Go to Declaration answers for source alone.
 - **A Visual Basic project that references a C# project** reads it by the assembly it last built, so a change there
   shows after a build; Rename and Find Usages do not cross the two languages.
 - **A solution mixing C# and Visual Basic** is untested. Roslyn's server is told of no `.vbproj`, but the C# service
   still counts it among the workspace's projects.
-- **A property's whole body** is not written for you (`End Property` with its `Get` and `Set`), and Enter inside a
-  block's first line (not at its end) only carries the indentation.
+- **Enter inside a block's first line** (not at its end) only carries the indentation.
 - **Tests before a first build** are not listed: the Tests window's reading of source is C#'s alone, so a Visual Basic
   project's tests come with its first run or Discover. NUnit and MSTest in Visual Basic are untested.
 - **The debugger's expressions** are Visual Basic said in C#, not compiled as Visual Basic, so a few differ: `/` on two

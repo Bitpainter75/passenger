@@ -71,6 +71,55 @@ public sealed class VisualBasicTests : IClassFixture<VisualBasicTests.Project>
     }
 
     [AvaloniaFact]
+    public void A_Visual_Basic_file_takes_the_compilers_colours_says_its_analyzers_notes_and_a_quick_fix_writes_the_member_meant()
+    {
+        MainWindow window = project.Open("Program.vb", languageServer: false);
+        CodeEditor editor = window.EditorArea.CodeEditor;
+        OpenDocument document = window.EditorArea.Active!;
+        Ui.WaitFor(() => document.Markers.Any(m => m.Kind == MarkerKind.Error), "the error under the member String has not");
+        // What the grammar cannot know: a call is a method, the name before its dot a type, a parameter a parameter.
+        Ui.WaitFor(() => KindOf(editor, "WriteLine") == TokenKind.Method, () => $"WriteLine coloured as a method, not {KindOf(editor, "WriteLine")}");
+        Assert.Equal(TokenKind.Class, KindOf(editor, "Console"));
+        Assert.Equal(TokenKind.Parameter, KindOf(editor, "rows\n"));
+        Assert.Equal(TokenKind.Class, KindOf(editor, "Orders"));
+        // An analyzer's note beside the compiler's error, and the unused parameter greyed.
+        Ui.WaitFor(() => document.Markers.Any(m => m.Message.Contains("Remove unused parameter 'args'", StringComparison.Ordinal)),
+            () => $"the analyzer's note on the unused parameter; markers: {string.Join("; ", document.Markers.Select(m => $"{m.Kind} {m.Message}"))}");
+
+        Ui.PlaceAfter(editor, "\"abc\".Len");
+        Ui.Run(window, AppActions.QuickFix);
+        Ui.WaitFor(() => window.Assist.Offered.Contains("Change 'Lenght' to 'Length'."),
+            () => $"the fix among the actions offered: {string.Join("; ", window.Assist.Offered)}; the status bar said: {window.Status}");
+        for (int down = window.Assist.Offered.ToList().IndexOf("Change 'Lenght' to 'Length'."); down > 0; down--)
+        {
+            Ui.Press(window, "DOWN");
+        }
+        Ui.Press(window, "ENTER");
+        Ui.WaitFor(() => editor.Document.Snapshot.ToString().Contains("\"abc\".Length\n", StringComparison.Ordinal), () => $"the member written as meant; the status bar said: {window.Status}");
+        Ui.WaitFor(() => !document.Markers.Any(m => m.Kind == MarkerKind.Error), "the error gone with its fix");
+        window.Close();
+    }
+
+    /// <summary>The one kind a stretch of the text is coloured as, its spaces aside; null when its parts differ.</summary>
+    private static TokenKind? KindOf(CodeEditor editor, string stretch)
+    {
+        TextSnapshot text = editor.Document.Snapshot;
+        int start = text.ToString().IndexOf(stretch, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"'{stretch}' is not in the text");
+        TokenKind?[] kinds = new TokenKind?[stretch.Length];
+        Array.Fill(kinds, TokenKind.Text);
+        foreach (SyntaxSpan span in editor.Highlighter!.GetSpans(text, start, stretch.Length))
+        {
+            for (int i = Math.Max(span.Start, start); i < Math.Min(span.End, start + stretch.Length); i++)
+            {
+                kinds[i - start] = span.Kind;
+            }
+        }
+        TokenKind?[] seen = [.. kinds.Where((_, i) => !char.IsWhiteSpace(stretch[i])).Distinct()];
+        return seen.Length == 1 ? seen[0] : null;
+    }
+
+    [AvaloniaFact]
     public void Class_Interface_in_a_Visual_Basic_project_makes_a_Visual_Basic_type_and_New_Item_offers_Visual_Basics_kinds()
     {
         MainWindow window = project.Open("Program.vb", languageServer: false);

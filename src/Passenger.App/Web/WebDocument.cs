@@ -187,6 +187,12 @@ public sealed class WebDocument : IServerDocument, IDisposable
         session = started;
         Lsp = started.Open(document.Path, document.Text, LanguageId);
         Lsp.DiagnosticsPushed += OnPushed;
+        // Visual Basic's server knows what a name is (a structure, a field, a parameter): its colours over the grammar's.
+        if (Kind == WebServerKind.VisualBasic && started.Server.Legend is { } legend && document.Highlighter is { } syntax)
+        {
+            semantic = new Passenger.Languages.CSharp.SemanticHighlighter(syntax, Lsp, legend);
+            document.Highlighter = semantic;
+        }
         TellIndentation();
         AwaitPush();
         Refresh();
@@ -196,7 +202,7 @@ public sealed class WebDocument : IServerDocument, IDisposable
     /// <summary>Holds the file's checks until its server's push for the text as it stands (<see cref="awaitingPush"/>).</summary>
     private void AwaitPush()
     {
-        if (Lsp is null || Kind is not (WebServerKind.Dockerfile or WebServerKind.Yaml or WebServerKind.TypeScript or WebServerKind.GDScript))
+        if (Lsp is null || Kind is not (WebServerKind.Dockerfile or WebServerKind.Yaml or WebServerKind.TypeScript or WebServerKind.GDScript or WebServerKind.VisualBasic))
         {
             return;
         }
@@ -253,6 +259,12 @@ public sealed class WebDocument : IServerDocument, IDisposable
     /// <summary>The diagnostics and colours asked for again (the server's refresh, a server started again).</summary>
     public void Refresh() => Pull(TimeSpan.Zero);
 
+    /// <summary>The server's colours asked for again: what it knows of the file changed without the text (its project loaded).</summary>
+    public void RefreshColours() => semantic?.Refresh();
+
+    /// <summary>The server's colours over the grammar's, where its server gives any (<see cref="WebServerKind.VisualBasic"/>).</summary>
+    private Passenger.Languages.CSharp.SemanticHighlighter? semantic;
+
     public void Dispose()
     {
         diagnostics.Stop();
@@ -263,6 +275,15 @@ public sealed class WebDocument : IServerDocument, IDisposable
         document.Text.Changed -= OnChanged;
         document.Saved -= OnSaved;
         document.PropertyChanged -= OnDocumentChanged;
+        if (semantic is not null)
+        {
+            semantic.Dispose();
+            if (document.Highlighter == semantic)
+            {
+                document.Highlighter = semantic.Syntax;
+            }
+            semantic = null;
+        }
         if (Lsp is { } lsp)
         {
             lsp.DiagnosticsPushed -= OnPushed;

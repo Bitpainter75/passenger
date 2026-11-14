@@ -657,6 +657,10 @@ public sealed class WebLanguages : IAsyncDisposable
             IdeErrors.Write($"Visual Basic's language server given {Plural.Of(projects.Count, "project")} for {folder}"
                 + $"{(projects.Any(p => p.Infos is null) ? $", {projects.Count(p => p.Infos is null)} of them not built" : string.Empty)}");
             await server.NotifyAsync(VisualBasicProjectsMethod, new { projects = projects.Select(p => new { path = p.Path, infos = p.Infos }).ToArray() });
+            foreach (WebDocument features in Of(new ServerPlace(WebServerKind.VisualBasic, null)))
+            {
+                features.RefreshColours();
+            }
         }
     }
 

@@ -21,6 +21,7 @@ internal sealed class Answers
 {
     /// <summary>The last completion's document and items, which a resolve of one of them reads its description from.</summary>
     private (Document Document, ImmutableArray<CompletionItem> Items)? completed;
+    private readonly Fixes fixes = new();
 
     public static JsonObject Initialized() => new()
     {
@@ -38,6 +39,8 @@ internal sealed class Answers
             ["documentFormattingProvider"] = true,
             ["documentRangeFormattingProvider"] = true,
             ["renameProvider"] = new JsonObject { ["prepareProvider"] = true },
+            ["codeActionProvider"] = new JsonObject { ["resolveProvider"] = true, ["codeActionKinds"] = new JsonArray("quickfix", "refactor") },
+            ["semanticTokensProvider"] = Colours.Provider(),
         },
         ["serverInfo"] = new JsonObject { ["name"] = "Passenger Visual Basic", ["version"] = Product.Version },
     };
@@ -47,6 +50,10 @@ internal sealed class Answers
         if (method == "completionItem/resolve")
         {
             return await ResolvedAsync(parameters, cancel).ConfigureAwait(false);
+        }
+        if (method == "codeAction/resolve")
+        {
+            return await fixes.ResolvedAsync(parameters, cancel).ConfigureAwait(false);
         }
         if (Places.DocumentOf(parameters) is not { } path || solution.GetDocumentIdsWithFilePath(path) is not [DocumentId id, ..]
             || solution.GetDocument(id) is not { } document)
@@ -65,6 +72,9 @@ internal sealed class Answers
             "textDocument/documentHighlight" => await UsagesAsync(document, at, true, text, cancel).ConfigureAwait(false),
             "textDocument/prepareRename" => await RenamableAsync(document, text, at, cancel).ConfigureAwait(false),
             "textDocument/rename" => await RenamedAsync(document, at, (string?)parameters?["newName"] ?? string.Empty, cancel).ConfigureAwait(false),
+            "textDocument/codeAction" => await fixes.OfAsync(document, text, Places.Span(text, parameters?["range"]), cancel).ConfigureAwait(false),
+            "textDocument/semanticTokens/full" => await Colours.OfAsync(document, text, new TextSpan(0, text.Length), cancel).ConfigureAwait(false),
+            "textDocument/semanticTokens/range" => await Colours.OfAsync(document, text, Places.Span(text, parameters?["range"]), cancel).ConfigureAwait(false),
             "textDocument/documentSymbol" => await Outline.OfAsync(document, text, cancel).ConfigureAwait(false),
             "textDocument/formatting" => await FormattedAsync(document, text, null, parameters?["options"], cancel).ConfigureAwait(false),
             "textDocument/rangeFormatting" => await FormattedAsync(document, text, Places.Span(text, parameters?["range"]), parameters?["options"], cancel).ConfigureAwait(false),
@@ -72,18 +82,14 @@ internal sealed class Answers
         };
     }
 
-    /// <summary>A file's errors and warnings, the compiler's hidden ones left out.</summary>
+    /// <summary>A file's errors, warnings and notes, the compiler's and its analyzers', the hidden ones left out.</summary>
     public static async Task<JsonArray> DiagnosticsAsync(Document document, CancellationToken cancel)
     {
         JsonArray found = [];
-        if (await document.GetSemanticModelAsync(cancel).ConfigureAwait(false) is not { } model)
-        {
-            return found;
-        }
         SourceText text = await document.GetTextAsync(cancel).ConfigureAwait(false);
-        foreach (Diagnostic diagnostic in model.GetDiagnostics(cancellationToken: cancel))
+        foreach (Diagnostic diagnostic in await Checks.OfAsync(document, cancel).ConfigureAwait(false))
         {
-            if (diagnostic.Severity == DiagnosticSeverity.Hidden || !diagnostic.Location.IsInSource)
+            if (diagnostic.Severity == DiagnosticSeverity.Hidden || diagnostic.IsSuppressed || !diagnostic.Location.IsInSource)
             {
                 continue;
             }
@@ -311,6 +317,12 @@ internal sealed class Answers
         }
         Solution before = document.Project.Solution;
         Solution after = await Renamer.RenameSymbolAsync(before, symbol, new SymbolRenameOptions(), name, cancel).ConfigureAwait(false);
+        return new JsonObject { ["changes"] = await ChangesAsync(before, after, cancel).ConfigureAwait(false) };
+    }
+
+    /// <summary>What turns one solution's texts into another's, as the protocol's edits by file.</summary>
+    public static async Task<JsonObject> ChangesAsync(Solution before, Solution after, CancellationToken cancel)
+    {
         JsonObject changes = [];
         foreach (ProjectChanges project in after.GetChanges(before).GetProjectChanges())
         {
@@ -324,7 +336,7 @@ internal sealed class Answers
                 changes[Places.UriOf(path)] = Edits(text, await now.GetTextChangesAsync(was, cancel).ConfigureAwait(false));
             }
         }
-        return new JsonObject { ["changes"] = changes };
+        return changes;
     }
 
     private static async Task<JsonNode?> FormattedAsync(Document document, SourceText text, TextSpan? span, JsonNode? asked, CancellationToken cancel)

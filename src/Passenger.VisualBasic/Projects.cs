@@ -17,7 +17,7 @@ internal sealed class Projects
 {
     private const string LooseName = "Miscellaneous Files";
 
-    private readonly AdhocWorkspace workspace = new(MefHostServices.DefaultHost);
+    private readonly AdhocWorkspace workspace = new(Fixes.Host);
     private readonly Dictionary<string, List<Loaded>> loaded = new(PathNames.Comparer);
     private readonly Dictionary<string, SourceText> open = new(PathNames.Comparer);
     private readonly Dictionary<string, PortableExecutableReference> references = new(PathNames.Comparer);
@@ -134,7 +134,8 @@ internal sealed class Projects
                 compilationOptions: parsed.CompilationOptions.WithAssemblyIdentityComparer(DesktopAssemblyIdentityComparer.Default), parseOptions: parsed.ParseOptions.WithDocumentationMode(DocumentationMode.Parse))
             .WithDocuments(Documents(id, info["documents"]))
             .WithAdditionalDocuments(Documents(id, info["additionalDocuments"]))
-            .WithAnalyzerConfigDocuments(Documents(id, info["analyzerConfigDocuments"]));
+            .WithAnalyzerConfigDocuments(Documents(id, info["analyzerConfigDocuments"]))
+            .WithAnalyzerReferences([Checks.BuiltIn, .. parsed.AnalyzerReferences.Select(a => Path.GetFullPath(a.FilePath, folder)).Where(File.Exists).Select(Checks.Of)]);
         now.Add(new Loaded(id, [.. parsed.MetadataReferences.Select(r => (Path.GetFullPath(r.Reference, folder), r.Properties))],
             [.. (info["projectReferences"] as JsonArray ?? []).Select(r => (string?)r?["path"]).OfType<string>().Select(r => Path.GetFullPath(r, folder))],
             [(string?)info["outputFilePath"], (string?)info["outputRefFilePath"], (string?)info["intermediateOutputFilePath"]]));
@@ -222,7 +223,7 @@ internal sealed class Projects
                     parseOptions: VisualBasicParseOptions.Default.WithDocumentationMode(DocumentationMode.Parse),
                     compilationOptions: new VisualBasicCompilationOptions(OutputKind.DynamicallyLinkedLibrary, optionInfer: true,
                         globalImports: GlobalImport.Parse("Microsoft.VisualBasic", "System", "System.Collections.Generic", "System.Linq", "System.Threading.Tasks")),
-                    metadataReferences: Runtime()));
+                    metadataReferences: Runtime(), analyzerReferences: [Checks.BuiltIn]));
             }
             solution = solution.AddDocument(DocumentInfo.Create(DocumentId.CreateNewId(loose, path), Path.GetFileName(path), loader: Loader(path), filePath: path));
         }

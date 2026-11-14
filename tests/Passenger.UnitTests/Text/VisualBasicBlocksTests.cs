@@ -31,6 +31,16 @@ public sealed class VisualBasicBlocksTests
         Assert.Equal(after, Entered(before));
 
     [Theory]
+    [InlineData("    Public Property Size As Integer\n        Get|", "    Public Property Size As Integer\n        Get\n            |\n        End Get\n        Set(value As Integer)\n        End Set\n    End Property")]
+    [InlineData("Public ReadOnly Property Name As String Implements IShop.Name\n    Get|", "Public ReadOnly Property Name As String Implements IShop.Name\n    Get\n        |\n    End Get\nEnd Property")]
+    [InlineData("Default Property Item(index As Integer) As List(Of String)\n    Get|", "Default Property Item(index As Integer) As List(Of String)\n    Get\n        |\n    End Get\n    Set(value As List(Of String))\n    End Set\nEnd Property")]
+    [InlineData("WriteOnly Property Size As Integer\n    Set(value As Integer)|", "WriteOnly Property Size As Integer\n    Set(value As Integer)\n        |\n    End Set\nEnd Property")]
+    [InlineData("Property Size As Integer\n    Get|\nEnd Property", "Property Size As Integer\n    Get\n        |\n    End Get\nEnd Property")]
+    [InlineData("Property Size As Integer\n    Get\n    End Get\n    Set(value As Integer)|\nEnd Property", "Property Size As Integer\n    Get\n    End Get\n    Set(value As Integer)\n        |\n    End Set\nEnd Property")]
+    public void Enter_after_a_propertys_first_accessor_writes_the_propertys_whole_body_and_after_one_of_a_property_that_ends_only_the_accessors_end(string before, string after) =>
+        Assert.Equal(after, Entered(before));
+
+    [Theory]
     [InlineData("    If rows > 0 Then Return|", "    If rows > 0 Then Return\n    |")]
     [InlineData("    Public Property Name As String|", "    Public Property Name As String\n    |")]
     [InlineData("    Public MustOverride Sub Open()|", "    Public MustOverride Sub Open()\n    |")]
