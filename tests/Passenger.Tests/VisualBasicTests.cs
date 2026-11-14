@@ -9,7 +9,8 @@ namespace Passenger.Tests;
 
 /// <summary>Visual Basic through the window, on a console project of two files with Passenger's own language server for
 /// it (src/Passenger.VisualBasic), which the project host's design-time builds feed: what the compiler says of a file, its
-/// completion, Go to Declaration, Rename and Reformat Code. It needs no Node.js and no C# language server.</summary>
+/// completion, Go to Declaration, Rename and Reformat Code, and the types Class/Interface makes in such a project. It needs
+/// no Node.js and no C# language server.</summary>
 public sealed class VisualBasicTests : IClassFixture<VisualBasicTests.Project>
 {
     private readonly Project project;
@@ -67,6 +68,29 @@ public sealed class VisualBasicTests : IClassFixture<VisualBasicTests.Project>
         Ui.WaitFor(() => editor.Document.Snapshot.ToString().Contains("\n        Return total\n", StringComparison.Ordinal),
             "the statement indented again by Visual Basic's formatter");
         window.Close();
+    }
+
+    [AvaloniaFact]
+    public void Class_Interface_in_a_Visual_Basic_project_makes_a_Visual_Basic_type_and_New_Item_offers_Visual_Basics_kinds()
+    {
+        MainWindow window = project.Open("Program.vb", languageServer: false);
+        string made = project.PathOf("Basket.vb");
+        try
+        {
+            Assert.Null(window.CreateType(project.Folder, "Basket", "Module"));
+            Assert.Equal("Public Module Basket\n\nEnd Module\n", File.ReadAllText(made));
+            Assert.Equal(made, window.EditorArea.Active?.Path);
+            Assert.Equal("1 is not a Visual Basic name", window.CreateType(project.Folder, "1", "Class"));
+            Assert.Equal(["Class", "Module", "Interface", "Structure", "Enum"],
+                Passenger.App.Templates.OwnTemplates.All.Where(t => t.Variants.Any(v => v.Language == "VB")).Select(t => t.Name));
+            Assert.All(Passenger.App.Templates.OwnTemplates.All.Where(t => t.Variants.Any(v => v.Language == "VB")),
+                t => Assert.True(t.Own is { Extension: ".vb", Namespaced: false }, $"{t.Name} is no Visual Basic file of its project's root namespace"));
+        }
+        finally
+        {
+            window.Close();
+            File.Delete(made);
+        }
     }
 
     /// <summary>A Visual Basic console project of two files, restored once for the class's tests.</summary>

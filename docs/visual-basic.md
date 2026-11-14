@@ -39,6 +39,16 @@ for every `.vb` file:
 - Rename, across the project's files, open or not;
 - File Structure, and Reformat Code in the file's own indentation.
 
+**New types.** In a Visual Basic project, Add › Class/Interface offers Class, Module, Interface, Structure and Enum
+and makes a `.vb` file (`Public Module Basket` … `End Module`), with no `Namespace` statement, as the project's root
+namespace holds every file of it. New Item lists the same five as Passenger's own beside dotnet new's, which for Visual
+Basic are only its test items.
+
+**Tests.** A Visual Basic test project's tests run and are listed with their files and lines, their failures with the
+compiler's own places: checked on 2026-11-14 with xunit 2 (4 tests run, 3 passed, 1 failed, each at its line of the
+`.vb` file). They are found by the test runner once the project has been built (Run or Discover), not read from the
+source before, as C#'s are.
+
 **Visual Basic projects are projects.** A folder is walked for `.vbproj` as for `.csproj`, so a Visual Basic project
 opened by its folder is in the Solution view, has its run configuration, and builds and runs through MSBuild as a C#
 project does. Before, only a solution that named a `.vbproj` knew it; a folder holding one showed "No
@@ -57,7 +67,7 @@ configurations". Roslyn's C# server is never given a Visual Basic project.
 | The language server | `src/Passenger.VisualBasic`, carried under `visualbasic/` beside the app | a process of its own on Passenger's runtime (`ChildProcesses.HelperCommand`), as the debug adapter is |
 | Its place in the App | `WebServerKind.VisualBasic` in `Web/WebLanguages.cs` | it speaks the standard protocol, so everything the web languages' servers give a file (`WebDocument`, `WebAssist`) it gives a `.vb` file |
 | Its projects | `ProjectSession.VisualBasicBuildsAsync`, `WebLanguages.VisualBasicProjects` | the project host's design-time builds, which already read `VbcCommandLineArgs` |
-| The tests | `FileColoursTests` (a file's kinds, its comment, the apostrophe, Markdown), `EditingTests` (typing), `FoldingTests` (the folds), `VisualBasicBlocksTests` (Enter), `VisualBasicTests` (the server through the window) | |
+| The tests | `FileColoursTests` (a file's kinds, its comment, the apostrophe, Markdown), `EditingTests` (typing), `FoldingTests` (the folds), `VisualBasicBlocksTests` (Enter), `VisualBasicTests` (the server and the templates through the window) | |
 
 **Why a grammar of Passenger's own.** Every other grammar here is VS Code's, unchanged. VS Code's grammar for `.vb`
 (`extensions/vb`, converted from textmate/asp.vb.net.tmbundle) is classic ASP's: it knows no `Imports`, `Namespace`,
@@ -143,7 +153,8 @@ with `ConservingMemory`, as Roslyn's server does, and ends with the IDE.
   still counts it among the workspace's projects.
 - **A property's whole body** is not written for you (`End Property` with its `Get` and `Set`), and Enter inside a
   block's first line (not at its end) only carries the indentation.
-- **New Item's templates and the Tests window's finder** are C#'s alone.
+- **Tests before a first build** are not listed: the Tests window's reading of source is C#'s alone, so a Visual Basic
+  project's tests come with its first run or Discover. NUnit and MSTest in Visual Basic are untested.
 - **The debugger** stops at breakpoints in Visual Basic code as far as the PDB carries it (untested) and evaluates
   expressions as C#: `CilExpressionCompiler` reads a method's debug information with `isVisualBasicMethod: false`.
 
@@ -151,7 +162,7 @@ with `ConservingMemory`, as Roslyn's server does, and ends with the IDE.
 
 1. **The language** (done): the entry, the grammar, comments, typing.
 2. **Language help** (done, with the gaps above): Passenger's own server on Roslyn 5.9.0.
-3. **The editor's own help**: folding and block ends (done); still to do, templates and the test finder.
+3. **The editor's own help**: folding, block ends and the type templates (done); tests are found by the runner.
 4. **The debugger**: expressions in Watches, hover and conditional breakpoints compiled as Visual Basic.
 
 ## Building on a machine that has only the .NET 10 SDK

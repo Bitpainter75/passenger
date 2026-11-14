@@ -75,15 +75,26 @@ public partial class MainWindow
     private void AskType(string into)
     {
         Vcs.NamePopup? popup = null;
-        popup = new Vcs.NamePopup("New Class/Interface", string.Empty, name => Task.FromResult(CreateType(into, name, popup?.Kind ?? TypeKinds[0])),
-            [.. TypeKinds.Select(kind => (kind, TypeBadge(kind)))]);
+        IReadOnlyList<string> kinds = InVisualBasic(into) ? Templates.OwnTemplates.VisualBasicKinds : TypeKinds;
+        popup = new Vcs.NamePopup("New Class/Interface", string.Empty, name => Task.FromResult(CreateType(into, name, popup?.Kind ?? kinds[0])),
+            [.. kinds.Select(kind => (kind, TypeBadge(kind)))]);
         popups.Show(popup, _ => { });
     }
+
+    /// <summary>Whether a folder's project is Visual Basic's, whose types Class/Interface then makes in Visual Basic.</summary>
+    private bool InVisualBasic(string folder) => ProjectOf(PathNames.Canonical(folder)) is { } project && WorkspaceModel.IsVisualBasic(project.Path);
 
     /// <summary>The letter and colour a kind of type is marked with, as Go to Symbol shows it.</summary>
     private static Avalonia.Controls.Control TypeBadge(string kind)
     {
-        (string letter, string brush) = Navigation.SymbolPopup.Badge(kind switch { "Interface" => Lsp.SymbolKind.Interface, "Struct" => Lsp.SymbolKind.Struct, "Enum" => Lsp.SymbolKind.Enum, _ => Lsp.SymbolKind.Class });
+        (string letter, string brush) = Navigation.SymbolPopup.Badge(kind switch
+        {
+            "Interface" => Lsp.SymbolKind.Interface,
+            "Struct" or "Structure" => Lsp.SymbolKind.Struct,
+            "Enum" => Lsp.SymbolKind.Enum,
+            "Module" => Lsp.SymbolKind.Module,
+            _ => Lsp.SymbolKind.Class,
+        });
         return Navigation.SymbolPopup.KindBadge(kind == "Record" ? "R" : letter, brush);
     }
 
@@ -151,17 +162,19 @@ public partial class MainWindow
     {
         string[] parts = name.Trim().Split('/', '\\');
         string last = parts[^1];
-        string type = last.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) ? last[..^3] : last;
+        bool basic = InVisualBasic(into);
+        string extension = basic ? ".vb" : ".cs";
+        string type = last.EndsWith(extension, StringComparison.OrdinalIgnoreCase) ? last[..^3] : last;
         if (type.Length == 0 || !char.IsLetter(type[0]) && type[0] != '_' || !type.All(c => char.IsLetterOrDigit(c) || c == '_'))
         {
-            return $"{type} is not a C# name";
+            return $"{type} is not a {(basic ? "Visual Basic" : "C#")} name";
         }
         if (Invalid(name) is { } problem)
         {
             return problem;
         }
         into = Path.Combine([into, .. parts[..^1].Where(p => p.Length > 0)]);
-        return CreateFile(into, type + ".cs", Templates.OwnTemplates.TypeText(kind, type, NamespaceFor(into)));
+        return CreateFile(into, type + extension, basic ? Templates.OwnTemplates.VisualBasicText(kind, type) : Templates.OwnTemplates.TypeText(kind, type, NamespaceFor(into)));
     }
 
     /// <summary>The namespace a folder's code takes: its project's evaluated RootNamespace (until it is evaluated, its

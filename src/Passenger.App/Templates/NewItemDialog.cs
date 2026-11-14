@@ -379,7 +379,7 @@ public sealed class NewItemDialog : IdeWindow
         heading.Text = chosen.Name;
         description.Text = variant.Description;
         nameRow.IsVisible = chosen.TakesName;
-        spaceRow.IsVisible = chosen.Own is not null || variant.Options.Any(o => Asked.Contains(o.Name));
+        spaceRow.IsVisible = chosen.Own is { Namespaced: true } || variant.Options.Any(o => Asked.Contains(o.Name));
         if (chosen.TakesName && (ItemName.Length == 0 || ItemName == nameGiven))
         {
             nameGiven = Free(chosen.DefaultName);

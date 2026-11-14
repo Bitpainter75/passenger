@@ -1,8 +1,9 @@
 namespace Passenger.App.Templates;
 
 /// <summary>An item template of Passenger's own: a file of the name given with this extension, its text made from that
-/// name and the folder's namespace (<see cref="Text"/>, given them in that order).</summary>
-public sealed record OwnTemplate(string Extension, Func<string, string, string> Text);
+/// name and the folder's namespace (<see cref="Text"/>, given them in that order); one of a language whose files name no
+/// namespace of their folder's (Visual Basic's, whose project's root namespace holds them) is not <see cref="Namespaced"/>.</summary>
+public sealed record OwnTemplate(string Extension, Func<string, string, string> Text, bool Namespaced = true);
 
 /// <summary>Passenger's own templates, a source beside dotnet new's: its item templates, which New Item lists and searches
 /// as it does dotnet new's, one more being one more entry in <see cref="All"/> (Add's Class/Interface makes the same types);
@@ -12,8 +13,15 @@ public static class OwnTemplates
     /// <summary>The C# types Class/Interface makes, in the order its popup lists them.</summary>
     public static IReadOnlyList<string> TypeKinds { get; } = ["Class", "Interface", "Record", "Struct", "Enum"];
 
-    /// <summary>Every one, as New Item lists it: an entry with one C# variant and no options.</summary>
-    public static IReadOnlyList<ProjectTemplate> All { get; } = [.. TypeKinds.Select(Type)];
+    /// <summary>The Visual Basic types Class/Interface makes in a Visual Basic project, in the order its popup lists them.</summary>
+    public static IReadOnlyList<string> VisualBasicKinds { get; } = ["Class", "Module", "Interface", "Structure", "Enum"];
+
+    /// <summary>Every one, as New Item lists it: an entry with one variant, C#'s or Visual Basic's, and no options.</summary>
+    public static IReadOnlyList<ProjectTemplate> All { get; } = [.. TypeKinds.Select(Type), .. VisualBasicKinds.Select(VisualBasicType)];
+
+    /// <summary>A Visual Basic file declaring a type of a kind (<see cref="VisualBasicKinds"/>), in its project's root
+    /// namespace as every file of the project is.</summary>
+    public static string VisualBasicText(string kind, string name) => $"Public {kind} {name}\n\nEnd {kind}\n";
 
     /// <summary>A C# file declaring a type of a kind (<see cref="TypeKinds"/>), in a file-scoped namespace.</summary>
     public static string TypeText(string kind, string name, string space)
@@ -43,6 +51,17 @@ public static class OwnTemplates
         TemplateVariant gdscript = new("Godot.Game.GDScript", GDScript, 0,
             "A Godot 4 game in GDScript: project.godot, a main scene and the script on its root", null, [], null, []);
         return new ProjectTemplate("Godot 4 Game", ["godot"], "Passenger", ["Game", "Godot"], "Game", scripts ? [csharp, gdscript] : [csharp]) { GodotGame = true };
+    }
+
+    private static ProjectTemplate VisualBasicType(string kind)
+    {
+        string lower = kind.ToLowerInvariant();
+        TemplateVariant variant = new($"Passenger.{kind}.VisualBasic", "VB", 0, $"A Visual Basic {lower} in a file of its own, in the project's root namespace",
+            null, [], null, []);
+        return new ProjectTemplate(kind, [lower], "Passenger", ["Common", "Code"], kind, [variant])
+        {
+            Own = new OwnTemplate(".vb", (name, _) => VisualBasicText(kind, name), Namespaced: false),
+        };
     }
 
     private static ProjectTemplate Type(string kind)
