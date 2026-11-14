@@ -29,6 +29,7 @@ just package-mac [RID]     # the .dmg (Apple Silicon), signed by PASSENGER_SIGN_
                            # PASSENGER_NOTARY_PROFILE when set, else ad hoc (--dry-run needs an identity)
 just package-win [RID]     # Velopack's per-user installer; just package-linux [RID]: the .tar.gz with install.sh
 just package-appimage [RID]  # the AppImage (squashfs-tools; the runtime downloaded once, SHA256-checked)
+just backup                # Passenger.bundle and Passenger.zip into ~/Dokumente (tools/backup-repo.sh): after each push
 just container-tools [RID] [--archive]  # the in-container tools (linux[-musl]-x64/arm64) into artifacts/container-tools
 just notices               # fail naming any carried package the notices miss
 just mcp [FOLDER]          # Passenger as an MCP server over a folder, from a clone of the last build
