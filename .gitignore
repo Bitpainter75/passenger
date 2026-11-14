@@ -22,3 +22,6 @@
 ._*
 Thumbs.db
 [Dd]esktop.ini
+
+# The owner's own backup of the repository (a bundle and a zip beside GitHub's copy), kept out of it.
+tools/backup-repo.sh

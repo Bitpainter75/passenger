@@ -116,12 +116,6 @@ package-linux rid="linux-x64":
 package-appimage rid="linux-x64":
     tools/package-appimage.sh {{rid}}
 
-# A local copy of the repository after a push: Passenger.bundle (every branch and tag, verified) and Passenger.zip (the
-# versioned files of HEAD) in PASSENGER_BACKUP_DIR, else ~/Dokumente, the newest pair alone: just backup
-[unix]
-backup:
-    tools/backup-repo.sh
-
 # Passenger's own icons (Passenger.icns, passenger.png, Passenger.ico) from Assets/passenger.svg; macOS, by sips.
 app-icon:
     tools/app-icon.sh
