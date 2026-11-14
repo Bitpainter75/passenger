@@ -168,10 +168,10 @@ public sealed class Language
     public static readonly Language Razor = new(LanguageIds.Razor, "Razor", ["*" + RazorFiles.Component, "*" + RazorFiles.Page], block: ("@*", "*@"),
         grammar: new("text.aspnetcorerazor", "aspnetcorerazor.tmLanguage.json", Tags.Html), service: LanguageService.CSharp, literals: LiteralLines.Preformatted);
 
-    /// <summary>Visual Basic, coloured by Passenger's own grammar and commented with an apostrophe; no language server
-    /// answers for it yet.</summary>
+    /// <summary>Visual Basic, coloured by Passenger's own grammar, folded by its blocks and commented with an apostrophe; no
+    /// language server answers for it yet.</summary>
     public static readonly Language VisualBasic = new("vb", "Visual Basic", ["*.vb"], line: "'",
-        grammar: new("source.vbnet", "visualbasic.tmLanguage.json"));
+        grammar: new("source.vbnet", "visualbasic.tmLanguage.json"), folds: FoldScan.VisualBasic);
 
     /// <summary>XAML, MSBuild's files and the rest of XML are one markup to the editor, each named and answered as its own.</summary>
     public static readonly Language Xaml = XmlKind("xaml", "XAML", ["*.axaml", "*.paml", "*.xaml"], LanguageService.Xaml);

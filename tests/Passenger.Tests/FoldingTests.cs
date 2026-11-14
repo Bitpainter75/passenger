@@ -765,6 +765,82 @@ public sealed class FoldingTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void A_Visual_Basic_file_folds_by_its_blocks_to_their_Ends_its_region_imports_and_comments_and_typing_keeps_its_folds()
+    {
+        string code = Path.Combine(folder, "Shapes.vb");
+        File.WriteAllText(code, """
+            ' Shapes.
+            ' MIT licence.
+            Imports System
+            Imports System.Linq
+
+            Namespace Sample
+                ''' <summary>
+                ''' Shapes.
+                ''' </summary>
+                Public Class Shapes
+                    Private size As Integer
+                    Public Property Name As String
+            #Region "Sizes"
+                    <Obsolete("a > b")> Public Function Area(w As Integer, h As Integer) As Integer
+                        Dim twice = Function(x As Integer)
+                                        Return x * 2 ' End Function
+                                    End Function
+                        If w > 0 Then
+                            Return twice(w * h)
+                        End If
+                        Return 0
+                    End Function
+            #End Region
+                    Public Property Size As Integer
+                        Get
+                            Return size
+                        End Get
+                        Set(value As Integer)
+                            size = value
+                        End Set
+                    End Property
+                End Class
+
+                Public Interface IShape
+                    Function Area() As Integer
+                    Sub Draw()
+                End Interface
+            End Namespace
+
+            """);
+        MainWindow window = Ui.OpenFolder(folder, width: 1000, height: 700, languageServer: false);
+        window.OpenFile(code);
+        Ui.Settle();
+        CodeEditor editor = window.EditorArea.CodeEditor;
+        Passenger.App.Workspace.OpenDocument document = window.EditorArea.Active!;
+        Ui.WaitFor(() => document.FoldsFound, "the Visual Basic file's regions");
+        // An auto-property and an interface's members open nothing; a lambda over several lines folds to its own End.
+        (int, string)[] regions = [(0, "..."), (2, "..."), (5, "...End Namespace"), (6, "..."), (9, "...End Class"), (12, "..."), (13, "...End Function"),
+            (14, "...End Function"), (23, "...End Property"), (24, "...End Get"), (27, "...End Set"), (33, "...End Interface")];
+        Assert.Equal(regions, Regions(editor));
+        Assert.All(editor.FoldRegions, r => Assert.Equal(editor.Document.Snapshot.GetLine(editor.Document.Snapshot.GetLineFromOffset(r.Start)).End, r.Start));
+        FoldKind[] kinds = [.. editor.FoldRegions.Select(r => r.Kind)];
+        Assert.Equal([FoldKind.FileHeader, FoldKind.Imports, FoldKind.Code, FoldKind.DocComment, FoldKind.Code, FoldKind.Region, FoldKind.Body, FoldKind.Body,
+            FoldKind.Body, FoldKind.Body, FoldKind.Body, FoldKind.Code], kinds);
+
+        editor.Focus();
+        Assert.DoesNotContain(editor.FoldRegions, r => r.Folded && r.Kind is FoldKind.Body or FoldKind.Code);
+        int foldedAtFirst = editor.FoldRegions.Count(r => r.Folded);
+        editor.GoTo(new TextPosition(25, 16));
+        Ui.Press(window, "control M , control S");
+        Assert.Equal("...End Get", Assert.Single(editor.FoldRegions, r => r.Folded && r.Kind == FoldKind.Body).Placeholder);
+        editor.GoTo(new TextPosition(35, editor.Document.Snapshot.GetLine(35).Length));
+        Ui.Press(window, "ENTER");
+        window.KeyTextInput("Sub Scale()");
+        Ui.Settle();
+        Assert.Equal(regions, Regions(editor));
+        Assert.Equal("...End Get", Assert.Single(editor.FoldRegions, r => r.Folded && r.Kind == FoldKind.Body).Placeholder);
+        Assert.Equal(foldedAtFirst + 1, editor.FoldRegions.Count(r => r.Folded));
+        window.Close();
+    }
+
+    [AvaloniaFact]
     public void A_project_file_folds_by_its_elements_and_a_JSON_file_by_its_braces_and_typing_keeps_their_folds()
     {
         string project = Path.Combine(folder, "Sample.csproj");

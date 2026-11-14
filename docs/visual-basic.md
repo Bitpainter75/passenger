@@ -17,6 +17,11 @@ on the `vb-net` branch of the fork.
 - an apostrophe typed starts a comment, where every other language pairs it as a quote;
 - a Markdown file's ```` ```vb ```` block is coloured as a `.vb` file is.
 
+**Folding (the first part of stage 3).** A `.vb` file folds: a namespace, a type, a member and a property's or custom
+event's accessors from the line that opens them to their `End` (the placeholder reads `...End Sub`), a lambda that goes
+on past its line, `#Region` to `#End Region`, the `Imports`, a documentation comment and the comments a file begins
+with. Collapse to Definitions, the fold settings and the folds a folder remembers treat them as C#'s.
+
 **What was there before.** A `.vbproj` was already a project to Passenger: the workspace finds it, a solution takes it
 with Visual Basic's project type, MSBuild's design-time build reads it, and Build and Run go through MSBuild as a C#
 project's do. None of that was changed, and none of it has a test with a Visual Basic project yet.
@@ -29,7 +34,8 @@ project's do. None of that was changed, and none of it has a test with a Visual 
 | The grammar | `src/Passenger.Languages/TextMate/Grammars/visualbasic.tmLanguage.json` | Passenger's own: see below |
 | A Markdown block | `EmbeddedAs` in `Language.cs`, `meta.embedded.block.vs_net` in `ScopeColours.cs` | VS Code's Markdown grammar names Visual Basic `source.asp.vb.net` |
 | The apostrophe | `TextEditing.Type`'s `comment`, given the editor's `LineCommentPrefix` | the editor names no language |
-| The tests | `FileColoursTests` (a file's kinds, its comment, the apostrophe, Markdown), `EditingTests` (typing) | |
+| The folds | `VisualBasicFolds` behind `FoldScan.VisualBasic` (`src/Passenger.Languages/Markup`) | a scan of lines off the UI thread, as XML's and JSON's: no parser is carried for it yet |
+| The tests | `FileColoursTests` (a file's kinds, its comment, the apostrophe, Markdown), `EditingTests` (typing), `FoldingTests` (the folds) | |
 
 **Why a grammar of Passenger's own.** Every other grammar here is VS Code's, unchanged. VS Code's grammar for `.vb`
 (`extensions/vb`, converted from textmate/asp.vb.net.tmbundle) is classic ASP's: it knows no `Imports`, `Namespace`,
@@ -45,19 +51,39 @@ kind of token, the reserved words from the language's specification) and needs n
   are common names (`Text`, `Key`, `Take`) are no keywords, so a variable named so is not miscoloured.
 - A word after a dot or inside `[brackets]` is a name, never a keyword.
 
+**How the folds are found.** A block is known by its line's first word past its attributes and modifiers, and an `End`
+closes the nearest open block of its kind, dropping those opened since that have no `End` of their own: an
+auto-property, an interface's member, a `MustOverride` one. Statement blocks (`If`, `For`, `Try`) do not fold. What a
+line scan gets wrong: a declaration inside a string over several lines, and a lambda whose line is longer than 512
+characters.
+
 ## What does not work yet
 
 Nothing answers for a Visual Basic file beyond the editor: no completion, no errors, no Go to Declaration, no rename,
-no Find Usages, no folding, no formatting, no `End If` written for you. The debugger stops at breakpoints in Visual
+no Find Usages, no formatting, no `End If` written for you. The debugger stops at breakpoints in Visual
 Basic code as far as the PDB carries it (untested), but evaluates expressions as C#.
 
 ## What stands in the way
 
-**Roslyn's server carries no Visual Basic.** Passenger's C# help is Roslyn's language server
-(`roslyn-language-server.<rid>`, `RoslynServerVersion` in `Directory.Packages.props`). The package at 5.13 holds
-`Microsoft.CodeAnalysis.CSharp*.dll` and no `Microsoft.CodeAnalysis.VisualBasic*.dll`, so stage 2 has to bring Visual
-Basic's assemblies into the server's folder at the server's own version, and it is not known that the server then
-composes them and loads a `.vbproj`. Passenger's extension inside the server already exports its handlers for both
+**Roslyn's server carries no Visual Basic, and nuget.org has none that fits it.** Passenger's C# help is Roslyn's
+language server (`roslyn-language-server.<rid>`, `RoslynServerVersion` in `Directory.Packages.props`). The package at
+5.13.0-1.26514.10 holds `Microsoft.CodeAnalysis.CSharp*.dll` and no `Microsoft.CodeAnalysis.VisualBasic*.dll`. Visual
+Basic's Features and Workspaces assemblies reach into Roslyn's internals, so they must be of the server's very build,
+and nuget.org, the only source Passenger restores from, carries them at 5.9.0 and 5.12.0 but at no build a server
+package matches (the servers there are 5.11.0, 5.12.0-1.x and 5.13.0-1.x). So stage 2 cannot simply add assemblies to
+the carried server. The ways left, each a decision for the project's owner:
+
+- **A language service of Passenger's own for Visual Basic**, a helper process holding Roslyn's public workspace API
+  from nuget.org at one version (`Microsoft.CodeAnalysis.VisualBasic.Features`, `.Workspaces.MSBuild`): completion,
+  diagnostics, navigation, rename and Find Usages are all public API there. It keeps every rule (nuget.org alone, MIT)
+  and costs the most work: a second server beside Roslyn's, with its own project loading.
+- **Visual Basic's assemblies of the server's build from the .NET team's own feed** (`dotnet-tools` on Azure DevOps),
+  which breaks the rule that packages come from nuget.org alone, and still leaves open whether the server composes them
+  and loads a `.vbproj`.
+- **Waiting** for a server package and Visual Basic packages of one build on nuget.org.
+
+The in-process parser is no obstacle: `Microsoft.CodeAnalysis.VisualBasic` 5.9.0, the version Passenger's C# parser is
+at, is on nuget.org. Passenger's extension inside the server already exports its handlers for both
 languages (`ExportCSharpVisualBasicLspServiceFactory`), and `ServerPlaces` already counts `.vb` among Roslyn's files.
 
 **The App asks for C# by name.** `Language.CSharp` is compared in 19 places and `".cs"` is written in 56 files; the
@@ -69,10 +95,10 @@ in-process parser that folds, indents and helps typing is C#'s alone (`CSharpPar
 ## The stages
 
 1. **The language** (done): the entry, the grammar, comments, typing, tests.
-2. **Language help through Roslyn's server**: Visual Basic's assemblies in the server, `.vb` files opened in it,
-   completion, diagnostics, navigation, rename, Find Usages, semantic colours.
-3. **The editor's own help**: folding, the block ends written as you type, indentation, Reformat Code, New Item's
-   templates, the Tests window's finder.
+2. **Language help** (blocked on the decision above): `.vb` files answered for by a Roslyn workspace, with completion,
+   diagnostics, navigation, rename, Find Usages and semantic colours.
+3. **The editor's own help**: folding (done); still to do, the block ends written as you type, indentation, Reformat
+   Code, New Item's templates and the Tests window's finder.
 4. **The debugger**: expressions in Watches, hover and conditional breakpoints compiled as Visual Basic.
 
 ## Building on a machine that has only the .NET 10 SDK

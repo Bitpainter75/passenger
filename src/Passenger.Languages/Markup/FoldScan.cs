@@ -39,6 +39,9 @@ public sealed class FoldScan : IFoldFinder, IDisposable
     /// <summary>A JSON file's folds: each object and array over several lines, and each block comment.</summary>
     public static FoldScan Json(TextDocument document) => new(document, JsonFolds.Find);
 
+    /// <summary>A Visual Basic file's folds: each block to its End, #Region, the Imports and the comments over several lines.</summary>
+    public static FoldScan VisualBasic(TextDocument document) => new(document, VisualBasicFolds.Find);
+
     public IReadOnlyList<FoldRegion> Folds { get; private set; } = [];
 
     public event EventHandler? FoldsChanged;
