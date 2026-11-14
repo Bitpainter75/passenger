@@ -1117,3 +1117,15 @@ projects (https://github.com/godotengine/godot-demo-projects, `mono/squash_the_c
 b761b4cd5718a7118f2c95eb55f181d0a5f004f1), running in the Game window: © Godot Engine contributors, MIT licence, its
 score and words in its Montserrat, under the SIL Open Font License 1.1. `tools/site-shots/shots.sh` fetches the game to
 take them; Passenger carries none of it.
+
+## The AppImage runtime
+
+`Passenger-linux-x64.AppImage` and `Passenger-linux-arm64.AppImage`, which `just package-appimage` makes
+(`tools/package-appimage.sh`), each begin with the AppImage project's runtime, the program that mounts the image after
+it and starts the app: `runtime-x86_64` or `runtime-aarch64` of AppImage/type2-runtime
+(https://github.com/AppImage/type2-runtime) at its release 20251108, unchanged, held to its SHA-256 as it is
+downloaded. MIT, Copyright (c) 2004-23 probonopd. Its build (`src/runtime/Makefile`,
+`scripts/common/install-dependencies.sh`) links it statically, on Alpine Linux, with squashfuse 0.5.2 (BSD-2-Clause),
+libfuse 3.15.0 with the runtime's own patch (LGPL-2.1), zstd (BSD-3-Clause), zlib (Zlib), mimalloc (MIT) and musl
+(MIT); the sources of each, libfuse's patch among them, are those its repository names at that release. Only the
+AppImage carries it, no other package of Passenger.

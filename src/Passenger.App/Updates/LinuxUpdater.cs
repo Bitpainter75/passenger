@@ -36,6 +36,9 @@ public sealed partial class LinuxUpdater : Updater
     private readonly string running;
     private readonly IReadOnlyDictionary<string, string> environment;
     private readonly Func<string, Task> start;
+
+    /// <summary>The AppImage file this copy runs from, mounted read-only for as long as it runs; or null.</summary>
+    private readonly string? appImage;
     private Task<UpdatedElsewhere?>? elsewhere;
 
     /// <summary>pkexec, found as the update was made ready, by which Restart to Update installs it as root; or null.</summary>
@@ -46,8 +49,9 @@ public sealed partial class LinuxUpdater : Updater
     /// through pkexec, <paramref name="environment"/> what install.sh is given beside this process's own variables (a
     /// test's HOME), <paramref name="start"/> how Restart to Update starts it (its launcher, apart, by default).</summary>
     public LinuxUpdater(string install, string staging, InstallKind kind, bool mayAsk = true, string? running = null,
-        IReadOnlyDictionary<string, string>? environment = null, Func<string, Task>? start = null)
+        IReadOnlyDictionary<string, string>? environment = null, Func<string, Task>? start = null, string? appImage = null)
     {
+        this.appImage = appImage;
         Folder = install;
         Staging = staging;
         this.kind = kind;
@@ -96,8 +100,14 @@ public sealed partial class LinuxUpdater : Updater
             : home is { Length: > 0 } && PathNames.Same(install, PathNames.Canonical(Path.Combine(home, ".local", "opt", "passenger"))) ? InstallKind.PerUser
             : InstallKind.Unpacked;
         why = string.Empty;
-        return new LinuxUpdater(install, staging, kind);
+        return new LinuxUpdater(install, staging, kind, appImage: AppImageOf(install));
     }
+
+    /// <summary>The AppImage a copy in <paramref name="install"/> runs from, as its runtime says (APPIMAGE the file, APPDIR
+    /// the folder it mounted it at); null for a copy that is no AppImage's, one started from inside an AppImage too.</summary>
+    private static string? AppImageOf(string install) =>
+        Environment.GetEnvironmentVariable("APPIMAGE") is { Length: > 0 } image && Environment.GetEnvironmentVariable("APPDIR") is { Length: > 0 } mounted
+            && PathNames.Same(install, PathNames.Canonical(mounted)) ? image : null;
 
     public override Task<UpdatedElsewhere?> ElsewhereAsync(CancellationToken cancel)
     {
@@ -115,6 +125,11 @@ public sealed partial class LinuxUpdater : Updater
         if (await PackageOfAsync(executable, cancel).ConfigureAwait(false) is { } package)
         {
             return new UpdatedElsewhere($"This copy of Passenger is {package}: the system's package manager updates it.", Download: false);
+        }
+        if (appImage is not null)
+        {
+            return new UpdatedElsewhere($"This copy of Passenger is the AppImage {appImage}, which nothing can write while it runs, "
+                + "so it is updated by hand: a newer AppImage put in its place.", Download: false);
         }
         if (kind == InstallKind.Unpacked || !File.Exists(Path.Combine(Folder, "install.sh")))
         {
