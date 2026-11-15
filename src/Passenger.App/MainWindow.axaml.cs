@@ -117,6 +117,7 @@ public partial class MainWindow : IdeWindow
         AddUpdates();
         AddWhatsNew();
         AddAgents();
+        AddAgentWindow();
         AddDiscord();
         AddShutdown();
         AddOwnWindows();

@@ -241,6 +241,10 @@ Projects in `src/`; `find_symbol` finds the rest from the names here. A pointer'
 - `Passenger.VisualBasic`: Passenger's own language server for Visual Basic (docs/visual-basic.md), Roslyn's public
   workspace API at the C# parser's version, never Roslyn's server (it holds no Visual Basic); the App runs it as a web
   language's server (`WebServerKind.VisualBasic`), fed the project host's builds.
+- `Passenger.Agents`: the Agent window's agents (Claude Code, Codex), each the person's own program on the PATH, never
+  one carried: its protocol read as text (`AgentWire`, no process or clock, so a recorded conversation is a unit test),
+  the program (`AgentSession`) and what a window shows (`AgentTranscript`). Claude Code's interrupted turn ends as a
+  failed `result` naming no interrupt, and a control request left unanswered holds its turn for good: refuse it.
 - `Passenger.Dap`, `Passenger.Debugger`, `Passenger.DebugAdapter`: Passenger's own debugger behind its own DAP.
   `Passenger.ContainerTools` runs inside a Linux container, carried only in the release's archives.
 - `Passenger.Profiler`: EventPipe and ClrMD (its Azure packages stay carried; its DAC stays loaded once used: unloading
@@ -365,6 +369,9 @@ Projects in `src/`; `find_symbol` finds the rest from the names here. A pointer'
   `SolutionEdits`/`ProjectEdits` change files as text, never `dotnet sln`/`add reference`;
   templates drive what is offered, Passenger's config only layered on (`ProjectTemplates`); only an installed copy
   updates itself, a package manager's left to it; What's New from `docs/release-notes/X.Y.Z.md`.
+- **Agent window.** `AgentChat` (a window's conversation with one agent, ended as the window leaves its folder),
+  `AgentView`; the agent is given the window as its MCP server (`--mcp-attach` its process id) and joins it as any agent
+  does, asked as any is. A question of the agent's is answered in the transcript, never by a dialog or a default button.
 - **MCP.** `PassengerTools` (every tool on the UI thread), `McpHost`, `McpProxy`, `AgentConnection`. A relay follows an
   update or, on Windows, ends, signalling the relay alone, never its agent's process group; `godot_editor` makes each
   change one `EditorUndoRedoManager` action.

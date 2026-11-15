@@ -23,6 +23,7 @@
     <!-- The JSON-RPC conversations Passenger.Lsp's formatter is held to, played in memory. -->
     <PackageReference Include="StreamJsonRpc" />
     <ProjectReference Include="../../src/Passenger.Core/Passenger.Core.csproj" />
+    <ProjectReference Include="../../src/Passenger.Agents/Passenger.Agents.csproj" />
     <ProjectReference Include="../../src/Passenger.Dap/Passenger.Dap.csproj" />
     <ProjectReference Include="../../src/Passenger.Debugger/Passenger.Debugger.csproj" />
     <ProjectReference Include="../../src/Passenger.Packages/Passenger.Packages.csproj" />

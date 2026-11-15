@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The coding agents the Agent window talks to (Claude Code, Codex): each one's own protocol read into one
+       conversation, and the program speaking it. No UI. -->
+  <PropertyGroup>
+    <RootNamespace>Passenger.Agents</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ChildProcesses, by which every program Passenger starts ends with it, and JsonMembers for another program's JSON. -->
+    <ProjectReference Include="../Passenger.Core/Passenger.Core.csproj" />
+  </ItemGroup>
+</Project>

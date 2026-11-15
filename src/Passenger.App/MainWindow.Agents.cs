@@ -163,6 +163,7 @@ public partial class MainWindow
     /// (<paramref name="opener"/>) stays. Those that stay are asked again before their first use of each tool there.</summary>
     private void AgentsGoTo(string? folder, Mcp.AgentConnection? opener)
     {
+        LeaveAgentChats();
         foreach (Window asking in agentDialogs.Where(d => d.IsVisible).ToList())
         {
             leftBehind.Add(asking);

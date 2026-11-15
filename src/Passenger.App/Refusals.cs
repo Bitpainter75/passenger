@@ -18,6 +18,21 @@ public static class Refusals
     /// <summary>The window has no folder open (a solution, a project or a folder of files).</summary>
     public const string NoFolder = "No folder is open";
 
+    /// <summary>An agent's program is not on the PATH, so the Agent window has nothing to talk to.</summary>
+    public static string AgentNotInstalled(string agent, string command) => $"{agent} is not installed: no {command} is on the PATH";
+
+    /// <summary>The agent chosen in the Agent window is at work on a turn, which Stop ends.</summary>
+    public static string AgentWorks(string agent) => $"{agent} is still at work: Stop ends its turn";
+
+    /// <summary>The agent chosen in the Agent window has no turn under way to stop.</summary>
+    public static string AgentIdle(string agent) => $"{agent} is not at work";
+
+    /// <summary>The Agent window's box holds nothing to send.</summary>
+    public const string NoPrompt = "Nothing is written in the Agent window to send";
+
+    /// <summary>The agent chosen in the Agent window has no conversation to begin anew.</summary>
+    public static string NoConversation(string agent) => $"No conversation with {agent} has begun";
+
     /// <summary>The folder open has no solution (a project opened alone, or a folder of files).</summary>
     public const string NoSolution = "No solution is open";
 

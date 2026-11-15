@@ -482,6 +482,12 @@
           "xunit.v3.runner.common": "[3.2.2]"
         }
       },
+      "passenger.agents": {
+        "type": "Project",
+        "dependencies": {
+          "Passenger.Core": "[0.3.4, )"
+        }
+      },
       "passenger.core": {
         "type": "Project",
         "dependencies": {

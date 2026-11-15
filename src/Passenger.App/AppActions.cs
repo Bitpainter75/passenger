@@ -155,6 +155,15 @@ public static class AppActions
     public const string BundleMigrations = "app.migrations.bundle";
     public const string MigrationsFix = "app.migrations.fix";
 
+    // The Agent window, where the person talks to a coding agent installed on the machine (Claude Code, Codex), its
+    // prompt sent, its turn stopped, its conversation begun anew, and each agent chosen: no keys of Rider's.
+    public const string ShowAgent = "app.showAgent";
+    public const string AgentSend = "app.agent.send";
+    public const string AgentStop = "app.agent.stop";
+    public const string AgentNew = "app.agent.new";
+    public const string AgentClaudeCode = "app.agent.claudeCode";
+    public const string AgentCodex = "app.agent.codex";
+
     // The Containers window over the person's container engine and its actions on the row chosen there: no keys of Rider's,
     // whose Services window has none in its Visual Studio keymaps.
     public const string ShowContainers = "app.showContainers";
