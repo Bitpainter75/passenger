@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The SQL Server window's servers: connections, what a database holds, scripts run and rows changed, and the T-SQL
+       Passenger writes for a table's design. No UI. -->
+  <PropertyGroup>
+    <RootNamespace>Passenger.Sql</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Passenger.Core/Passenger.Core.csproj" />
+    <!-- Microsoft's own client for SQL Server (MIT), which speaks TDS on every system Passenger runs on. -->
+    <PackageReference Include="Microsoft.Data.SqlClient" />
+    <!-- BACPAC export and import (SqlServer.ExportAsync, ImportAsync): the owner's exception to the open-source rule. -->
+    <PackageReference Include="Microsoft.SqlServer.DacFx" />
+    <!-- DacFx names MSBuild 15.9 for its build tasks, which a .bacpac never runs: named here at the host's version and
+         left out whole, so no MSBuild is carried with the IDE. -->
+    <PackageReference Include="Microsoft.Build" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Build.Utilities.Core" ExcludeAssets="all" PrivateAssets="all" />
+    <!-- Left out whole, as neither is open source nor needed: DacFx's spatial types (pre-release terms), without which a
+         .bacpac's geography and hierarchyid columns still travel, and SqlClient's native networking for Windows, in
+         whose place SqlServer turns on the managed one every other system uses. -->
+    <PackageReference Include="Microsoft.SqlServer.Types" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Data.SqlClient.SNI.runtime" ExcludeAssets="all" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

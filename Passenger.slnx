@@ -6,6 +6,7 @@
     <Project Path="src/Passenger.Core/Passenger.Core.csproj" />
     <Project Path="src/Passenger.Agents/Passenger.Agents.csproj" />
     <Project Path="src/Passenger.Dap/Passenger.Dap.csproj" />
+    <Project Path="src/Passenger.Sql/Passenger.Sql.csproj" />
     <Project Path="src/Passenger.DebugAdapter/Passenger.DebugAdapter.csproj" />
     <Project Path="src/Passenger.VisualBasic/Passenger.VisualBasic.csproj" />
     <Project Path="src/Passenger.Debugger/Passenger.Debugger.csproj" />

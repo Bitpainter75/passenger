@@ -117,6 +117,15 @@
     <!-- The app's JoinableTaskFactory (Synchronously.cs), at the version StreamJsonRpc takes. -->
     <PackageVersion Include="Microsoft.VisualStudio.Threading.Only" Version="18.7.23" />
     <PackageVersion Include="Porta.Pty" Version="2.2.4" />
+    <!-- The SQL Server window's client: Microsoft's own, which speaks TDS on every system Passenger runs on. -->
+    <PackageVersion Include="Microsoft.Data.SqlClient" Version="7.1.2" />
+    <!-- A database written to and read from a .bacpac, which only Microsoft's own framework does: carried by the
+         owner's exception to the open-source rule (Microsoft Software License Terms, distributable). -->
+    <PackageVersion Include="Microsoft.SqlServer.DacFx" Version="170.5.96" />
+    <!-- Named by DacFx and by SqlClient alone, at the versions they take, to be left out of what is carried
+         (Passenger.Sql): neither is open source. -->
+    <PackageVersion Include="Microsoft.SqlServer.Types" Version="170.1000.7" />
+    <PackageVersion Include="Microsoft.Data.SqlClient.SNI.runtime" Version="7.1.2" />
     <!-- A Godot game's Ogg Vorbis and MP3 sounds decoded to WAV for the system's player; NVorbis's 0.10 line, as 1.0 is
          still a pre-release. -->
     <PackageVersion Include="NVorbis" Version="0.10.5" />
@@ -136,6 +145,8 @@
   <ItemGroup>
     <PackageVersion Include="Microsoft.Build" Version="17.11.48" />
     <PackageVersion Include="Microsoft.Build.Framework" Version="17.11.48" />
+    <!-- Named by DacFx alone (Passenger.Sql), at MSBuild's version above, and left out of what is carried. -->
+    <PackageVersion Include="Microsoft.Build.Utilities.Core" Version="17.11.48" />
     <PackageVersion Include="Microsoft.Build.Locator" Version="1.10.2" />
   </ItemGroup>
   <!-- Roslyn's server written again without Visual Studio Telemetry's session (tools/Passenger.RoslynPatch), a tool of

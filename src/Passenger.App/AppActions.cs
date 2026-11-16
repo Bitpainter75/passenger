@@ -164,6 +164,28 @@ public static class AppActions
     public const string AgentClaudeCode = "app.agent.claudeCode";
     public const string AgentCodex = "app.agent.codex";
 
+    // The SQL Server window over the servers the person connects to: a connection made, let go of and forgotten, what
+    // it holds read again, a table made, designed and dropped, a view made and changed, a table's or view's rows
+    // opened, and the script written there run and stopped. No keys of Rider's, whose database tools are a plugin's.
+    public const string ShowSqlServer = "app.showSqlServer";
+    public const string SqlConnect = "app.sql.connect";
+    public const string SqlDisconnect = "app.sql.disconnect";
+    public const string SqlForget = "app.sql.forget";
+    public const string SqlRefresh = "app.sql.refresh";
+    public const string SqlExecute = "app.sql.execute";
+    public const string SqlStop = "app.sql.stop";
+    public const string SqlOpenData = "app.sql.openData";
+    public const string SqlNewTable = "app.sql.newTable";
+    public const string SqlNewView = "app.sql.newView";
+    public const string SqlDesign = "app.sql.design";
+    public const string SqlDrop = "app.sql.drop";
+
+    // A database backed up to and restored from a file on the server's disk, and written to and made of a .bacpac here.
+    public const string SqlBackup = "app.sql.backup";
+    public const string SqlRestore = "app.sql.restore";
+    public const string SqlExport = "app.sql.exportBacpac";
+    public const string SqlImport = "app.sql.importBacpac";
+
     // The Containers window over the person's container engine and its actions on the row chosen there: no keys of Rider's,
     // whose Services window has none in its Visual Studio keymaps.
     public const string ShowContainers = "app.showContainers";

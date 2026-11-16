@@ -118,6 +118,7 @@ public partial class MainWindow : IdeWindow
         AddWhatsNew();
         AddAgents();
         AddAgentWindow();
+        AddSqlServer();
         AddDiscord();
         AddShutdown();
         AddOwnWindows();

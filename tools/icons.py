@@ -137,6 +137,9 @@ ICONS = [
     # The Agent window, where the person talks to a coding agent, and its box's Send.
     ("Agent", "Bot", "20_regular"),
     ("Send", "Send", "20_regular"),
+    # The SQL Server window's stripe button: a server, whose databases it lists.
+    ("SqlServer", "Server", "20_regular"),
+    ("Table", "Table", "20_regular"),
     # A web project's web root (wwwroot) in the Explorer: the folder whose files are served on the web.
     ("WebRootFolder", "Folder Globe", "20_regular"),
     # A signed commit's mark in the Git log: a good signature, one unverified, a bad one and one expired.

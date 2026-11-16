@@ -29,4 +29,5 @@ public static class ToolWindowIds
     public const string Aspire = "aspire";
     public const string Migrations = "migrations";
     public const string Agent = "agent";
+    public const string SqlServer = "sqlServer";
 }

@@ -83,8 +83,9 @@ tests run with a 4 MB `System.GC.Gen0MaxBudget`, so a young collection fits a 14
   change (`just notices` and CI fail on a package missed): a package by NuGet id with its licence and copyright as
   stated, copied source by file and origin, assets after the marker line, a new SPDX text in
   `tools/Passenger.Notices/Licenses`, a package inside Roslyn's server in its table. MIT first. The owner's exceptions:
-  Visual Studio Telemetry and Utilities.Internal inside Roslyn's server (Razor needs them), and the TextMate bundle
-  licence.
+  Visual Studio Telemetry and Utilities.Internal inside Roslyn's server (Razor needs them), the TextMate bundle
+  licence, and Microsoft.SqlServer.DacFx (a .bacpac needs it; Microsoft's terms, distributable), of whose packages
+  MSBuild, Microsoft.SqlServer.Types and SqlClient's native SNI are restored and never carried.
 - **Every program Passenger starts goes through `ChildProcesses`**, so none outlives the IDE (`Lifeline`): `Command`,
   `DotnetCommand`, `HelperCommand` (Passenger's helpers on Passenger's runtime, never the machine's), `ConservingMemory`
   for Roslyn's server and the project host but never the debug adapter, whose program would inherit it, `DotnetQuestion`
@@ -245,6 +246,10 @@ Projects in `src/`; `find_symbol` finds the rest from the names here. A pointer'
   one carried: its protocol read as text (`AgentWire`, no process or clock, so a recorded conversation is a unit test),
   the program (`AgentSession`) and what a window shows (`AgentTranscript`). Claude Code's interrupted turn ends as a
   failed `result` naming no interrupt, and a control request left unanswered holds its turn for good: refuse it.
+- `Passenger.Sql`: the SQL Server window's servers (Microsoft.Data.SqlClient, whose types never leave the project: a
+  failure is a `SqlFailure`), the T-SQL Passenger writes as text alone (`SqlScripts`: a name in brackets, a typed value
+  a parameter), a .bak by BACKUP and RESTORE on the server's own disk, a .bacpac by DacFx, which works on the calling
+  thread, speaks the machine's language unless told and sends telemetry unless `DACFX_TELEMETRY_OPTOUT` is set.
 - `Passenger.Dap`, `Passenger.Debugger`, `Passenger.DebugAdapter`: Passenger's own debugger behind its own DAP.
   `Passenger.ContainerTools` runs inside a Linux container, carried only in the release's archives.
 - `Passenger.Profiler`: EventPipe and ClrMD (its Azure packages stay carried; its DAC stays loaded once used: unloading
@@ -372,6 +377,9 @@ Projects in `src/`; `find_symbol` finds the rest from the names here. A pointer'
 - **Agent window.** `AgentChat` (a window's conversation with one agent, ended as the window leaves its folder),
   `AgentView`; the agent is given the window as its MCP server (`--mcp-attach` its process id) and joins it as any agent
   does, asked as any is. A question of the agent's is answered in the transcript, never by a dialog or a default button.
+- **SQL Server window.** `SqlServerView` (its tree read as a row opens, a script and its results, a table's rows written
+  by their key, one row a change or none), `SqlTableDialog`, `SqlServersState` (never a password: asked at each connect,
+  kept in the connection alone). A change no Undo takes back (a drop, a restore, deleted rows) asks first.
 - **MCP.** `PassengerTools` (every tool on the UI thread), `McpHost`, `McpProxy`, `AgentConnection`. A relay follows an
   update or, on Windows, ends, signalling the relay alone, never its agent's process group; `godot_editor` makes each
   change one `EditorUndoRedoManager` action.

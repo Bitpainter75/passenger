@@ -45,6 +45,7 @@ public sealed class StateStore
         Previews = new(Path.Combine(root, "previews.json"));
         LiveTree = new(Path.Combine(root, "liveTree.json"));
         Dotnet = new(Path.Combine(root, "dotnet.json"));
+        SqlServers = new(Path.Combine(root, "sqlServers.json"));
         // Before this process writes any: a change is written a moment after it is made, and only through this store.
         UsedBefore = new[] { Path.Combine(root, SettingsFile), Layout.Path, Recent.Path, Updates.Path }.Any(File.Exists)
             || Directory.Exists(Path.Combine(root, "workspaces"));
@@ -124,6 +125,9 @@ public sealed class StateStore
     /// <summary>What the person said of the machine's .NET: the installations whose off-PATH word they hid.</summary>
     public StateDocument<DotnetState> Dotnet { get; }
 
+    /// <summary>The SQL Servers the person connected to, to connect to again: never a password.</summary>
+    public StateDocument<Passenger.App.Sql.SqlServersState> SqlServers { get; }
+
     /// <summary>A folder's own documents, held for a window that has the folder open or is opening it until it lets them go
     /// (<see cref="LetGo"/>); every window holding the folder shares them.</summary>
     public ProjectState Hold(string folder)
@@ -167,6 +171,7 @@ public sealed class StateStore
         Previews.Flush();
         LiveTree.Flush();
         Dotnet.Flush();
+        SqlServers.Flush();
         foreach ((ProjectState documents, _) in projects.Values)
         {
             documents.Flush();

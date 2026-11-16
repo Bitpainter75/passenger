@@ -25,6 +25,7 @@
     <ProjectReference Include="../../src/Passenger.Core/Passenger.Core.csproj" />
     <ProjectReference Include="../../src/Passenger.Agents/Passenger.Agents.csproj" />
     <ProjectReference Include="../../src/Passenger.Dap/Passenger.Dap.csproj" />
+    <ProjectReference Include="../../src/Passenger.Sql/Passenger.Sql.csproj" />
     <ProjectReference Include="../../src/Passenger.Debugger/Passenger.Debugger.csproj" />
     <ProjectReference Include="../../src/Passenger.Packages/Passenger.Packages.csproj" />
     <ProjectReference Include="../../src/Passenger.Profiler/Passenger.Profiler.csproj" />
