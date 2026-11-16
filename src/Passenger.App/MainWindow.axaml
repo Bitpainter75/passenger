@@ -77,6 +77,14 @@
                         <PathIcon Classes="toolbarStop" Data="{StaticResource Icon.Stop}" />
                     </Button>
                     <Border Classes="toolbarRule" />
+                    <!-- The Agent and SQL Server windows, a click away: each shows its window, as its stripe button does. -->
+                    <Button Name="AgentToolButton" Classes="tool" ToolTip.Tip="Agent: Claude Code and Codex">
+                        <PathIcon Data="{StaticResource Icon.Agent}" />
+                    </Button>
+                    <Button Name="SqlServerToolButton" Classes="tool" ToolTip.Tip="SQL Server">
+                        <PathIcon Data="{StaticResource Icon.SqlServer}" />
+                    </Button>
+                    <Border Name="WindowButtonsRule" Classes="toolbarRule" />
                     <Button Name="SearchButton" Classes="tool" ToolTip.Tip="Search everywhere">
                         <PathIcon Data="{StaticResource Icon.Search}" />
                     </Button>

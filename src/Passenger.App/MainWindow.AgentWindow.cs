@@ -71,6 +71,20 @@ public partial class MainWindow
             WhyNot = _ => AgentChat.Transcript.Entries.Count == 0 && !AgentChat.Runs ? Refusals.NoConversation(AgentChat.Program.Name) : null,
         });
         Closed += (_, _) => LeaveAgentChats();
+        SizeChanged += (_, sized) => ShowWindowButtons(sized.NewSize.Width);
+        ShowWindowButtons(Width);
+    }
+
+    /// <summary>The narrowest window whose toolbar shows the Agent and SQL Server windows' buttons: narrower, the names
+    /// beside them would lose their room, and each window's stripe button still shows it.</summary>
+    public const double WindowButtonsFrom = 960;
+
+    private void ShowWindowButtons(double width)
+    {
+        bool room = double.IsNaN(width) || width >= WindowButtonsFrom;
+        AgentToolButton.IsVisible = room;
+        SqlServerToolButton.IsVisible = room;
+        WindowButtonsRule.IsVisible = room;
     }
 
     /// <summary>Why the person cannot talk to an agent here, else null: no folder for it to work in, or no program of it.</summary>

@@ -124,7 +124,8 @@ public partial class MainWindow
         Dock.Actions = actions;
         Dock.Request = Request;
         foreach ((Button button, string id) in (ReadOnlySpan<(Button, string)>)[(BuildButton, A.Build), (RunButton, A.RunProgram), (DebugButton, A.Debug),
-            (ProfileButton, A.Profile), (HotReloadButton, A.ApplyHotReloadChanges), (StopButton, A.Stop), (SearchButton, A.GoToEverything), (SettingsButton, A.ShowSettings)])
+            (ProfileButton, A.Profile), (HotReloadButton, A.ApplyHotReloadChanges), (StopButton, A.Stop), (AgentToolButton, A.ShowAgent),
+            (SqlServerToolButton, A.ShowSqlServer), (SearchButton, A.GoToEverything), (SettingsButton, A.ShowSettings)])
         {
             ActionButtons.Bind(button, id, actions, action => Request(action));
         }
