@@ -345,7 +345,8 @@ public sealed class DebugSession
     /// and writes, and how it ended, which the adapter cannot tell of a program it did not start on macOS and Linux.</summary>
     public Run.TerminalRun? Terminal { get; private set; }
 
-    /// <summary>Why the session ended other than by the program ending or being stopped: the adapter crashed.</summary>
+    /// <summary>Why the session ended other than by the program ending or being stopped: the adapter crashed, or said the
+    /// runtime's debugging of the program failed.</summary>
     public string? Failure { get; private set; }
 
     /// <summary>Why the program ended with the place it ran in, when it did ("web-1 stopped": its container stopped, taking
@@ -417,6 +418,20 @@ public sealed class DebugSession
         StartAsync(OwnAdapter(place, elsewhere), place is null ? $"process {processId}" : $"process {processId} in {place.Where}", DapCommands.Attach,
             new AttachArguments { ProcessId = processId, JustMyCode = true, HotReload = hotReload ? true : null, Presentations = Godot.GodotValues.Presentations },
             breakpoints, lines, log, output, null, columns, starting, elsewhere, place, quiet);
+
+    /// <summary>Starts the adapter and attaches it to an app on a device through Passenger's relay in it, the app's start
+    /// waiting for it there: the relay's local address and token, and the build's copies of the app's assemblies, with the
+    /// store's breakpoints (none where <paramref name="quiet"/>, Run's for Hot Reload alone); <paramref name="starting"/> is
+    /// handed the session as it begins.</summary>
+    public static Task<DebugSession> AttachThroughRelayAsync(string program, Run.Devices.RelaySession relay, BreakpointStore breakpoints, BuiltLines lines, Action<string> log,
+        Action<OutputEvent> output, Func<string, int, string?, int?, int?>? columns = null, Action<DebugSession>? starting = null, bool hotReload = false, bool quiet = false) =>
+        StartAsync(OwnAdapter(null, elsewhere: true), program, DapCommands.Attach,
+            new AttachArguments
+            {
+                Relay = relay.Address, RelayModules = relay.Modules, RelayToken = relay.Token, JustMyCode = true, HotReload = hotReload ? true : null,
+                Presentations = Godot.GodotValues.Presentations,
+            },
+            breakpoints, lines, log, output, null, columns, starting, elsewhere: true, place: null, quiet);
 
     /// <summary>Attaches an adapter inside the IDE to a program another session runs (a Godot game's GDScript, over the game's
     /// own connection, <paramref name="engine"/> saying which files' breakpoints it takes), with the store's breakpoints;
@@ -659,7 +674,7 @@ public sealed class DebugSession
         {
             return;
         }
-        IdeLog.Write(IdeLog.Debugger, $"[{adapter.Name}] {Program} has gone, and its adapter did not say its debugging ended within {AdapterSilence.TotalSeconds:0} s: "
+        IdeLog.Write(IdeLog.Debugger, $"[{adapter.Name}] {Program} has gone, and its adapter did not say its debugging ended within {Durations.Said(AdapterSilence)}: "
             + "the session ends without it");
         FallbackUsed = true;
         programEnded = true;
@@ -906,11 +921,13 @@ public sealed class DebugSession
     /// <summary>A thread's frames, each source on this disk named as the IDE names its files: a PDB records a file as the
     /// build was given it (another letter case, an 8.3 name, a container's path the session's map names back), and its
     /// stops would otherwise miss the open file. Named off the caller's thread: a stop asks the disk twice for each frame
-    /// with a source, a hundred and more of them in an app's stack.</summary>
+    /// with a source, a hundred and more of them in an app's stack. A source a PDB names on a share or a device has no
+    /// path, so neither this nor anything shown from the frame asks for it.</summary>
     public async Task<IReadOnlyList<DapStackFrame>> StackTraceAsync(int threadId) =>
         [.. (await connection.RequestAsync<StackTraceResponse>(DapCommands.StackTrace, new StackTraceArguments(threadId)).ConfigureAwait(false)).StackFrames.Select(f =>
-            f.Source is { Path: { } named } source && ToIde(named) is var path && Path.IsPathFullyQualified(path) && File.Exists(path)
-                ? f with { Source = source with { Path = PathNames.Canonical(path) } }
+            f.Source is not { Path: { } named } source ? f
+                : ToIde(named) is var path && !FoundPaths.Askable(path) ? f with { Source = source with { Path = null } }
+                : Path.IsPathFullyQualified(path) && File.Exists(path) ? f with { Source = source with { Path = PathNames.Canonical(path) } }
                 : f)];
 
     public async Task<IReadOnlyList<DapScope>> ScopesAsync(int frameId) =>
@@ -1015,7 +1032,7 @@ public sealed class DebugSession
 
     /// <summary>Sends a file's breakpoints at their built lines; one on a line written since the build is refused here, as
     /// the debugger refuses a line with no code. The adapter keeps those sent as they were, hit counts and all. Run to
-    /// Cursor's line stops: its own breakpoint is sent there, or the one there sent stopping, its count going on.</summary>
+    /// Cursor's line stops: its own breakpoint is sent there, or the one there held for it, its count going on.</summary>
     private async Task SendBreakpointsAsync(string path)
     {
         // Muted, none is sent and each is as no debugger has said, though Run to Cursor's place still is.
@@ -1034,8 +1051,8 @@ public sealed class DebugSession
                 // A lambda's breakpoint is its own, stopping only inside the lambda.
                 if (requests[i].Line == target.At.Line && built[i].Column is null)
                 {
-                    // Its condition, hit count or going on set aside until the stop, which Run to Cursor makes whatever they say.
-                    requests[i] = requests[i] with { Condition = null, HitCondition = null, Suspend = true };
+                    // Held until the stop, which Run to Cursor makes whatever its condition, hit count or going on say.
+                    requests[i] = requests[i] with { RunTo = true };
                     held = true;
                 }
             }
@@ -1468,6 +1485,7 @@ public sealed class DebugSession
                 programEnded = true;
                 break;
             case DapEvents.Terminated:
+                Failure ??= body.Read<TerminatedEvent>().Failure;
                 programEnded = true;
                 IdeErrors.Observe(StopAsync());
                 break;

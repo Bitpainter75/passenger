@@ -33,6 +33,7 @@ public partial class MainWindow
         }, Docking.ToolAnchor.BottomLeft)
         {
             Action = A.ShowSqlServer,
+            Serves = ToolWindowServes.EveryFolder,
             Menus = [new MenuPlace("Tools", 0, 11)],
         });
         Sql(A.SqlConnect, "Connect to SQL Server…", view => view.ConnectAsync(), 0, 0, shows: true);

@@ -9,7 +9,7 @@ Windows, macOS and Linux ([installing](#installing)).
 <p align="center">
   <a href="https://passenger-ide.net">Website</a> •
   <a href="https://passenger-ide.net/#download">Download</a> •
-  <a href="docs/release-notes/0.3.4.md">What's new in 0.3.4</a> •
+  <a href="docs/release-notes/0.4.0.md">What's new in 0.4.0</a> •
   <a href="#what-it-does">What it does</a> •
   <a href="#installing">Installing</a> •
   <a href="#your-coding-agent-using-the-ide-as-you-do">Your coding agent</a> •
@@ -45,7 +45,7 @@ under MIT, for work and personal projects alike, with no account, no licence key
 
 Coming from Visual Studio? Its keys are the default, and VS Code's and IntelliJ IDEA's are a setting away, each as
 Rider's keymaps have it. On a Mac, where Visual Studio for Mac was retired in August 2024, Passenger is a full .NET IDE
-that runs natively on Apple Silicon.
+that runs natively on Apple Silicon and Intel Macs.
 
 What comes next is in the [milestones](https://github.com/Zaneris/passenger/milestones), the release in progress among
 them. The pictures here are of sample projects committed to this repository, in your system's light or dark.
@@ -166,8 +166,8 @@ connection string its AppHost never gives it is marked, with a fix that adds the
 The Requests window shows each request a running web app serves and the database commands it ran, with their times and
 rows, an N+1 or a slow query marked, for Run, Debug and Profile and for the services of a compose run or an AppHost:
 Passenger reads ASP.NET Core's and EF Core's own events, only while you look. The Migrations window lists each
-DbContext's migrations and whether the database has them, and fixes what would stop `dotnet ef` (the tool, the Design
-package, a provider behind) before it runs. The Endpoints window lists your `.http` files' requests and each web
+DbContext's migrations and whether the database has them, in the environment you choose (its run's, Staging, one you
+type), and fixes what would stop `dotnet ef` (the tool, the Design package, a provider behind) before it runs. The Endpoints window lists your `.http` files' requests and each web
 project's routes, read from its code with no build, and makes requests from the app's OpenAPI document. Turn on Collect
 logs and traces and a run's OpenTelemetry logs and traces show beside its console.
 
@@ -260,12 +260,12 @@ in each look's colours.
 
 [passenger-ide.net](https://passenger-ide.net/#download) has each system's download:
 
-- **macOS:** a disk image for Macs with Apple Silicon. Drag Passenger onto Applications.
+- **macOS:** a disk image for Macs with Apple Silicon, or one for Intel Macs. Drag Passenger onto Applications.
 - **Windows:** an installer for x64 or Arm64, which installs for you alone, with no administrator.
 - **Linux:** an archive for x64 or Arm64. Unpack it and run its `install.sh`, for you alone or with `--system` for
   everyone; the command is `passenger-ide`, so it never meets Phusion Passenger's `passenger`. Its
-  [Linux page](https://passenger-ide.net/linux) names the libraries it needs, and `install.sh` names your
-  distribution's font package where it finds no font.
+  [Linux page](https://passenger-ide.net/linux) names the libraries it needs; `install.sh` names your distribution's
+  font package where it finds no font, and refreshes fontconfig's cache where it lists none of those installed.
 
 A copy the installer, the disk image or `install.sh` put in place updates itself, then shows what's new. Passenger
 needs:
@@ -305,8 +305,11 @@ There are two ways in, each a flag on Passenger's own executable:
   of Passenger's windows), so its breakpoints and stops show in your editor and its runs in your Run window; its first
   call opens the folder in Passenger, starting it if need be, and it never joins a window on another folder. The window
   asks you before it lets an agent in (Allow, Don't allow, or Always for this folder), unless you have turned on
-  Settings | MCP Server | Enable MCP Server, and asks again the first time the agent uses a tool that changes anything.
-  A question not answered within two minutes comes back to the agent as nobody having answered.
+  Settings | MCP Server | Enable MCP Server, and asks again before each call of a tool that changes anything: Allow Once
+  for that call, or Allow for This Session for every call of that tool until the agent disconnects. An agent about to
+  make several changes can ask once for every tool, which Allow for This Session lets it use unasked until it
+  disconnects; Deny keeps each tool asking. A question not answered within two minutes comes back to the agent as nobody
+  having answered.
 - **`--mcp FOLDER`** starts a Passenger of the agent's own with no window, over a folder or solution, for work it does
   alone. It asks nothing, so it suits an agent you leave to work while you are away.
 
@@ -366,13 +369,14 @@ Building needs the .NET 11 SDK (11.0.100 or a later 11.0 SDK, as [`global.json`]
 
 ```sh
 just build                 # Debug build; warnings are errors
-just run [PATH]            # run it on a folder or solution (--theme dark|light, --look passenger, harbour, sorbet…)
+just run [PATH]            # run it on a folder or solution (--theme dark|light, --look passenger, cubicle, harbour… or SOURCE::NAME)
 just test [FILTER]         # every test, the IDE driven whole on Avalonia's headless platform, or those matching;
                            # the results in artifacts/test-results
 just screenshot shell.png  # draw the main window to a PNG off-screen (--size 1600x1000 --scale 2)
 just mcp [FOLDER]          # Passenger as an MCP server over a folder, from a clone of the last build
-just publish osx-arm64     # a self-contained Release build (win-x64, win-arm64, linux-x64, linux-arm64 too)
-just package-mac           # the macOS disk image, Apple Silicon; signed with PASSENGER_SIGN_IDENTITY, else ad hoc
+just publish osx-arm64     # a self-contained Release build (osx-x64, win-x64, win-arm64, linux-x64, linux-arm64 too)
+just package-mac           # the macOS disk image, Apple Silicon (or osx-x64, Intel); signed with
+                           # PASSENGER_SIGN_IDENTITY, else ad hoc
 just package-win win-x64   # the Windows installer (or win-arm64), unsigned unless tools/package-win.sh's variables sign it
 just package-linux         # the Linux archive with its install.sh (linux-x64, or linux-arm64), as site/linux.html uses it
 just package-appimage      # the Linux AppImage, one file run as it is (linux-x64, or linux-arm64); needs squashfs-tools

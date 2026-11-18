@@ -1,3 +1,4 @@
+using Passenger.Core;
 using Passenger.Dap;
 
 namespace Passenger.DebugAdapter;
@@ -68,6 +69,8 @@ public static class AdapterProgram
         try
         {
             Passenger.Debugger.Extensions.EvaluationTimeout = AdapterEnvironment.EvaluationTimeout;
+            Passenger.Debugger.ManagedDebugger.LateYield = AdapterEnvironment.LateYield;
+            Passenger.Debugger.ManagedDebugger.FailAtModule = AdapterEnvironment.FailAtModule;
             _ = Passenger.Core.Waits.Scale;
         }
         catch (FormatException error)
@@ -116,7 +119,7 @@ public static class AdapterProgram
         TimeSpan limit = Passenger.Core.Waits.Of(AbortLimit + Passenger.Debugger.Extensions.EvaluationTimeout);
         if (await Task.WhenAny(aborted, Task.Delay(limit)) != aborted)
         {
-            Console.Error.WriteLine($"The program was not let go within {limit.TotalSeconds:0} s of the client's end: the adapter exits without it");
+            Console.Error.WriteLine($"The program was not let go within {Durations.Said(limit)} of the client's end: the adapter exits without it");
             Log("Abort: not done in time; exiting without it");
         }
         Log("Exiting");

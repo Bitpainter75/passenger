@@ -670,7 +670,7 @@ public sealed class RunConfigurationsTests : IClassFixture<RestoredFolders>, IDi
             Ui.Settle();
             Ui.ClickRow(window, window.ExplorerView.Tree.Rows.First(r => r.Name.StartsWith("Hello", StringComparison.Ordinal)));
             Ui.Run(window, Passenger.Editor.EditorActions.Undo);
-            Assert.Equal(["Undo Save Greeting as a Launch Profile? It changes launchSettings.json, the Properties folder and the run configuration Greeting."], asked);
+            Assert.Equal(["Undo Save Greeting as a Launch Profile? It changes the Properties folder and the run configuration Greeting, and deletes launchSettings.json."], asked);
             Assert.False(File.Exists(settingsFile) || Directory.Exists(properties), "Undo left launchSettings.json or the Properties folder made for it");
             Assert.Equal(["Hello", "Greeting"], Names(window));
             Assert.True(window.Configuration is { Name: "Greeting", Generated: false, BuildBeforeLaunch: false },
@@ -996,6 +996,53 @@ public sealed class RunConfigurationsTests : IClassFixture<RestoredFolders>, IDi
         }
     }
 
+    /// <summary>A program drawing with Spectre.Console, itself or through a library it references, is generated running in
+    /// the terminal, Edit Configurations saying why, since through the Run window's pipe its colours, live output and
+    /// prompts show as plain text or refuse; one of its launch profiles does too, Hello beside it keeps the Run window, and
+    /// Use external console turned off is kept with the folder over the default.</summary>
+    [AvaloniaFact]
+    public void A_program_drawing_with_a_terminal_package_is_generated_running_in_the_terminal_and_the_person_may_turn_it_off()
+    {
+        Write("Shop/Shop.csproj", TestProjects.Console().With("  <ItemGroup>\n    <PackageReference Include=\"Spectre.Console\" Version=\"0.57.2\" />\n  </ItemGroup>\n"));
+        Write("Shop/Program.cs", "System.Console.WriteLine(\"shop\");\n");
+        Write("Shop/Properties/launchSettings.json", "{ \"profiles\": { \"Shop\": { \"commandName\": \"Project\" } } }\n");
+        Write("Lib/Lib.csproj", TestProjects.Library().With("  <ItemGroup>\n    <PackageReference Include=\"Spectre.Console.Cli\" Version=\"0.57.2\" />\n  </ItemGroup>\n"));
+        Write("Tool/Tool.csproj", TestProjects.Console().With("  <ItemGroup>\n    <ProjectReference Include=\"../Lib/Lib.csproj\" />\n  </ItemGroup>\n"));
+        Write("Tool/Program.cs", "System.Console.WriteLine(\"tool\");\n");
+        Write("Shop.slnx", "<Solution>\n  <Project Path=\"Hello/Hello.csproj\" />\n  <Project Path=\"Shop/Shop.csproj\" />\n  <Project Path=\"Lib/Lib.csproj\" />\n  <Project Path=\"Tool/Tool.csproj\" />\n</Solution>\n");
+        MainWindow window = Keeping();
+        Ui.WaitFor(() => Names(window) is ["Hello", "Shop: Shop", "Tool"] && window.Configurations.Any(c => c.Console == ConsoleKind.Terminal),
+            () => $"Hello's, Shop's profile's and Tool's configurations, a drawing one in the terminal: {string.Join(", ", window.Configurations.Select(c => $"{c.Name} ({c.Console})"))}");
+        Assert.Equal([ConsoleKind.Internal, ConsoleKind.Terminal, ConsoleKind.Terminal], window.Configurations.Select(c => c.Console));
+        RunConfigurationsDialog dialog = window.ShowRunConfigurations();
+        Assert.True(dialog.Choose("Tool"));
+        Ui.Settle();
+        Assert.True(dialog.ConsoleBox.IsChecked == true, "A program drawing with Spectre.Console through its library is not run in the terminal, so its prompts refuse");
+        Assert.Contains("It runs in the terminal: Tool draws with Spectre.Console.Cli", dialog.Note, StringComparison.Ordinal);
+        Assert.True(dialog.Choose("Shop: Shop"));
+        Ui.Settle();
+        Assert.Contains("Shop draws with Spectre.Console,", dialog.Note, StringComparison.Ordinal);
+        dialog.ConsoleBox.IsChecked = false;
+        Ui.Settle();
+        Assert.DoesNotContain("draws with", dialog.Note, StringComparison.Ordinal);
+        Ui.Click(dialog.OkButton);
+        Ui.Settle();
+        Assert.Equal(ConsoleKind.Internal, window.Configurations.Single(c => c.Name == "Shop: Shop").Console);
+        window.Close();
+
+        MainWindow again = Keeping();
+        try
+        {
+            Ui.WaitFor(() => Names(again) is ["Hello", "Shop: Shop", "Tool"] && again.Configurations[2].Console == ConsoleKind.Terminal,
+                () => $"the configurations again: {string.Join(", ", again.Configurations.Select(c => $"{c.Name} ({c.Console})"))}");
+            Assert.True(again.Configurations[1].Console == ConsoleKind.Internal, "Use external console turned off for a drawing program was not kept with the folder");
+        }
+        finally
+        {
+            again.Close();
+        }
+    }
+
     /// <summary>Open browser, After launch: a launch profile's launchBrowser shows ticked with the URL its launchUrl and
     /// applicationUrl make, and opens that URL once the program listens; turned off in a copy, the copy opens none.</summary>
     [Gate]
@@ -1095,7 +1142,7 @@ public sealed class RunConfigurationsTests : IClassFixture<RestoredFolders>, IDi
     [AvaloniaFact]
     public void A_compose_configuration_added_in_the_dialog_shows_its_kinds_page_and_is_kept_with_its_files_and_choices()
     {
-        Write("compose.yaml", "services:\n  web:\n    image: busybox:1.37\n");
+        Write("compose.yaml", "services:\n  web:\n    image: busybox:1.38\n");
         Write("compose.override.yaml", "services:\n  web:\n    environment: { A: \"1\" }\n");
         MainWindow window = Keeping();
         RunConfigurationsDialog dialog = window.ShowRunConfigurations();
@@ -1299,7 +1346,7 @@ public sealed class RunConfigurationsTests : IClassFixture<RestoredFolders>, IDi
             Ui.Settle();
             Ui.ClickRow(window, window.ExplorerView.Tree.Rows.First(r => r.Name.StartsWith("Hello", StringComparison.Ordinal)));
             Heard(window, shared, () => Ui.Run(window, Passenger.Editor.EditorActions.Undo));
-            Assert.Equal(["Undo Change Launch Profiles? It changes Shop.slnLaunch and Shop.slnLaunch.user."], asked);
+            Assert.Equal(["Undo Change Launch Profiles? It changes Shop.slnLaunch, and deletes Shop.slnLaunch.user."], asked);
             Assert.True(File.ReadAllText(shared) == Launch && !File.Exists(own), "Undo did not put the launch profiles back as they were");
             Ui.WaitFor(() => Names(window).SequenceEqual(["Hello", "Tool: quiet", "Both", "Old"]), () => $"the configurations to follow the files taken back ({string.Join(", ", Names(window))})");
         }

@@ -40,7 +40,7 @@ internal static class Evaluation
         // Load-balanced, so each worker takes the next project in the order asked: the active file's first.
         Parallel.ForEach(Partitioner.Create(asked.Projects.ToArray(), loadBalance: true), parallel, path =>
         {
-            (EvaluatedProject outer, IReadOnlyList<string> frameworks) = Outer(path, collection, context, asked.Properties);
+            (EvaluatedProject outer, IReadOnlyList<string> frameworks) = Outer(path, collection, context, asked.Of(path));
             evaluated(outer);
             if (!outer.Complete)
             {
@@ -50,7 +50,7 @@ internal static class Evaluation
         List<(EvaluatedProject Outer, IReadOnlyList<string> Frameworks)> inOrder =
             [.. asked.Projects.Distinct(PathNames.Comparer).Where(targeted.ContainsKey).Select(p => targeted[p])];
         Parallel.ForEach(Partitioner.Create(inOrder.ToArray(), loadBalance: true), parallel,
-            t => evaluated(Frameworks(t.Outer, t.Frameworks, collection, context, asked.Properties)));
+            t => evaluated(Frameworks(t.Outer, t.Frameworks, collection, context, asked.Of(t.Outer.Path))));
     }
 
     /// <summary>A project's outer evaluation: all of it for a project with one framework (or none), and for a
@@ -128,7 +128,7 @@ internal static class Evaluation
         {
             Path = path,
             AssemblyName = NonEmpty(first.GetPropertyValue(MSBuildNames.AssemblyName)),
-            OutputType = NonEmpty(first.GetPropertyValue("OutputType")),
+            OutputType = NonEmpty(first.GetPropertyValue(MSBuildNames.OutputType)),
             TargetFrameworks = frameworks,
             IsTestProject = each.Any(p => p.GetPropertyValue("IsTestProject").Equals("true", StringComparison.OrdinalIgnoreCase)),
             IsAspireHost = each.Any(p => p.GetPropertyValue("IsAspireHost").Equals("true", StringComparison.OrdinalIgnoreCase)),
@@ -237,16 +237,42 @@ internal static class Evaluation
             .DistinctBy(p => p.Name, StringComparer.OrdinalIgnoreCase)];
         List<string> projects = [.. project.GetItems("ProjectReference")
             .Select(r => NonEmpty(r.GetMetadataValue(ProgramFiles.RefMetadata)) ?? r.GetMetadataValue("FullPath")).Distinct(PathNames.Comparer)];
+        List<string> shared = [.. project.GetItems("FrameworkReference").Select(r => r.EvaluatedInclude).Distinct(StringComparer.OrdinalIgnoreCase)];
         return new FrameworkDependencies(framework, packages, projects)
         {
-            FrameworkReferences = [.. project.GetItems("FrameworkReference").Select(r => r.EvaluatedInclude).Distinct(StringComparer.OrdinalIgnoreCase)],
+            FrameworkReferences = shared,
+            TargetingPacks = TargetingPacks(project, shared),
             WindowsTargeting = WindowsTargeting.Given(project),
             TargetPath = NonEmpty(project.GetPropertyValue(CarriedProperties.TargetPath)),
         };
     }
 
+    /// <summary>The reference pack of each shared framework a project references, as the SDK picks it: the
+    /// KnownFrameworkReference of that framework for the project's .NET version, its TargetingPackName and version.</summary>
+    private static List<TargetingPack> TargetingPacks(Project project, IReadOnlyList<string> shared)
+    {
+        string version = project.GetPropertyValue(MSBuildNames.TargetFrameworkVersion);
+        if (!project.GetPropertyValue("TargetFrameworkIdentifier").Equals(".NETCoreApp", StringComparison.OrdinalIgnoreCase) || version.Length < 2)
+        {
+            return [];
+        }
+        string target = "net" + version.TrimStart('v', 'V');
+        List<TargetingPack> packs = [];
+        foreach (ProjectItem known in project.GetItems("KnownFrameworkReference"))
+        {
+            if (shared.Contains(known.EvaluatedInclude, StringComparer.OrdinalIgnoreCase)
+                && known.GetMetadataValue(MSBuildNames.TargetFramework).Equals(target, StringComparison.OrdinalIgnoreCase)
+                && NonEmpty(known.GetMetadataValue("TargetingPackName")) is { } name && !packs.Any(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+            {
+                string pinned = known.GetMetadataValue("TargetingPackVersion");
+                packs.Add(new TargetingPack(known.EvaluatedInclude, name, pinned.Length == 0 || pinned.StartsWith("**", StringComparison.Ordinal) ? null : pinned));
+            }
+        }
+        return packs;
+    }
+
     /// <summary>The project's files, every evaluation's, each once: of the file item types and those the project names as
-    /// such, but those it hides (Visible false).</summary>
+    /// such, but those it hides (Visible false), each a shared project brings in naming its items file.</summary>
     internal static List<EvaluatedItem> Items(IReadOnlyList<Project> evaluations)
     {
         List<EvaluatedItem> items = [];
@@ -267,7 +293,9 @@ internal static class Evaluation
                     {
                         continue;
                     }
-                    items.Add(new EvaluatedItem(type, full, NonEmpty(item.GetMetadataValue("Link")), NonEmpty(item.GetMetadataValue("DependentUpon"))));
+                    string? shared = item.Xml?.ContainingProject?.FullPath is { } from && from.EndsWith(EvaluatedItem.SharedItemsExtension, StringComparison.OrdinalIgnoreCase)
+                        ? from : null;
+                    items.Add(new EvaluatedItem(type, full, NonEmpty(item.GetMetadataValue("Link")), NonEmpty(item.GetMetadataValue("DependentUpon")), shared));
                 }
             }
         }

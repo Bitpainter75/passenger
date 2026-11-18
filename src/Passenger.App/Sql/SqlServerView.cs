@@ -35,7 +35,7 @@ public sealed class SqlServerView : DockPanel
     private readonly Action<string> say;
     private readonly Window owner;
     private readonly TreeRows<SqlNode> rows = [];
-    private readonly ListBox tree = new() { Name = "SqlTree", Classes = { StyleClasses.Tree } };
+    private readonly TreeList tree = new() { Name = "SqlTree", Classes = { StyleClasses.Tree } };
     private readonly EmptyState empty = new();
     private readonly ComboBox targets = new() { Name = "SqlDatabase", MinWidth = 180, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBox script;
@@ -71,7 +71,7 @@ public sealed class SqlServerView : DockPanel
 
         tree.ItemsSource = rows;
         ReusedRows.Use(tree, Row);
-        TreeKeys.Attach<SqlNode>(tree, node => IdeErrors.Observe(ToggleAsync(node)), node =>
+        TreeKeys.Attach<SqlNode>(tree, toggle: node => IdeErrors.Observe(ToggleAsync(node)), open: node =>
         {
             if (node.Kind != SqlNodeKind.Object)
             {
@@ -80,17 +80,6 @@ public sealed class SqlServerView : DockPanel
             request(AppActions.SqlOpenData);
             return true;
         });
-        tree.DoubleTapped += (_, _) =>
-        {
-            if (tree.SelectedItem is SqlNode { Kind: SqlNodeKind.Object })
-            {
-                request(AppActions.SqlOpenData);
-            }
-            else if (tree.SelectedItem is SqlNode node)
-            {
-                IdeErrors.Observe(ToggleAsync(node));
-            }
-        };
         tree.SelectionChanged += (_, _) => Aim();
         ListMenus.Attach(tree, () => Chosen is not { } node ? [] : node.Kind switch
         {

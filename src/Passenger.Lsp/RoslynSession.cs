@@ -256,9 +256,24 @@ public sealed class RoslynSession : IAsyncDisposable, IDocumentHost
     }
 
     /// <summary>Has a server fed by the client let go of projects, which it answers from no longer; done once it has, with
-    /// whether it held any of them.</summary>
-    public async Task<bool> UnloadAsync(IReadOnlyList<string> projects) =>
-        Fed && projects.Count > 0 && await Server.RequestAsync<bool>(ProjectMethods.Unload, new UnloadProjectsParams(projects)).ConfigureAwait(false);
+    /// whether it held any of them. Nothing pulled before it answered stands (<see cref="LanguageServer.Changes"/>).</summary>
+    public async Task<bool> UnloadAsync(IReadOnlyList<string> projects)
+    {
+        if (!Fed || projects.Count == 0)
+        {
+            return false;
+        }
+        // Counted as sent and again once answered: a pull answered meanwhile may have read the projects still held.
+        Server.AnswersMoved();
+        try
+        {
+            return await Server.RequestAsync<bool>(ProjectMethods.Unload, new UnloadProjectsParams(projects)).ConfigureAwait(false);
+        }
+        finally
+        {
+            Server.AnswersMoved();
+        }
+    }
 
     /// <summary>Has a server fed by the client that has loaded its projects load them again, from the design-time builds
     /// it asks for, and waits for that load as for its first: <see cref="IsLoaded"/> until it says it has. For a server
@@ -323,6 +338,12 @@ public sealed class RoslynSession : IAsyncDisposable, IDocumentHost
         }
     }
 
+    /// <summary>Done once the source generators' runs the server has queued, as a load changing a project's analyzers queues
+    /// one, have run: before then it answers for a project's generated code as its generators made it before. With the
+    /// files its projects' builds write that it holds otherwise than the disk, which it has yet to hear of.</summary>
+    public Task<Roslyn.Extension.GeneratorsRan> GeneratorsRunAsync(CancellationToken cancel = default) =>
+        ExtensionAsync<Roslyn.Extension.GeneratorsRan>(Roslyn.Extension.Handlers.GeneratorsRun, new Roslyn.Extension.GeneratorsAsked(), cancel);
+
     /// <summary>A message to Passenger's extension about the solution that nothing waits on, as a debugging session ends.</summary>
     public void TellExtension(string handler, object message) => RoslynExtension.TellWorkspace(Server, handler, message);
 
@@ -335,6 +356,16 @@ public sealed class RoslynSession : IAsyncDisposable, IDocumentHost
     /// at most <paramref name="limit"/>.</summary>
     public Task<Roslyn.Extension.SymbolsFound> SymbolsNamedAsync(string name, int limit, CancellationToken cancel = default) =>
         ExtensionAsync<Roslyn.Extension.SymbolsFound>(Roslyn.Extension.Handlers.SymbolsNamed, new Roslyn.Extension.SymbolsAsked(name, limit), cancel);
+
+    /// <summary>What the symbols declared at places the server named are in (Passenger's extension's <see
+    /// cref="Roslyn.Extension.ContainersAsked"/>), in order, as <see cref="SymbolsNamedAsync"/> names a symbol's container: a
+    /// member's type, a type's namespace; null when the server has no extension to ask.</summary>
+    public async Task<IReadOnlyList<string?>?> ContainersAsync(IReadOnlyList<LspLocation> declarations, CancellationToken cancel = default) =>
+        Server.ExtensionProblem is null
+            ? (await ExtensionAsync<Roslyn.Extension.ContainersFound>(Roslyn.Extension.Handlers.SymbolContainers, new Roslyn.Extension.ContainersAsked([.. declarations.Select(d =>
+                new Roslyn.Extension.UriSpan(d.Uri, new Roslyn.Extension.Place(d.Range.Start.Line, d.Range.Start.Character), new Roslyn.Extension.Place(d.Range.End.Line, d.Range.End.Character)))]),
+                cancel).ConfigureAwait(false)).Containers
+            : null;
 
     /// <summary>Places the server named, a source generator's document's each taken to the file its code was written in (a
     /// Razor component's C# to its .razor, as the server takes a reference's), the rest as they were; all as they were when
@@ -379,6 +410,42 @@ public sealed class RoslynSession : IAsyncDisposable, IDocumentHost
     public async Task<IReadOnlyList<bool>?> GeneratedCodeAsync(IReadOnlyList<string> uris, CancellationToken cancel = default) =>
         Server.ExtensionProblem is null
             ? (await ExtensionAsync<Roslyn.Extension.GeneratedDocumentsFound>(Roslyn.Extension.Handlers.GeneratedDocuments, new Roslyn.Extension.GeneratedDocumentsAsked(uris), cancel).ConfigureAwait(false)).Generated
+            : null;
+
+    /// <summary>What completion offers at a place in a MAUI XAML file's C# expression (Passenger's extension's
+    /// <see cref="Roslyn.Extension.MauiExpressionCompletion"/>); null when the server has no extension to ask.</summary>
+    public async Task<Roslyn.Extension.MauiCompletions?> MauiCompletionAsync(string path, Roslyn.Extension.MauiExpression expression, int at, CancellationToken cancel = default) =>
+        Server.ExtensionProblem is null
+            ? await ExtensionAsync<Roslyn.Extension.MauiCompletions>(Roslyn.Extension.Handlers.MauiExpressionCompletion, new Roslyn.Extension.MauiExpressionAsked(path, expression, at), cancel).ConfigureAwait(false)
+            : null;
+
+    /// <summary>The symbol a place in a MAUI XAML file's C# expression names (Passenger's extension's
+    /// <see cref="Roslyn.Extension.MauiExpressionSymbol"/>); null for none, or when the server has no extension to ask.</summary>
+    public async Task<Roslyn.Extension.NamedSymbol?> MauiSymbolAsync(string path, Roslyn.Extension.MauiExpression expression, int at, CancellationToken cancel = default) =>
+        Server.ExtensionProblem is null
+            ? (await ExtensionAsync<Roslyn.Extension.SymbolsFound>(Roslyn.Extension.Handlers.MauiExpressionSymbol, new Roslyn.Extension.MauiExpressionAsked(path, expression, at), cancel).ConfigureAwait(false)).Symbols.FirstOrDefault()
+            : null;
+
+    /// <summary>The hover card of a place in a MAUI XAML file's C# expression, in Markdown (Passenger's extension's
+    /// <see cref="Roslyn.Extension.MauiExpressionHover"/>); null for none, or when the server has no extension to ask.</summary>
+    public async Task<string?> MauiHoverAsync(string path, Roslyn.Extension.MauiExpression expression, int at, CancellationToken cancel = default) =>
+        Server.ExtensionProblem is null
+            ? (await ExtensionAsync<Roslyn.Extension.MauiHover>(Roslyn.Extension.Handlers.MauiExpressionHover, new Roslyn.Extension.MauiExpressionAsked(path, expression, at), cancel).ConfigureAwait(false)).Markdown
+            : null;
+
+    /// <summary>Where a MAUI XAML file's expressions name a C# symbol, by its documentation id (Passenger's extension's
+    /// <see cref="Roslyn.Extension.MauiExpressionUses"/>); null when the server has no extension to ask.</summary>
+    public async Task<IReadOnlyList<Roslyn.Extension.MauiUse>?> MauiUsesAsync(string path, IReadOnlyList<Roslyn.Extension.MauiExpression> expressions, string id,
+        CancellationToken cancel = default) =>
+        Server.ExtensionProblem is null
+            ? (await ExtensionAsync<Roslyn.Extension.MauiUsesFound>(Roslyn.Extension.Handlers.MauiExpressionUses, new Roslyn.Extension.MauiUsesAsked(path, expressions, id), cancel).ConfigureAwait(false)).Uses
+            : null;
+
+    /// <summary>A MAUI XAML file's problems as its text stands, MAUI's source generator's and C#'s in its expressions
+    /// (Passenger's extension's <see cref="Roslyn.Extension.MauiXamlChecks"/>); null when the server has no extension to ask.</summary>
+    public async Task<IReadOnlyList<Roslyn.Extension.MauiCheck>?> MauiChecksAsync(string path, string text, IReadOnlyList<Roslyn.Extension.MauiExpression> expressions, CancellationToken cancel = default) =>
+        Server.ExtensionProblem is null
+            ? (await ExtensionAsync<Roslyn.Extension.MauiChecksFound>(Roslyn.Extension.Handlers.MauiXamlChecks, new Roslyn.Extension.MauiChecksAsked(path, text, expressions), cancel).ConfigureAwait(false)).Checks
             : null;
 
     /// <summary>The class a Razor component's file makes, and where the server takes it (Passenger's extension's
@@ -663,17 +730,33 @@ public sealed class LspDocument : IDisposable
     }
 
     /// <summary>Completion at an offset: invoked, after a trigger character, or asked again as more is typed into a list
-    /// the server said was incomplete.</summary>
+    /// the server said was incomplete. Through Passenger's extension the list comes in parts, what is in scope first, its
+    /// later part asked for at once (<see cref="CompletionList.Later"/>) and given up with it.</summary>
     public async Task<(CompletionList? List, int Version)> CompletionAsync(int offset, string? trigger, CancellationToken cancel = default, bool incomplete = false)
     {
         int version = Text.Version;
         CompletionContext context = incomplete ? new CompletionContext(CompletionTriggerKind.TriggerForIncompleteCompletions)
             : trigger is null ? new CompletionContext(CompletionTriggerKind.Invoked) : new CompletionContext(CompletionTriggerKind.TriggerCharacter, trigger);
+        string method = CompletionMethod;
         // Sent now, after the changes before it; read off the caller's thread: a list may hold every type in reach.
-        JsonElement result = await Read(Server.RequestAsync<JsonElement>(LspMethods.Completion,
-            new CompletionParams(Identifier, PositionOf(offset), context), cancel));
-        return (Shapes.CompletionList(result), version);
+        CompletionAnswer? answer = await Read(Server.RequestAsync<CompletionAnswer>(method,
+            new CompletionParams(Identifier, PositionOf(offset), context) { Parts = method == ExtensionMethods.Completion ? true : null }, cancel));
+        if (answer?.List is { LaterId: { } later } first)
+        {
+            // Sent from the thread pool, so this part goes on to the caller while it is written.
+            first.Later = BackgroundWork.Run(() => LaterCompletionAsync(later, cancel), cancel);
+            // A list let go of before its later part came leaves the part unawaited.
+            UnawaitedWork.Dismiss(first.Later);
+        }
+        return (answer?.List, version);
     }
+
+    private async Task<CompletionList?> LaterCompletionAsync(long later, CancellationToken cancel) =>
+        (await Read(Server.RequestAsync<CompletionAnswer>(ExtensionMethods.LaterCompletion, new LaterAsked(later), cancel)))?.List;
+
+    /// <summary>How completion is asked for: of a C# file, through Passenger's extension once it is up, whose list says how
+    /// well each item fits where it is asked for; else as the protocol asks it.</summary>
+    public string CompletionMethod => Server.ExtensionProblem is null && !IsRazor ? ExtensionMethods.Completion : LspMethods.Completion;
 
     public Task<CompletionItem?> ResolveAsync(CompletionItem item, CancellationToken cancel = default) =>
         Server.RequestAsync<CompletionItem>(LspMethods.CompletionResolve, item, cancel);
@@ -847,6 +930,11 @@ public sealed class LspDocument : IDisposable
     /// is renamed to <paramref name="name"/> (<see cref="Roslyn.Extension.ToolkitFound"/>); none for any other symbol.</summary>
     public Task<Roslyn.Extension.ToolkitFound> ToolkitRenamesAsync(int offset, string name, CancellationToken cancel = default) =>
         ExtensionAsync<Roslyn.Extension.ToolkitFound>(Roslyn.Extension.Handlers.ToolkitRenames, new Roslyn.Extension.ToolkitAsked(PlaceOf(offset), name), cancel);
+
+    /// <summary>Whether the method whose name, just written, ends at <paramref name="offset"/> is called where it stands,
+    /// and takes arguments.</summary>
+    public Task<Roslyn.Extension.CallFound> CompletionCallAsync(int offset, CancellationToken cancel = default) =>
+        ExtensionAsync<Roslyn.Extension.CallFound>(Roslyn.Extension.Handlers.CompletionCall, new Roslyn.Extension.CallAsked(PlaceOf(offset)), cancel);
 
     /// <summary>An offset as the extension's messages give a place.</summary>
     public Roslyn.Extension.Place PlaceOf(int offset)

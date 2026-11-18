@@ -364,7 +364,7 @@ public static class ContainerTools
             }
             catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
             {
-                throw new ContainerToolsException($"Container {container} did not say within {ContainerEngine.AskLimit.TotalSeconds:0} s whether it has {path}");
+                throw new ContainerToolsException($"Container {container} did not say within {Durations.Said(ContainerEngine.AskLimit)} whether it has {path}");
             }
             finally
             {
@@ -460,7 +460,7 @@ public static class ContainerTools
         }
         catch (ChildOutputException overran)
         {
-            throw new ContainerToolsException($"Passenger's tools in {container} answered more than the {MostProcesses / (1024 * 1024)} MB a list of programs takes, "
+            throw new ContainerToolsException($"Passenger's tools in {container} answered more than the {Sizes.Said(MostProcesses)} a list of programs takes, "
                 + $"which was not read: {overran.Message}");
         }
         if (!listed.Succeeded)

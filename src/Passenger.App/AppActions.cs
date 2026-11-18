@@ -126,9 +126,22 @@ public static class AppActions
     // The Godot found's export templates installed from a .tpz the person picks: no key of Rider's.
     public const string InstallGodotTemplates = "app.godot.installTemplates";
 
+    // The open folder trusted, so its code runs: no key of Rider's.
+    public const string TrustFolder = "app.trustFolder";
+
     // The .NET SDK installed into the person's own folder, and put on their shell's PATH: no key of Rider's.
     public const string InstallDotnetSdk = "app.dotnet.install";
     public const string AddDotnetToPath = "app.dotnet.addToPath";
+
+    // What a mobile project needs: the .NET workloads it lacks, and the Android SDK and JDK through the Android workload's installer: no keys of Rider's.
+    public const string InstallWorkloads = "app.dotnet.installWorkloads";
+    public const string InstallAndroidDependencies = "app.android.install";
+
+    // The edits a mobile project's heads need to build here, made to its project and Info.plist: no key of Rider's.
+    public const string MakeMobileEdits = "app.mobile.makeEdits";
+
+    // A Mac Catalyst head's Debug build kept whole of .NET's own assemblies, for Passenger's inspector and update handlers' hook: no key of Rider's.
+    public const string KeepAssembliesWhole = "app.mobile.keepAssembliesWhole";
 
     // The Endpoints window over the folder's .http files, and Test of the request chosen there: no key of Rider's.
     public const string ShowEndpoints = "app.showEndpoints";
@@ -154,6 +167,7 @@ public static class AppActions
     public const string ScriptMigrations = "app.migrations.script";
     public const string BundleMigrations = "app.migrations.bundle";
     public const string MigrationsFix = "app.migrations.fix";
+    public const string MigrationsEnvironment = "app.migrations.environment";
 
     // The Agent window, where the person talks to a coding agent installed on the machine (Claude Code, Codex), its
     // prompt sent, its turn stopped, its conversation begun anew, and each agent chosen: no keys of Rider's.
@@ -275,10 +289,13 @@ public static class AppActions
     public const string AddDockerCompose = "app.explorer.addDockerCompose";
     public const string AddAspireOrchestration = "app.explorer.addAspireOrchestration";
     public const string ManageNuGet = "app.explorer.manageNuGet";
+    public const string ManageNuGetForSolution = "app.explorer.manageNuGetForSolution";
     public const string ManageUserSecrets = "app.explorer.manageUserSecrets";
     public const string EditProjectFile = "app.explorer.editProjectFile";
     public const string UnloadProject = "app.explorer.unloadProject";
     public const string ReloadProject = "app.explorer.reloadProject";
+    public const string IncludeInProject = "app.explorer.includeInProject";
+    public const string ExcludeFromProject = "app.explorer.excludeFromProject";
     public const string CompareFiles = "app.explorer.compareFiles";
     public const string CopyPath = "app.explorer.copyPath";
     public const string RevealInFileManager = "app.explorer.reveal";
@@ -309,6 +326,12 @@ public static class AppActions
     public const string RunAnotherCopy = "app.run.anotherCopy";
     public const string DebugAnotherCopy = "app.debug.anotherCopy";
 
+    // Run, Debug or Profile again in a tab of the Terminal window, of a program whose output in the Run or Debug window said
+    // it needs a terminal: no keys of Rider's.
+    public const string RunInTerminal = "app.run.inTerminal";
+    public const string DebugInTerminal = "app.debug.inTerminal";
+    public const string ProfileInTerminal = "app.profile.inTerminal";
+
     // Run, Debug and Profile of the program at hand (a gutter icon's, an Explorer row's, the open file's): no keys, Rider's
     // RunClass key being Attach to Process's in its Visual Studio keymap.
     public const string RunHere = "app.run.here";
@@ -318,6 +341,12 @@ public static class AppActions
     public const string StopAll = "app.stopAll";
     public const string Rerun = "app.rerun";
     public const string EditConfigurations = "app.editConfigurations";
+
+    // Where the chosen configuration's app runs (a device, an emulator or a simulator), the widget beside the configuration's.
+    public const string ChooseRunTarget = "app.chooseRunTarget";
+
+    // The build configuration and platform every build takes, the widget before the run configuration's: no keys of Rider's.
+    public const string ChooseBuildConfiguration = "app.chooseBuildConfiguration";
 
     // One of the folder's own run configurations saved as a launch profile of its project: no keys of Rider's.
     public const string SaveAsLaunchProfile = "app.saveAsLaunchProfile";
@@ -350,6 +379,8 @@ public static class AppActions
     public const string RestartCSharpServer = "app.restartCSharpServer";
     public const string ShowDebug = "app.showDebug";
     public const string HideToolWindow = "app.hideToolWindow";
+    public const string CloseToolWindow = "app.closeToolWindow";
+    public const string DockToolWindow = "app.dockToolWindow";
     public const string Back = "app.back";
     public const string Forward = "app.forward";
 
@@ -377,6 +408,14 @@ public static class AppActions
 
     // Passenger's own, for a GDScript: the style guide's Code order, kept out of Reformat Code; no keymap gives it keys.
     public const string OrderScriptParts = "app.code.orderScriptParts";
+
+    // Reqnroll's Find Unused Step Definitions, which its Visual Studio extension gives no keys either.
+    public const string FindUnusedStepDefinitions = "app.code.findUnusedStepDefinitions";
+
+    // The Step Library window over the folder's step definitions, and Insert Step into Feature of the one chosen there: no
+    // keys of Rider's.
+    public const string ShowStepLibrary = "app.showStepLibrary";
+    public const string InsertStep = "app.steps.insert";
 
     // Rider's ReformatWithPrettierAction (its Visual Studio keymaps give its keys to VcsShowPrevChangeMarker) and
     // Javascript.Linters.EsLint.Fix, which it names Fix ESLint Problems; both in the editor's menu.
@@ -419,6 +458,11 @@ public static class AppActions
     public const string NextError = "app.code.nextError";
     public const string PreviousError = "app.code.previousError";
     public const string FocusEditor = "app.focusEditor";
+
+    // The keys to the window's next and previous region (the toolbar, each tool window shown, the editor, the status bar),
+    // which no keymap of Rider's has an action for: Ctrl+Alt+` (Ctrl+Cmd+` on the Mac), Shift for back, in every keymap.
+    public const string NextRegion = "app.nextRegion";
+    public const string PreviousRegion = "app.previousRegion";
 
     // The debugger's, on the active editor and the session.
     public const string ToggleBreakpoint = "app.debug.toggleBreakpoint";
@@ -645,7 +689,9 @@ public static class AppActions
     public static Keymap Keymap(KeymapPreset preset, IReadOnlyDictionary<string, string[]> overrides)
     {
         // A chord no keymap here takes and a game is unlikely to want, as the game hears it while it has the keys.
-        Keymap keymap = Base(preset).Bind(GameKeys, "control F11");
+        Keymap keymap = Base(preset).Bind(GameKeys, "control F11")
+            .Bind(NextRegion, OperatingSystem.IsMacOS() ? "control meta BACK_QUOTE" : "control alt BACK_QUOTE")
+            .Bind(PreviousRegion, OperatingSystem.IsMacOS() ? "control meta shift BACK_QUOTE" : "control alt shift BACK_QUOTE");
         foreach ((string action, string[] shortcuts) in overrides)
         {
             List<Shortcut> keys = [];

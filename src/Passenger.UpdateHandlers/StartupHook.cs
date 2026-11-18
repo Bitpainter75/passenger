@@ -3,19 +3,20 @@ using Passenger.Core;
 using Passenger.UpdateHandlers;
 
 /// <summary>Run before the program's Main, as DOTNET_STARTUP_HOOKS names this assembly, only in a program Passenger debugs
-/// with Hot Reload: it takes itself and its variable out of what the program's children inherit, connects to Passenger's
-/// socket, starts a thread of its own to read it and answer, and returns once that thread has made every call of its own
-/// and is about to wait in its first read. A stop between updates then finds the thread in the system's receive, partway
-/// through nothing an evaluation there could need; the program's handlers still run for the first time at the first
-/// update, as under the runtime's own agent. It never waits on Passenger: connecting waits for nothing of Passenger's, the
-/// thread waits only to start, and a socket that cannot be reached leaves the program as it would run without the hook.</summary>
+/// with Hot Reload: it takes itself and its variables out of what the program's children inherit, connects to Passenger's
+/// socket (saying its token, where it has one), starts a thread of its own to read it and answer, and returns once that
+/// thread has made every call of its own and is about to wait in its first read. A stop between updates then finds the
+/// thread in the system's receive, partway through nothing an evaluation there could need; the program's handlers still
+/// run for the first time at the first update, as under the runtime's own agent. It never waits on Passenger: connecting
+/// waits for nothing of Passenger's, the thread waits only to start, and a socket that cannot be reached leaves the program
+/// as it would run without the hook.</summary>
 internal static class StartupHook
 {
-    /// <summary>The longest Main waits for the thread to reach its first read, in milliseconds of the clock, the time a
-    /// debugger holds the program counted too: past it the program goes on, the thread reaching its read on its own.</summary>
-    private const long StartLimitMilliseconds = 2000;
+    /// <summary>The longest Main waits for the thread to reach its first read, the time a debugger holds the program counted
+    /// too: past it the program goes on, the thread reaching its read on its own.</summary>
+    private static readonly TimeSpan StartLimit = TimeSpan.FromSeconds(2);
 
-    /// <summary>The longest line read: Passenger's are a word long, and a longer one is passed over.</summary>
+    /// <summary>The longest line read: each carries one type or ends a batch, and a longer one is passed over.</summary>
     private const int LongestLine = 256;
 
     /// <summary>Whether the thread has come to its first read, written by it with nothing of .NET's left to run before the
@@ -25,17 +26,24 @@ internal static class StartupHook
     public static void Initialize()
     {
         string? socket = Environment.GetEnvironmentVariable(Wire.SocketVariable);
+        string? token = Environment.GetEnvironmentVariable(Wire.TokenVariable);
         OwnEnvironment.Set(Wire.SocketVariable, null);
+        OwnEnvironment.Set(Wire.TokenVariable, null);
         StartupHooks.TakeOut(typeof(StartupHook).Assembly.Location);
         if (socket is not { Length: > 0 } || Connection.Open(socket) is not { } connection)
         {
             return;
         }
+        if (token is { Length: > 0 } && !connection.Send(Line(token)))
+        {
+            connection.Dispose();
+            return;
+        }
         Thread listening = new(() => Serve(connection)) { IsBackground = true, Name = Wire.ThreadName };
         listening.UnsafeStart();
-        long until = Environment.TickCount64 + StartLimitMilliseconds;
+        Deadline until = Deadline.In(StartLimit);
         SpinWait waiting = default;
-        while (!Volatile.Read(ref reading) && Environment.TickCount64 < until)
+        while (!Volatile.Read(ref reading) && !until.Passed)
         {
             // Never Sleep(1), whose least on Windows is the clock's tick: the thread is a moment from its read.
             waiting.SpinOnce(sleep1Threshold: -1);
@@ -50,6 +58,7 @@ internal static class StartupHook
         using Connection open = connection;
         byte[] updated = Encoding.ASCII.GetBytes(Wire.Updated);
         byte[] buffer = new byte[LongestLine];
+        ChangedTypes changes = new();
         Ready(open, buffer, updated);
         Volatile.Write(ref reading, true);
         int kept = 0;
@@ -65,9 +74,19 @@ internal static class StartupHook
                 {
                     continue;
                 }
-                if (!passing && Says(buffer, start, end - start, updated) && !Answer(open, Handlers.Run()))
+                if (!passing)
                 {
-                    return;
+                    if (Says(buffer, start, end - start, updated))
+                    {
+                        if (!Answer(open, Handlers.Run(changes.Take(AppDomain.CurrentDomain.GetAssemblies()))))
+                        {
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        changes.Add(Encoding.ASCII.GetString(buffer, start, end - start));
+                    }
                 }
                 passing = false;
                 start = end + 1;
@@ -88,7 +107,9 @@ internal static class StartupHook
         Says(updated, 0, updated.Length, updated);
         Line(Wire.Failed + "a\nb");
         open.Send([]);
-        Handlers.Run([typeof(StartupHook).Assembly]);
+        ChangedTypes changes = new();
+        changes.Add(Wire.TypeLine(typeof(StartupHook).Module.ModuleVersionId, typeof(StartupHook).MetadataToken));
+        Handlers.Run([typeof(StartupHook).Assembly], changes.Take([typeof(StartupHook).Assembly]));
         Answer(open, [], done: false);
         Array.Copy(buffer, 0, buffer, 0, 0);
     }

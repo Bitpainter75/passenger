@@ -18,7 +18,7 @@ namespace Passenger.App.ToolWindows;
 /// person types goes to the program's <see cref="Input"/> a line at a time, in the input colour. It keeps a cycle buffer of
 /// text, the oldest lines dropped past it. Its file locations, web addresses and the folder a publish landed in are links
 /// (<see cref="Links"/>).</summary>
-public sealed class OutputView : DockPanel
+public sealed class OutputView : DockPanel, IOwnKeys
 {
     /// <summary>The cycle buffer a console keeps by default: 1024 KB of text.</summary>
     public const int DefaultLimitKb = 1024;
@@ -108,6 +108,7 @@ public sealed class OutputView : DockPanel
         {
             Document = Document,
             IsReadOnly = true,
+            ReadOnlyWhy = Refusals.OutputReadOnly,
             LineCommentPrefix = null,
             ShowLineNumbers = false,
             ShowErrorStripe = false,
@@ -199,6 +200,54 @@ public sealed class OutputView : DockPanel
 
     /// <summary>What the bar over the console says of its program, null while it shows none.</summary>
     public string? Waiting => waiting?.Said;
+
+    /// <summary>The bar over the console offering what its run's words ask of the project, and what its link does; made the
+    /// first time it is shown.</summary>
+    private Banner? offer;
+
+    private Button? offerLink;
+
+    private Action? offered;
+
+    /// <summary>Shows over the console words offering a change with a link that makes it, until the console is emptied;
+    /// null takes it away.</summary>
+    public void ShowOffer(string? said, string link = "", Action? make = null)
+    {
+        UiThread.Check();
+        string? before = Offered;
+        offered = make;
+        if (said is null || make is null)
+        {
+            offer?.Say(null);
+        }
+        else
+        {
+            if (offer is null || offerLink is null)
+            {
+                offer = new Banner();
+                offerLink = offer.Link(link, TakeOffer);
+                Children.Insert(Children.IndexOf(body), offer);
+            }
+            offerLink.Content = link;
+            offer.Say(said);
+        }
+        if (before != Offered || said is not null)
+        {
+            OfferChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>What the offer over the console says, null while it shows none.</summary>
+    public string? Offered => offer?.Said;
+
+    /// <summary>What the offer's link says, while there is one.</summary>
+    public string? OfferLink => Offered is null ? null : offerLink?.Content as string;
+
+    /// <summary>The offer over the console shown, changed or taken away.</summary>
+    public event EventHandler? OfferChanged;
+
+    /// <summary>Makes the change the console offers, as its link does.</summary>
+    public void TakeOffer() => offered?.Invoke();
 
     /// <summary>A program's text as it reached the console, its colour codes gone, a batch at a time, with the stretches
     /// of it each of its streams wrote.</summary>
@@ -308,6 +357,7 @@ public sealed class OutputView : DockPanel
         UiThread.Check();
         Sink.Drop();
         Document.Clear();
+        ShowOffer(null);
         Links.Forget();
         ForgetFolds();
     }
@@ -499,6 +549,8 @@ public sealed class OutputView : DockPanel
             if (filtered is not null)
             {
                 body.Children.Remove(filtered);
+                // Its colours hear the console's links, which outlive it.
+                filtered.Highlighter = null;
                 filtered = null;
             }
             Editor.IsVisible = true;
@@ -510,6 +562,7 @@ public sealed class OutputView : DockPanel
             {
                 Document = new TextDocument(),
                 IsReadOnly = true,
+                ReadOnlyWhy = Refusals.OutputReadOnly,
                 LineCommentPrefix = null,
                 ShowLineNumbers = false,
                 ShowErrorStripe = false,
@@ -551,10 +604,11 @@ public sealed class OutputView : DockPanel
     /// <summary>The filtered console's colours: each entry in its severity's, its links over them.</summary>
     private sealed class FoldColours(OutputView view) : IHighlighter
     {
+        /// <summary>Its links' changes, as the disk's answers for their paths land.</summary>
         public event EventHandler? Changed
         {
-            add { }
-            remove { }
+            add => view.Links.Changed += value;
+            remove => view.Links.Changed -= value;
         }
 
         public IReadOnlyList<SyntaxSpan> GetSpans(TextSnapshot text, int start, int length)
@@ -671,31 +725,53 @@ public sealed class OutputView : DockPanel
     /// Ctrl+D (Rider's Send EOF, on every platform) ends the input, and Paste types the clipboard.</summary>
     private void OnKey(object? sender, KeyEventArgs e)
     {
-        if (input is null)
+        if (InputKey(e) is { } typed)
         {
-            return;
+            typed();
+            e.Handled = true;
         }
-        if (e.Key == Key.Enter && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift)
+    }
+
+    /// <summary>The keys the console takes for its program's input while its editor has the keys, ahead of the IDE's
+    /// keymap.</summary>
+    public bool TakesKey(KeyEventArgs e) => editor is { IsFocused: true } && InputKey(e) is not null;
+
+    /// <summary>What a key does to the program's input, null with none waiting or for a key it leaves to the keymap.</summary>
+    private Action? InputKey(KeyEventArgs e) =>
+        input is null ? null
+        : e.Key == Key.Enter && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift ? SendLine
+        : e.Key == Key.Back && e.KeyModifiers == KeyModifiers.None ? Backspace
+        : e.Key == Key.D && e.KeyModifiers == KeyModifiers.Control ? EndInput
+        : AppActions.Keymap().ActionFor(new Shortcut(Keystroke.From(e))) is EditorActions.Paste ? InputEdit(EditorActions.Paste)
+        : null;
+
+    /// <summary>What an editor action does to the program's input, as the console's keys do: Paste types the clipboard,
+    /// Backspace takes back what was typed and New Line sends the line; null with none waiting or for one the output
+    /// refuses.</summary>
+    private Action? InputEdit(string action) =>
+        input is null ? null
+        : action switch
         {
-            SendLine();
-        }
-        else if (e.Key == Key.Back && e.KeyModifiers == KeyModifiers.None)
+            EditorActions.Paste => () => IdeErrors.Observe(PasteAsync()),
+            EditorActions.Backspace => Backspace,
+            EditorActions.NewLine => SendLine,
+            _ => null,
+        };
+
+    /// <summary>Whether an editor action run on <paramref name="at"/> (the Edit menu's, Find Action's) goes to the program's
+    /// input: only at the console's own editor, while a program reads it.</summary>
+    public bool TakesEdit(CodeEditor at, string action) => at == editor && InputEdit(action) is not null;
+
+    /// <summary>Runs an editor action on the program's input where it takes it (<see cref="TakesEdit"/>); false
+    /// elsewhere.</summary>
+    public bool EditInput(CodeEditor at, string action)
+    {
+        if (at != editor || InputEdit(action) is not { } edit)
         {
-            Backspace();
+            return false;
         }
-        else if (e.Key == Key.D && e.KeyModifiers == KeyModifiers.Control)
-        {
-            EndInput();
-        }
-        else if (AppActions.Keymap().ActionFor(new Shortcut(Keystroke.From(e))) == EditorActions.Paste)
-        {
-            IdeErrors.Observe(PasteAsync());
-        }
-        else
-        {
-            return;
-        }
-        e.Handled = true;
+        edit();
+        return true;
     }
 
     /// <summary>Text typed at the end of the line being typed, the caret after it.</summary>

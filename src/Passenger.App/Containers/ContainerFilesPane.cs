@@ -37,15 +37,7 @@ public sealed class ContainerFilesPane : DockPanel
             Classes = { StyleClasses.Tree },
         };
         ReusedRows.Use(list, Row);
-        list.DoubleTapped += (_, _) => IdeErrors.Observe(ActivateAsync(list.SelectedItem as ContainerFile));
-        list.KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Enter)
-            {
-                IdeErrors.Observe(ActivateAsync(list.SelectedItem as ContainerFile));
-                e.Handled = true;
-            }
-        };
+        ListKeys.Act(list, new ListActs { Open = () => IdeErrors.Observe(ActivateAsync(list.SelectedItem as ContainerFile)) });
         Children.Add(new Panel { Children = { list, said } });
     }
 
@@ -327,7 +319,7 @@ public sealed class ContainerFilesPane : DockPanel
                 }
             }
             // A rename puts the file where a link may stand, never through it.
-            File.Move(partial, copy, overwrite: true);
+            AtomicFile.Move(partial, copy);
             return null;
         }
         finally

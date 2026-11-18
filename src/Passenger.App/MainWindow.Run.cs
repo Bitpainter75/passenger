@@ -50,7 +50,7 @@ public partial class MainWindow
         RunConfigurations configurations = session.Configurations;
         RunConfigurationsDialog dialog = new([.. configurations.All.Where(c => c.Generated)], configurations.Own, [.. session.RunProjects.Where(p => p.Exists && (p.IsRunnable || p.GodotFolder is not null))],
             configurations.Chosen?.Name, (mine, generated, chosen) => configurations.Set(mine, generated, chosen, Projects), buildRun.IsRunningConfiguration,
-            configurations.Profiles, configurations.Solution, configurations.ProfileProblems)
+            configurations.Profiles, configurations.Solution, configurations.ProfileProblems, session.BuildChoices.Offered, session.BuildChoices.Chosen)
         {
             Folder = Folder,
             WriteProfiles = WriteLaunchProfilesAsync,
@@ -231,6 +231,10 @@ public partial class MainWindow
         if (shared.IsMultiple)
         {
             return $"{shared.Name} is a launch profile of the solution's already, kept beside it where Visual Studio reads it too";
+        }
+        if (shared.IsScript)
+        {
+            return $"{shared.Name} runs a package.json script: a launch profile saved here runs a .NET project";
         }
         if (Projects.FirstOrDefault(p => p.Exists && p.IsRunnable && PathNames.Same(p.Path, shared.Project)) is not { } project)
         {
@@ -414,9 +418,10 @@ public partial class MainWindow
             return start.NoFolder;
         }
         string shown = PathNames.Shown(folder, folder);
-        // As an agent's open waits: the walk for its projects, its single-file AppHosts, then the evaluations those started.
+        // As an agent's open waits: the walk for its projects, its single-file AppHosts and Node packages, then the evaluations those started.
         await reading.WorkspaceRead;
         await reading.AspireFilesRead;
+        await reading.NodeFilesRead;
         await Task.Yield();
         await reading.Models.Idle;
         if (reading.IsEnded)
@@ -478,7 +483,7 @@ public partial class MainWindow
         }
         IEnumerable<string> rest = arguments.Args.Skip(1);
         // A program named without a folder (a .dll's "dotnet") is the one the IDE builds with, or one on the PATH.
-        System.Diagnostics.ProcessStartInfo start = ChildProcesses.Command(program is "dotnet" ? Core.Dotnet.Host() : program, rest, arguments.Cwd ?? Folder, arguments.Env);
+        System.Diagnostics.ProcessStartInfo start = ChildProcesses.Command(program is "dotnet" ? Core.Dotnet.Host(arguments.Cwd ?? Folder) : program, rest, arguments.Cwd ?? Folder, arguments.Env);
         return ShowInTerminal(name, start);
     }
 
@@ -493,6 +498,39 @@ public partial class MainWindow
 
     /// <summary>Run, from its key, the toolbar or the Run window: what stopped it, if anything, is in the status bar.</summary>
     private void RunSelected() => IdeErrors.Observe(RunAsync());
+
+    /// <summary>A program run with the Run window's console, or a Debug tab's, said it needs a terminal: that console offers,
+    /// over what it wrote, to start it again in one, as the Profiler window does over its run for a program Profile started.</summary>
+    private void OfferTerminal(TerminalNeed need, ToolWindows.OutputView console)
+    {
+        UiThread.Check();
+        string start = need.Debugged ? AppActions.DebugInTerminal : need.Profiled ? AppActions.ProfileInTerminal : AppActions.RunInTerminal;
+        console.ShowOffer(need.Said, actions![start]!.Title, () => Request(start));
+        if (need.Profiled)
+        {
+            ProfilerView.Offer(console);
+        }
+    }
+
+    /// <summary>Run, Debug or Profile in the Terminal: the configuration whose program said it needs a terminal set to run in
+    /// one, kept with the folder as Edit Configurations keeps its Use external console, chosen, and started again through
+    /// <paramref name="start"/>, Run's, Debug's or Profile's action, which stops the run it ends first.</summary>
+    private void StartInTerminal(ActionContext context, string start)
+    {
+        if ((start == AppActions.Debug ? buildRun.DebugNeed : buildRun.RunNeed) is not { } need)
+        {
+            return;
+        }
+        if (!session.Configurations.UseConsole(need.Configuration, ConsoleKind.Terminal) || !SelectConfiguration(need.Configuration))
+        {
+            status.Text = $"{need.Configuration} is no longer one of the folder's run configurations";
+            return;
+        }
+        if (actions!.Run(start, context) is { } why)
+        {
+            status.Text = why;
+        }
+    }
 
     /// <summary>Rerun, of the configuration chosen (<see cref="BuildRunController.RerunAsync"/>): what stopped it, if anything,
     /// is in the status bar.</summary>
@@ -548,16 +586,31 @@ public partial class MainWindow
     private void OnRunConfigClicked(object? sender, RoutedEventArgs e)
     {
         ContextMenu menu = new();
-        foreach (RunConfiguration each in Configurations)
+        foreach (RunConfiguration each in Configurations.Where(c => !c.IsScript || !c.Generated))
         {
-            string name = each.Name;
-            string? why = WhyNotHere(each);
-            MenuItem item = MenuChoice.Of(why is null ? Shown(each) : Greyed(name, why), session.Configurations.Chosen?.Name == name, () => SelectConfiguration(name));
-            if (why is not null)
+            menu.Items.Add(Choice(each));
+        }
+        // A package's scripts after the rest, each package's under its name where there are several.
+        List<IGrouping<string, RunConfiguration>> scripts = [.. Configurations.Where(c => c is { IsScript: true, Generated: true }).GroupBy(c => c.Project, PathNames.Comparer)];
+        if (scripts.Count > 0 && menu.Items.Count > 0)
+        {
+            menu.Items.Add(new Separator());
+        }
+        foreach (IGrouping<string, RunConfiguration> package in scripts)
+        {
+            if (scripts.Count == 1)
             {
-                ToolTip.SetTip(item, $"{name} cannot run here: {why}");
+                foreach (RunConfiguration each in package)
+                {
+                    menu.Items.Add(Choice(each));
+                }
+                continue;
             }
-            menu.Items.Add(item);
+            NodePackage? read = session.NodeFiles.Packages.FirstOrDefault(p => PathNames.Same(p.Manifest, package.Key));
+            string header = read is null ? PathNames.Shown(Path.GetDirectoryName(package.Key)!, session.Folder) : $"{read.Name} ({NodeProjects.ProgramOf(read.Manager)})";
+            MenuItem holding = new() { Header = header, ToggleType = MenuItemToggleType.Radio, IsChecked = package.Any(c => c.Name == session.Configurations.Chosen?.Name) };
+            holding.ItemsSource = (Control[])[.. package.Select(Choice)];
+            menu.Items.Add(holding);
         }
         if (menu.Items.Count == 0)
         {
@@ -568,6 +621,18 @@ public partial class MainWindow
         edit.Click += (_, _) => Request(AppActions.EditConfigurations);
         menu.Items.Add(edit);
         Open(menu, RunConfigButton);
+
+        MenuItem Choice(RunConfiguration each)
+        {
+            string name = each.Name;
+            string? why = WhyNotHere(each);
+            MenuItem item = MenuChoice.Of(why is null ? Shown(each) : Greyed(name, why), session.Configurations.Chosen?.Name == name, () => SelectConfiguration(name));
+            if (why is not null)
+            {
+                ToolTip.SetTip(item, $"{name} cannot run here: {why}");
+            }
+            return item;
+        }
 
         static StackPanel Greyed(string name, string why) => new()
         {

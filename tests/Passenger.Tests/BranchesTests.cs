@@ -314,6 +314,48 @@ public sealed class BranchesTests : IDisposable
         window.Close();
     }
 
+    /// <summary>A side button pressed as the branches are listed again (the log reading its history afresh, its filter's
+    /// branch with it) acts on its release: the panel keeps its choice through the listing, so its buttons never grey for
+    /// that moment, which let go of the press and lost the click.</summary>
+    [AvaloniaFact]
+    public void Navigate_pressed_as_the_branches_are_listed_again_chooses_the_head_on_its_release()
+    {
+        MainWindow window = Open();
+        BranchesPanel panel = window.GitBranches;
+        GitLogView log = window.GitLog;
+        Assert.True(panel.Select("feature"));
+        panel.Activate(panel.Selected!);
+        Ui.Settle();
+        Assert.True(panel.Select("main"));
+        Ui.ClickAcross(SideButton(panel, "Navigate Log to Selected Branch Head"), () => Ui.Await(log.LoadAsync(), "the log and its branches read again"));
+        Ui.Landed(() => log.Selected?.Hash == Git("rev-parse", "main").Trim(), "main's head chosen in the log filtered to feature, Navigate pressed as the branches were listed again");
+        Assert.Equal("refs/heads/feature", log.BranchFilter);
+        window.Close();
+    }
+
+    /// <summary>Navigate asked while the log still reads the history of the branch it was just filtered to decides on that
+    /// history, not the rows listed before it: feature's head, which main's history lacks, is chosen with every branch shown
+    /// again, where it was chosen among the rows of every branch and then lost as main's landed.</summary>
+    [AvaloniaFact]
+    public void Navigate_asked_as_the_log_reads_a_filter_lacking_the_head_shows_every_branch_and_chooses_it()
+    {
+        MainWindow window = Open();
+        BranchesPanel panel = window.GitBranches;
+        GitLogView log = window.GitLog;
+        Ui.Landed(() => log.Rows.Count == 3, "every branch's three commits");
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task held = log.HoldNextRead(release.Task);
+        Assert.True(panel.Select("main"));
+        panel.Activate(panel.Selected!);
+        Ui.AwaitPumped(held, "the log's read of main's history, held once git answered");
+        Assert.True(panel.Select("feature"));
+        Ui.Click(SideButton(panel, "Navigate Log to Selected Branch Head"));
+        release.SetResult();
+        Ui.Landed(() => log.Selected?.Hash == Git("rev-parse", "feature").Trim(), "feature's head chosen in the log asked while main's history was read");
+        Assert.Null(log.BranchFilter);
+        window.Close();
+    }
+
     [Gate]
     [AvaloniaFact]
     public void Merge_into_rebase_onto_and_checkout_and_rebase_onto_current_move_the_branches_as_git_would()
@@ -357,7 +399,7 @@ public sealed class BranchesTests : IDisposable
 
         Choose(panel, rows, "feature", "Compare with 'main'");
         Assert.Equal(["Log", "Compare main and feature"], window.GitWindow.Titles);
-        GitLogView feature = window.GitWindow.Shown;
+        GitLogView feature = Assert.IsType<GitLogView>(window.GitWindow.Shown);
         Ui.Settle();
         Assert.Equal(["Feature"], feature.Rows.Select(r => r.Commit.Subject));
         GitLogView main = Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window.GitWindow).OfType<GitLogView>().Single(v => v.Range?.To == "main");
@@ -368,16 +410,75 @@ public sealed class BranchesTests : IDisposable
         Ui.Settle();
 
         Choose(panel, rows, "feature", "Show Diff with Working Tree");
-        ChangesWindow changes = Assert.IsType<ChangesWindow>(window.Frontmost);
-        Assert.Equal("Changes Between feature and Current Working Tree", changes.Title);
+        Assert.Equal(["Log", "Compare main and feature", "Compare feature and Working Tree"], window.GitWindow.Titles);
+        WorkingTreeDiffView changes = Assert.IsType<WorkingTreeDiffView>(window.GitWindow.Shown);
         Assert.Equal(["Feature.cs Deleted", "Notes.txt Added", "Shop.cs Modified"], changes.Files.Select(f => $"{f.Name} {f.Kind}").Order());
-        changes.Select(changes.Files.Single(f => f.Name == "Shop.cs"));
-        changes.Open();
-        Ui.Landed(() => window.Frontmost is DiffWindow, "Shop.cs as feature has it beside the file");
-        DiffWindow diff = (DiffWindow)window.Frontmost;
-        Assert.Equal(Shop, diff.View.Left.Document.Snapshot.ToString());
+        Ui.Click(Ui.Row(changes.List, changes.Files.Single(f => f.Name == "Shop.cs")));
+        Ui.Press(window, "ENTER");
+        IDiffHost diff = OpenDiffs.Landed(window, "Shop.cs as feature has it beside the file");
+        Assert.Equal(Shop, OpenDiffs.ViewOf(diff).Left.Document.Snapshot.ToString());
         diff.Close();
-        changes.Close();
+        window.Close();
+    }
+
+    /// <summary>Show Diff with Working Tree lists a branch's files that differ from the working tree in a tab of the Git
+    /// window, said above them, the first chosen with the keys; a file's diff opens beside the editors' files as a tab with
+    /// diffs set to open as tabs, and over them in a window of its own with diffs set to open in windows, the list staying in
+    /// the Git window either way. The list follows the working tree, and a branch nothing differs from says so.</summary>
+    [AvaloniaFact]
+    public void Show_diff_with_working_tree_lists_the_files_in_the_Git_window_and_opens_their_diffs_in_a_tab_or_a_window()
+    {
+        Commit("Notes.txt", "notes\n", "Notes on main");
+        File.WriteAllText(Path.Combine(folder, "Shop.cs"), Shop.Replace("int count", "long count", StringComparison.Ordinal));
+        MainWindow window = Open();
+        BranchesPanel panel = window.GitBranches;
+        ListBox rows = List(panel);
+
+        Choose(panel, rows, "feature", "Show Diff with Working Tree");
+        Assert.Equal(["Log", "Compare feature and Working Tree"], window.GitWindow.Titles);
+        WorkingTreeDiffView changes = Assert.IsType<WorkingTreeDiffView>(window.GitWindow.Shown);
+        Assert.Contains(Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window.GitWindow).OfType<TextBlock>(),
+            t => t.Text == "Files that differ between feature and the working tree");
+        Assert.Equal(["Feature.cs Deleted", "Notes.txt Added", "Shop.cs Modified"], changes.Files.Select(f => $"{f.Name} {f.Kind}").Order());
+        Assert.True(changes.List.SelectedIndex == 0 && changes.List.IsKeyboardFocusWithin,
+            $"The list opened with row {changes.List.SelectedIndex} chosen and the keys {(changes.List.IsKeyboardFocusWithin ? "in" : "out of")} it, not on its first file");
+
+        // Diffs set to open as tabs: Shop.cs's opens beside the files, the Git window still listing the branch's.
+        window.ApplySettings(window.Settings with { OpenDiffsIn = Passenger.App.Settings.DiffPlace.Tab });
+        Ui.Click(Ui.Row(changes.List, changes.Files.Single(f => f.Name == "Shop.cs")));
+        Ui.Press(window, "ENTER");
+        DiffTab tab = Assert.IsType<DiffTab>(OpenDiffs.Landed(window, "Shop.cs as feature has it, in a tab beside the file"));
+        Assert.Equal("Shop.cs: feature and your version", tab.Document.Title);
+        Assert.Same(tab.Document, window.EditorArea.Active);
+        Assert.Equal(Shop, OpenDiffs.ViewOf(tab).Left.Document.Snapshot.ToString());
+        Assert.True(window.DockHost.IsShown(ToolWindowIds.Git) && window.GitWindow.Shown == changes && changes.IsVisible,
+            "The diff's tab opened, the Git window no longer showed the branch's files");
+        tab.Close();
+        Ui.Settle();
+
+        // Diffs set to open in windows: Shop.cs's opens in a window of its own over the IDE's, the list staying.
+        window.ApplySettings(window.Settings with { OpenDiffsIn = Passenger.App.Settings.DiffPlace.Window });
+        Ui.Click(Ui.Row(changes.List, changes.Files.Single(f => f.Name == "Shop.cs")));
+        Ui.Press(window, "ENTER");
+        DiffWindow shown = Assert.IsType<DiffWindow>(OpenDiffs.Landed(window, "Shop.cs as feature has it, in a window of its own"));
+        Assert.Same(shown, window.Frontmost);
+        Assert.Equal(Shop, shown.View.Left.Document.Snapshot.ToString());
+        Assert.True(window.GitWindow.Shown == changes, "The diff's window opened, the Git window no longer showed the branch's files");
+        shown.Close();
+        Ui.Settle();
+
+        // Shop.cs put back as committed: the list follows, and main, which the working tree now matches, has nothing listed.
+        File.WriteAllText(Path.Combine(folder, "Shop.cs"), Shop);
+        Ui.WaitFor(() => window.Vcs.Changes.Count == 0, "Shop.cs put back as committed, Git listing nothing changed");
+        Ui.Landed(() => changes.Files.Count == 2, $"feature's files following the working tree, where it lists [{string.Join(", ", changes.Files.Select(f => f.Name))}]");
+        Assert.Equal(["Feature.cs Deleted", "Notes.txt Added"], changes.Files.Select(f => $"{f.Name} {f.Kind}").Order());
+        window.GitWindow.ShowLog();
+        Ui.Settle();
+        Choose(panel, rows, "main", "Show Diff with Working Tree");
+        WorkingTreeDiffView same = Assert.IsType<WorkingTreeDiffView>(window.GitWindow.Shown);
+        Assert.Equal(["Log", "Compare feature and Working Tree", "Compare main and Working Tree"], window.GitWindow.Titles);
+        Assert.True(same.Files.Count == 0 && same.Placeholder == "No differences",
+            $"main, which the working tree matches, lists [{string.Join(", ", same.Files.Select(f => f.Name))}] and says \"{same.Placeholder}\"");
         window.Close();
     }
 

@@ -28,6 +28,33 @@ public partial class ManagedDebugger
         ReportTerminated();
     }
 
+    /// <summary>The runtime's debugging of the program failed for good (ICorDebug's DebuggerError): it answers nothing more,
+    /// no continue or detach among it, so the program never runs on from where the failure held it. The debugging ends
+    /// saying why, as the program's end would: one the session launched is ended, one attached to left as it is.</summary>
+    private async Task HandleDebuggerError(DebuggerErrorCorDebugManagedCallbackEventArgs error)
+    {
+        if (Failure is not null)
+        {
+            return;
+        }
+        string code = $"0x{error.ErrorHR:X8}{(error.ErrorCode == 0 ? "" : $", code {error.ErrorCode}")}";
+        Failure = $"the runtime's debugging of the program failed ({code}), so it can be debugged no further";
+        OnConsole?.Invoke($"The runtime's debugging of the program failed ({code}): it can be debugged no further, "
+            + (_launched ? "so it is ended.\n" : "and it is left as the failure left it, which may hold it.\n"));
+        if (_launch is { } launch)
+        {
+            // Its end, which the launch's wait hears, tells the client.
+            launch.Kill();
+            return;
+        }
+        if (_launched && _attachedId != 0)
+        {
+            EndHeld(_attachedId);
+        }
+        await ReportExitAsync(null).ConfigureAwait(false);
+        ReportTerminated();
+    }
+
     private void HandleThreadCreated(object? sender, CreateThreadCorDebugManagedCallbackEventArgs createThreadCorDebugManagedCallbackEventArgs)
     {
         ICorDebugThread corThread = createThreadCorDebugManagedCallbackEventArgs.Thread;
@@ -98,10 +125,11 @@ public partial class ManagedDebugger
             }
             else if (corModule.IsInMemory)
             {
-                int size = corModule.Size;
-                CORDB_ADDRESS baseAddress2 = corModule.BaseAddress;
-                (byte[] bytes, _) = (_process ?? throw new InvalidOperationException("A module loaded before its process")).ReadMemory(baseAddress2, size);
-                metadataReader = ModuleMetadataReader.TryLoadFromBytes(bytes);
+                // Its size is the program's word, so the image is read only as long as its headers lay it out, a piece at a time.
+                System.Runtime.InteropServices.Marshal.ThrowExceptionForHR(corModule.TryGetSize(out uint size));
+                ICorDebugProcess process = _process ?? throw new InvalidOperationException("A module loaded before its process");
+                metadataReader = ModuleMetadataReader.TryLoadFromBytes(Relay.ModuleImages.Read(process, baseAddress.Value, size, out string? why)
+                    ?? throw new InvalidOperationException($"Its image in the program's memory is not read: {why}"));
             }
             else
             {
@@ -253,6 +281,14 @@ public partial class ManagedDebugger
         {
             return;
         }
+        if (LateYield && _heldYield is null && breakpointCorDebugManagedCallbackEventArgs != _handedYield && breakpoint is ICorDebugFunctionBreakpoint late
+            && _asyncStepper?.IsYield(late) is true)
+        {
+            _logger?.Invoke($"Held back: the yield on thread {breakpointCorDebugManagedCallbackEventArgs.Thread.Id}, until its step's end comes");
+            _heldYield = breakpointCorDebugManagedCallbackEventArgs;
+            Continue(clearVariables: false);
+            return;
+        }
 
         if (breakpoint is ICorDebugFunctionBreakpoint afterCall && WatchedCallOf(afterCall) is { } watched)
         {
@@ -269,7 +305,9 @@ public partial class ManagedDebugger
         }
 
         ICorDebugThread corThread = breakpointCorDebugManagedCallbackEventArgs.Thread;
-        if (_stepper is { IsActive: false } && Stepping is (int stepping, _))
+        // The stepping thread leaving at an await, handed over only with its step's end, is the async step's wherever that end is.
+        bool leavesAtAwait = breakpoint is ICorDebugFunctionBreakpoint leaving && _asyncStepper?.IsYield(leaving) is true;
+        if (!leavesAtAwait && _stepper is { IsActive: false } && Stepping is (int stepping, _))
         {
             if (stepping == corThread.Id)
             {
@@ -357,7 +395,7 @@ public partial class ManagedDebugger
 
         BreakpointManager.BreakpointBinding? hit = managedBreakpoint.Bindings.Find(binding => binding.CorBreakpoint == functionBreakpoint);
         if (!await HitStopsAsync(corThread, managedBreakpoint, "the breakpoint",
-            () => $"Breakpoint reached at {Path.GetFileName(managedBreakpoint.FilePath)}:{(managedBreakpoint.IsFunctionBreakpoint ? managedBreakpoint.Line : hit?.Source.StartLine ?? managedBreakpoint.Line)}"))
+            () => BreakpointHits.Reached(managedBreakpoint.FilePath, managedBreakpoint.IsFunctionBreakpoint ? managedBreakpoint.Line : hit?.Source.StartLine ?? managedBreakpoint.Line)))
         {
             Continue(clearVariables: true);
             return;
@@ -421,6 +459,16 @@ public partial class ManagedDebugger
     private async Task HandleStepComplete(object? sender, StepCompleteCorDebugManagedCallbackEventArgs stepCompleteEventArgs)
     {
         ICorDebugThread corThread = stepCompleteEventArgs.Thread;
+        if (_heldYield is { } late && late.Thread.Id == corThread.Id && !EvalStatus.IsRunning)
+        {
+            // LateYield's hand-over: the yield first, this end then in place of its continue.
+            _heldYield = null;
+            _handedYield = late;
+            _logger?.Invoke($"Handed over: the yield held back on thread {corThread.Id}, with its step's end");
+            _deferredEvents.Enqueue(stepCompleteEventArgs);
+            await HandleBreakpoint(sender, late);
+            return;
+        }
         bool evaluatedHere = EvalStatus.ThreadId == corThread.Id || EvalStatus.Abandoned.ContainsKey(corThread.Id);
         if (PutOffDuringEvaluation(stepCompleteEventArgs, corThread))
         {
@@ -782,7 +830,7 @@ public partial class ManagedDebugger
         List<int> stopping = [];
         foreach (ExceptionRule rule in rules)
         {
-            if (await HitStopsAsync(thread, rule, $"the breakpoint on {exceptionType}", () => $"Exception breakpoint reached: {exceptionType}"))
+            if (await HitStopsAsync(thread, rule, $"the breakpoint on {exceptionType}", () => BreakpointHits.ExceptionReached(exceptionType)))
             {
                 stopping.Add(rule.Id);
             }

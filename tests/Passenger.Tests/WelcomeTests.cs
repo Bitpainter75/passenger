@@ -5,6 +5,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.VisualTree;
 using Passenger.App;
 using Passenger.App.Explorer;
 using Passenger.App.Vcs;
@@ -69,6 +70,23 @@ public sealed class WelcomeTests : IClassFixture<WelcomeTests.Workspaces>, IDisp
     }
 
     [AvaloniaFact]
+    public void A_start_asking_for_a_new_window_reopens_nothing_and_shows_the_Welcome_screen()
+    {
+        using IDisposable theme = TestsTheme();
+        MainWindow first = Started(LaunchOptions.Empty);
+        first.OpenFolder(alpha);
+        Ui.Settle();
+        first.Close();
+
+        MainWindow window = Started(LaunchOptions.Parse([LaunchOptions.NewWindowFlag]));
+
+        Assert.True(window.Folder is null && Shown(window),
+            $"The taskbar's New Window, starting Passenger, was to show a window with nothing open; it opened {window.Folder ?? "nothing"}, the Welcome screen {(Shown(window) ? "shown" : "not shown")}");
+        Assert.Equal([Name(alpha)], window.Welcome.Rows.Select(r => r.Name));
+        window.Close();
+    }
+
+    [AvaloniaFact]
     public void With_reopening_off_the_Welcome_screen_lists_the_recent_ones_newest_first_narrowed_by_a_search_and_opens_one_by_its_keys()
     {
         using IDisposable theme = TestsTheme();
@@ -93,8 +111,12 @@ public sealed class WelcomeTests : IClassFixture<WelcomeTests.Workspaces>, IDisp
         Ui.Press(window, "UP");
         Assert.Equal(Name(beta), window.Welcome.Selected?.Name);
         Ui.Press(window, "DOWN");
+        Assert.Equal(Name(alpha), window.Welcome.Selected?.Name);
+        // Enter on the row a click gave the keys opens it, as Enter in the search does.
+        ListBox list = window.Welcome.GetVisualDescendants().OfType<ListBox>().Single();
+        Ui.Click(Ui.Row(list, window.Welcome.Selected!));
         Ui.Press(window, "ENTER");
-        Assert.True(window.Folder == PathNames.Canonical(alpha), $"Down and Enter on {Name(alpha)} opened {window.Folder ?? "nothing"}");
+        Assert.True(window.Folder == PathNames.Canonical(alpha), $"Down and Enter on {Name(alpha)}'s row opened {window.Folder ?? "nothing"}");
         window.Close();
     }
 

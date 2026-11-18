@@ -61,13 +61,18 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>Saves before anything else hears of the close, so the language server and the rest go only once the
-    /// edits are on disk; a file that cannot be written keeps the window open, its edits with it, and asks whether to make
-    /// it writable or close without it (<see cref="CloseUnsavedAsync"/>). A save still landing holds the close until it
-    /// has (<see cref="CloseLandedAsync"/>), and a program Hot Reload changed that it would stop is asked about (<see
-    /// cref="CloseHeldAsync"/>).</summary>
+    /// <summary>Saves before anything else hears of the close (but an agent's input closing the last window, <see
+    /// cref="LastCloseRefused"/>); a file that cannot be written keeps the window open and asks whether to make it writable
+    /// or close without it (<see cref="CloseUnsavedAsync"/>). A save still landing holds the close until it has (<see
+    /// cref="CloseLandedAsync"/>), a program Hot Reload changed that it would stop is asked about (<see
+    /// cref="CloseHeldAsync"/>), and so are the containers of runs Detach let go of (<see cref="CloseLetGoAsync"/>).</summary>
     protected override void OnClosing(WindowClosingEventArgs e)
     {
+        if (LastCloseRefused())
+        {
+            e.Cancel = true;
+            return;
+        }
         // Passenger's quit (File, Exit; Restart to Update) and the system's (the application menu's Quit) keep each solution.
         bool quit = PassengerApp.Quitting || e.CloseReason is WindowCloseReason.ApplicationShutdown or WindowCloseReason.OSShutdown;
         if (Autosaves && !(Editors.SaveAll(new HashSet<OpenDocument>(conflicted.Concat(leftUnsaved))) && conflicted.Count == 0))
@@ -87,6 +92,13 @@ public partial class MainWindow
         {
             e.Cancel = true;
             IdeErrors.Observe(CloseHeldAsync(held, quit));
+            return;
+        }
+        // The containers of runs Detach let go of: stopped with the folder, or left running as the person's.
+        if (e.CloseReason != WindowCloseReason.OSShutdown && AsksOfLetGo)
+        {
+            e.Cancel = true;
+            IdeErrors.Observe(CloseLetGoAsync(quit));
             return;
         }
         quitting = quit;
@@ -123,8 +135,9 @@ public partial class MainWindow
     }
 
     /// <summary>File, Save (the file shown as it is pressed) or Save All: each changed file first gets what Settings
-    /// ask of a save (Run eslint --fix on save, then Prettier's Run on save, or a GDScript's Reformat on save), which an
-    /// explicit save runs and autosave never does, each one undoable edit. The files are saved whatever came of those.</summary>
+    /// ask of a save (Run eslint --fix on save, then Prettier's Run on save, or a GDScript's Reformat on save, else
+    /// Reformat on save), which an explicit save runs and autosave never does, each one undoable edit. The files are saved
+    /// whatever came of those, a file Reformat on save left as it was said once.</summary>
     private async Task SaveExplicitly(bool all)
     {
         OpenDocument? pressed = all ? null : Editors.Active?.Saves;
@@ -136,6 +149,7 @@ public partial class MainWindow
             status.Text = held;
             saving.RemoveAll(d => Editors.HeldElsewhere(d.Path) is not null);
         }
+        List<string> unformatted = [];
         BackgroundWork.Begin();
         try
         {
@@ -143,13 +157,20 @@ public partial class MainWindow
             {
                 try
                 {
-                    await assist.BeforeSave(document);
+                    if (await assist.BeforeSave(document) is { } why)
+                    {
+                        unformatted.Add(why);
+                    }
                 }
                 catch (Exception error)
                 {
                     // The save goes on without what failed, which IDE Internal Errors shows.
                     IdeErrors.Report(error);
                 }
+            }
+            if (unformatted.Count > 0)
+            {
+                status.Text = unformatted.Count == 1 ? unformatted[0] : $"{unformatted[0]} (and {Plural.Of(unformatted.Count - 1, "more file")})";
             }
             if (all && held is null)
             {

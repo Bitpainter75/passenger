@@ -109,6 +109,8 @@ public sealed class PlatformChoosingAppFolder : DesktopAgentAppFolder
                     return AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont()
                         .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).StartWithClassicDesktopLifetime(args);
                 }
+                // A helper holding the app's output a moment past its end, which the run's end waits for and its inspector's does not.
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("sleep", "1") { UseShellExecute = false })!.Dispose();
                 AppBuilder.Configure<App>().UseX11().UseSkia().UseHarfBuzz().WithInterFont().SetupWithoutStarting();
                 System.Console.WriteLine("{{PlatformStarted}}");
                 return 3;
@@ -206,6 +208,11 @@ public sealed class McpUnseenAppTests : McpRig, IClassFixture<DesktopAgentAppFol
 
         Assert.StartsWith("Clicked Button#Count @", Text(await Call(client, McpTools.AppClick, new() { ["control"] = "#Count" })), StringComparison.Ordinal);
         Assert.Contains("\"Clicked once\"", Text(await Call(client, McpTools.AppTree, new() { ["control"] = "#Counter" })), StringComparison.Ordinal);
+        // Its text boxes take its system's command key on the headless platform as on its screen, the one primary holds.
+        Assert.Contains("it shows \"Ada\"", Text(await Call(client, McpTools.AppType, new() { ["control"] = "#NameBox", ["text"] = "Ada" })), StringComparison.Ordinal);
+        string replaced = Text(await Call(client, McpTools.AppKey, new() { ["control"] = "#NameBox", ["keys"] = "primary+A G" }));
+        Assert.True(replaced.Contains("it shows \"g\"", StringComparison.Ordinal),
+            $"primary+A, {(OperatingSystem.IsMacOS() ? "Cmd" : "Ctrl")}+A, did not select the text box's text for G to replace: {replaced}");
 
         await Call(client, McpTools.Edit, new() { ["path"] = "MainWindow.axaml", ["oldText"] = "Text=\"Nobody greeted\"", ["newText"] = "Text=\"Greeted unseen\"" });
         JsonElement reloaded = await Call(client, McpTools.HotReload);
@@ -290,7 +297,8 @@ public sealed class McpUnseenAppTests : McpRig, IClassFixture<DesktopAgentAppFol
 
     /// <summary>A Main whose own code uses the headless platform chooses for itself: the platform loaded and left is no end,
     /// the headless one comes up with no Main left out, and one of a screen ends the app as it starts, before it has done
-    /// anything there. Windows puts the app on a desktop of its own instead.</summary>
+    /// anything there, answered as ended though a helper it started holds its output a moment longer, so its inspector's
+    /// end is heard well before the run's. Windows puts the app on a desktop of its own instead.</summary>
     [Fact]
     public async Task A_main_choosing_its_platform_runs_on_the_headless_one_and_ends_as_it_starts_one_of_a_screen()
     {

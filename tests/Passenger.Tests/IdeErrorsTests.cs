@@ -226,8 +226,8 @@ public sealed class IdeErrorsTests : IDisposable
 
     /// <summary>Every place src's code lets go of a task it started (DroppedTasks): a discard, a call as a statement, a
     /// lambda for a delegate that returns nothing, a continuation that only marks a fault seen among them (that is
-    /// UnawaitedWork.Dismiss's). Passed over: a project not built, the container tools (only the solution's build and the
-    /// release make them).</summary>
+    /// UnawaitedWork.Dismiss's). Passed over: a folder of no .NET project (the debugger's relay is C), a project not built,
+    /// the container tools (only the solution's build and the release make them).</summary>
     [Gate]
     [AvaloniaFact]
     public void Nothing_in_src_leaves_a_fault_in_the_work_it_starts_for_the_garbage_collector_to_find()
@@ -238,7 +238,12 @@ public sealed class IdeErrorsTests : IDisposable
         foreach (string project in Directory.GetDirectories(Path.Combine(root, "src")).Order(StringComparer.Ordinal))
         {
             string name = Path.GetFileName(project);
-            Match named = Regex.Match(File.ReadAllText(Path.Combine(project, $"{name}.csproj")), "<AssemblyName>([^<]+)</AssemblyName>");
+            string projectFile = Path.Combine(project, $"{name}.csproj");
+            if (!File.Exists(projectFile))
+            {
+                continue;
+            }
+            Match named = Regex.Match(File.ReadAllText(projectFile), "<AssemblyName>([^<]+)</AssemblyName>");
             string assembly = Path.Combine(root, "artifacts", "bin", name, "debug", $"{(named.Success ? named.Groups[1].Value : name)}.dll");
             if (!File.Exists(assembly))
             {
@@ -447,6 +452,40 @@ public sealed class IdeErrorsTests : IDisposable
         Assert.True(Core.BackgroundWork.Pending == 0, $"{Core.BackgroundWork.Pending} pieces of the failed test's work were still held for the next test to wait out");
     }
 
+    /// <summary>A window closed while its C# file's parse after a key has yet to land lets go of that parse with the file, as
+    /// nothing draws it again, so a window opened after it is quiet at once rather than waiting for good on its colours.</summary>
+    [AvaloniaFact]
+    public void A_window_closed_while_a_C_sharp_files_parse_after_a_key_is_held_leaves_the_next_window_quiet()
+    {
+        File.WriteAllText(Path.Combine(folder, "Program.cs"), "class Program\n{\n}\n");
+        TaskCompletionSource parse = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
+        try
+        {
+            window.OpenFile("Program.cs");
+            Ui.Settle();
+            Languages.CSharp.CSharpHighlighter syntax = window.EditorArea.Active!.Syntax!;
+            int parses = syntax.Worked.Parses;
+            window.EditorArea.CodeEditor.Focus();
+            Languages.CSharp.CSharpHighlighter.HeldParses = parse.Task;
+            window.KeyTextInput("x");
+            Languages.CSharp.CSharpHighlighter.HeldParses = null;
+            window.Close();
+
+            MainWindow next = new() { Width = 1200, Height = 800, StartsLanguageServer = false };
+            next.Show();
+            Assert.True(Ui.Quiet(TimeSpan.FromSeconds(90)),
+                $"The parse under way as the window closed still held the IDE's quiet, so every window after it waits for good on colours nothing draws:\n{Ui.Busy()}");
+            Assert.True(syntax.Worked.Parses == parses, "The key's parse ran though it was held, so the window closed with no parse under way to let go of");
+            next.Close();
+        }
+        finally
+        {
+            Languages.CSharp.CSharpHighlighter.HeldParses = null;
+            parse.TrySetResult();
+        }
+    }
+
     /// <summary>A window test that closes its own window, as most do, is over only once what that window started has ended,
     /// as one it left open is: here a language server that answers nothing, which the window's end kills at its limit. On
     /// Windows a program still ending holds the DLLs it loaded, which the next test's reset of a shared project deletes.</summary>
@@ -507,8 +546,9 @@ public sealed class IdeErrorsTests : IDisposable
         }
         Assert.Equal("Find Usages failed: the language server stopped responding, so it was ended", window.Status);
         string[] said = [.. Ui.IdeLog().Split('\n').Where(l => l.Contains($"process {first})", StringComparison.Ordinal))];
-        Assert.True(said.Any(l => l.Contains($"process {first}) is not responding: {Passenger.Lsp.LspMethods.References} waited", StringComparison.Ordinal)),
-            $"The log did not say the server stopped answering Find Usages; of process {first} it said: {string.Join(" | ", said)}");
+        // The first request past its limit is named, which may be one the window asked just before the stop (a refresh's colours).
+        Assert.True(said.Any(l => l.Contains($"process {first}) is not responding: ", StringComparison.Ordinal) && l.Contains(" waited ", StringComparison.Ordinal)),
+            $"The log did not say the server stopped answering; of process {first} it said: {string.Join(" | ", said)}");
         Ui.WaitFor(() => !Running(first), "the server that stopped answering to be ended, not left behind");
 
         TypeAnErrorAndSeeItReported(window);

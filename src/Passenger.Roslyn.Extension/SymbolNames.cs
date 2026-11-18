@@ -29,6 +29,42 @@ public sealed class SymbolAt : IExtensionDocumentMessageHandler<Caret, SymbolsFo
     }
 }
 
+/// <summary>What the symbols declared at places are in (<see cref="SymbolNames.ContainerOf"/>), as a symbol found by name is
+/// told it, for symbols found otherwise (Go to Symbol's).</summary>
+public sealed class SymbolContainers : IExtensionWorkspaceMessageHandler<ContainersAsked, ContainersFound>
+{
+    public async Task<ContainersFound> ExecuteAsync(ContainersAsked message, ExtensionWorkspaceMessageContext context, CancellationToken cancellationToken)
+    {
+        List<string?> found = [];
+        foreach (UriSpan declared in message.Declarations)
+        {
+            found.Add(await ContainerAsync(context.Solution, declared, cancellationToken).ConfigureAwait(false));
+        }
+        return new ContainersFound(found);
+    }
+
+    /// <summary>The container of the symbol whose declaration's name is at a span's start: the first a node from its token
+    /// outward declares.</summary>
+    private static async Task<string?> ContainerAsync(Solution solution, UriSpan declared, CancellationToken cancel)
+    {
+        if ((await solution.GetTextDocumentsAsync(new global::Roslyn.LanguageServer.Protocol.DocumentUri(declared.Uri), cancel).ConfigureAwait(false)).OfType<Document>().FirstOrDefault() is not { } document
+            || await document.GetSyntaxRootAsync(cancel).ConfigureAwait(false) is not { } root
+            || await document.GetSemanticModelAsync(cancel).ConfigureAwait(false) is not { } model)
+        {
+            return null;
+        }
+        int at = WrittenPlaces.Offset(await document.GetTextAsync(cancel).ConfigureAwait(false), declared.Start);
+        for (SyntaxNode? node = root.FindToken(at).Parent; node is not null; node = node.Parent)
+        {
+            if (model.GetDeclaredSymbol(node, cancel) is { } symbol)
+            {
+                return SymbolNames.ContainerOf(symbol);
+            }
+        }
+        return null;
+    }
+}
+
 /// <summary>The class a Razor component's file makes (<see cref="SymbolNames.ComponentAsync"/>).</summary>
 public sealed class ComponentClass : IExtensionWorkspaceMessageHandler<ComponentAsked, ComponentFound>
 {
@@ -53,7 +89,7 @@ internal static class SymbolNames
     /// project's.</summary>
     public static async Task<ComponentFound> ComponentAsync(Solution solution, string path, CancellationToken cancel)
     {
-        foreach (DocumentId id in solution.GetDocumentIdsWithFilePath(path))
+        foreach (DocumentId id in DocumentIdsOf(solution, path))
         {
             if (solution.GetAdditionalDocument(id) is not { FilePath: { } file } razor || !RazorFiles.Is(file) || MadeOf(razor.Project, file) is not { } made)
             {
@@ -117,7 +153,7 @@ internal static class SymbolNames
             }
             IEnumerable<ISymbol> declared = bracketed ? [] :
                 [.. await SymbolFinder.FindSourceDeclarationsAsync(solution, Bare(last), ignoreCase: false, cancel).ConfigureAwait(false),
-                .. await RazorDeclarationsAsync(solution, Bare(last), cancel).ConfigureAwait(false)];
+                .. await GeneratedDeclarationsAsync(solution, Bare(last), cancel).ConfigureAwait(false)];
             foreach (ISymbol symbol in declared)
             {
                 if (In(symbol, path) && Takes(symbol, parameters))
@@ -131,19 +167,41 @@ internal static class SymbolNames
                 }
             }
         }
-        // Each target framework's project declares the symbol again: one of each, by its id and its first place.
-        List<NamedSymbol> named = [.. found.Select(s => Named(solution, s)).Where(s => s.Path is not null)
-            .DistinctBy(s => (s.Id ?? s.Shown, s.Path, s.At))
-            .OrderBy(s => s.Shown, StringComparer.Ordinal).ThenBy(s => s.Path, StringComparer.Ordinal)];
+        // Each target framework's project declares the symbol again: one of each, the solution's own files' first.
+        List<NamedSymbol> named = [.. found.Distinct(SymbolEqualityComparer.Default).Select(s => Named(solution, s)).Where(s => s.Path is not null || s.Generated is not null)
+            .DistinctBy(s => (s.Id ?? s.Shown, s.Path ?? s.Generated, s.At))
+            .OrderBy(s => s.Path is null).ThenBy(s => s.Shown, StringComparer.Ordinal).ThenBy(s => s.Path ?? s.Generated, StringComparer.Ordinal)];
         return new SymbolsFound([.. named.Take(limit)], Math.Max(0, named.Count - limit));
     }
 
     public static NamedSymbol Named(Solution solution, ISymbol symbol)
     {
         (string? path, Place? at) = Declared(solution, symbol);
-        string? container = symbol.ContainingType?.ToDisplayString(Short)
-            ?? (symbol.ContainingNamespace is { IsGlobalNamespace: false } space ? space.ToDisplayString() : null);
-        return new NamedSymbol(symbol.Name, symbol.ToDisplayString(Short), KindOf(symbol), symbol.OriginalDefinition.GetDocumentationCommentId(), container, path, at);
+        NamedSymbol named = new(symbol.Name, symbol.ToDisplayString(Short), KindOf(symbol), symbol.OriginalDefinition.GetDocumentationCommentId(), ContainerOf(symbol), path, at);
+        if (path is not null || GeneratedPlace(solution, symbol) is not { } made)
+        {
+            return named;
+        }
+        return named with { Generated = made.Uri, At = made.At, MadeOf = ToolkitRenames.MakerOf(symbol, solution) is { } maker ? Named(solution, maker) : null };
+    }
+
+    /// <summary>What a symbol is in, as an agent is told it: a member's or a nested type's type, else its namespace; null in
+    /// the global namespace.</summary>
+    public static string? ContainerOf(ISymbol symbol) => symbol.ContainingType?.ToDisplayString(Short)
+        ?? (symbol.ContainingNamespace is { IsGlobalNamespace: false } space ? space.ToDisplayString() : null);
+
+    /// <summary>The first of a symbol's declarations in a source generator's document, by the server's URI of it; null for a
+    /// symbol no generator declares.</summary>
+    private static (string Uri, Place At)? GeneratedPlace(Solution solution, ISymbol symbol)
+    {
+        foreach (Location location in symbol.Locations.Where(l => l.IsInSource && l.SourceTree is not null))
+        {
+            if (solution.GetDocument(location.SourceTree!) is SourceGeneratedDocument generated)
+            {
+                return (SourceGeneratedDocumentUri.Create(generated.Identity).UriString, PlaceOf(location.GetLineSpan().StartLinePosition));
+            }
+        }
+        return null;
     }
 
     /// <summary>The first of a symbol's declarations in a file of the solution's own, a Razor file's where its generated
@@ -174,19 +232,19 @@ internal static class SymbolNames
         return (null, null);
     }
 
-    /// <summary>The symbols a name names that Razor files declare, in the C# Razor's generator makes of them, which the
-    /// solution's index of declarations does not read; only a project with Razor files is asked.</summary>
-    private static async Task<IReadOnlyList<ISymbol>> RazorDeclarationsAsync(Solution solution, string name, CancellationToken cancel)
+    /// <summary>The symbols a name names that source generators declare (a Razor file's C#, a regular expression's, a XAML
+    /// file's names), which the solution's index of declarations does not read; only a project whose generators made
+    /// documents is asked.</summary>
+    private static async Task<IReadOnlyList<ISymbol>> GeneratedDeclarationsAsync(Solution solution, string name, CancellationToken cancel)
     {
         List<ISymbol> found = [];
-        foreach (Project project in solution.Projects.Where(p => p.AdditionalDocuments.Any(d => RazorFiles.Is(d.FilePath))))
+        foreach (Project project in solution.Projects)
         {
-            HashSet<string> generated = [.. (await project.GetSourceGeneratedDocumentsAsync(cancel).ConfigureAwait(false))
-                .Where(d => IsRazorGenerated(d.HintName) && d.FilePath is not null).Select(d => d.FilePath!)];
-            if (generated.Count > 0 && await project.GetCompilationAsync(cancel).ConfigureAwait(false) is { } compilation)
+            if ((await project.GetSourceGeneratedDocumentsAsync(cancel).ConfigureAwait(false)).Any()
+                && await project.GetCompilationAsync(cancel).ConfigureAwait(false) is { } compilation)
             {
-                found.AddRange(compilation.GetSymbolsWithName(n => n == name, SymbolFilter.TypeAndMember, cancel)
-                    .Where(s => s.Locations.Any(l => l.SourceTree?.FilePath is { } tree && generated.Contains(tree))));
+                found.AddRange(compilation.GetSymbolsWithName(name, SymbolFilter.TypeAndMember, cancel)
+                    .Where(s => s.Locations.Any(l => l.SourceTree is { } tree && solution.GetDocument(tree) is SourceGeneratedDocument)));
             }
         }
         return found;

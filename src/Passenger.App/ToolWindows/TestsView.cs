@@ -9,6 +9,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Passenger.App.Testing;
+using Passenger.Core;
 using Passenger.Editor;
 using Passenger.Text;
 
@@ -36,7 +37,7 @@ public sealed class TestsView : DockPanel
         (TestState.Running, "Running Tests", IconKeys.TestRunning, TokenKeys.Test_Running),
     ];
 
-    private readonly ListBox tree;
+    private readonly TreeList tree;
     private readonly TextDocument detailsText = new();
     private readonly DockPanel result;
 
@@ -59,7 +60,7 @@ public sealed class TestsView : DockPanel
     public TestsView(TestTree model)
     {
         Model = model;
-        tree = new ListBox
+        tree = new TreeList
         {
             Classes = { StyleClasses.Tree },
             ItemsSource = model.Rows,
@@ -67,22 +68,25 @@ public sealed class TestsView : DockPanel
         };
         ReusedRows.Use(tree, () => new TestRow(model));
         tree.SelectionChanged += (_, _) => ShowDetails();
-        tree.DoubleTapped += (_, _) =>
+        // A double click and Enter open or close a row with rows under it but a method's, and go to any other.
+        TreeKeys.Attach<TestNode>(tree, model.Toggle, GoTo, new ListActs
         {
-            if (tree.SelectedItem is not TestNode node)
+            Open = () =>
             {
-                return;
-            }
-            if (node.HasChildren && node.Kind != TestNodeKind.Method)
-            {
-                model.Toggle(node);
-            }
-            else
-            {
-                GoToRequested?.Invoke(this, node);
-            }
-        };
-        TreeKeys.Attach<TestNode>(tree, model.Toggle, GoTo);
+                if (tree.SelectedItem is not TestNode node)
+                {
+                    return;
+                }
+                if (node.HasChildren && node.Kind != TestNodeKind.Method)
+                {
+                    model.Toggle(node);
+                }
+                else
+                {
+                    GoToRequested?.Invoke(this, node);
+                }
+            },
+        });
         ListMenus.Attach(tree, () => tree.SelectedItem is not TestNode chosen ? [] :
         [
             ListMenus.Item("Run", Keys(AppActions.RunTests), () => RunRequested?.Invoke(this, false)),
@@ -183,6 +187,7 @@ public sealed class TestsView : DockPanel
         {
             Document = detailsText,
             IsReadOnly = true,
+            ReadOnlyWhy = Refusals.OutputReadOnly,
             LineCommentPrefix = null,
             ShowLineNumbers = false,
             ShowErrorStripe = false,
@@ -454,8 +459,6 @@ public sealed class TestsView : DockPanel
         }
     }
 
-    private static string Format(TimeSpan duration) =>
-        duration.TotalSeconds >= 1 ? $"{duration.TotalSeconds:0.0} s" : $"{Math.Max(1, (int)duration.TotalMilliseconds)} ms";
 
     /// <summary>A row of the tree for whichever node the list gives its container, handed another as the list scrolls: it
     /// follows its node's changes only while it is shown, and lets go of them when the list takes it away or gives it
@@ -587,7 +590,7 @@ public sealed class TestsView : DockPanel
             state.ForegroundKey = brush;
             state.Width = state.Height = size;
             state.Margin = new Thickness((16 - size) / 2, 0, ((16 - size) / 2) + 6, 0);
-            duration.Text = node.State is TestState.Passed or TestState.Failed && node.Duration > TimeSpan.Zero ? Format(node.Duration) : string.Empty;
+            duration.Text = node.State is TestState.Passed or TestState.Failed && node.Duration > TimeSpan.Zero ? Durations.Said(node.Duration) : string.Empty;
             earlier.Text = node.Kind is not (TestNodeKind.Method or TestNodeKind.Row) ? string.Empty
                 : node.EarlierRun is { } ran ? $"earlier run, {Earlier(ran)}{(node.CodeChanged ? "; code changed" : string.Empty)}"
                 : node.CodeChanged && node.State is not (TestState.NotRun or TestState.Running) ? "code changed"

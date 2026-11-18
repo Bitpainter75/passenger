@@ -9,6 +9,7 @@ using Passenger.App.Debugging;
 using Passenger.App.Docking;
 using Passenger.App.Editors;
 using Passenger.App.LiveTree;
+using Passenger.App.Run.Devices;
 using Passenger.App.Settings;
 using Passenger.App.Telemetry;
 using Passenger.App.ToolWindows;
@@ -53,6 +54,14 @@ public sealed record BuildRunParts(
     /// <summary>Opens a folder in the file manager: where a publish put the app, from the status bar's word that it did.</summary>
     public Action<string>? ShowFolder { get; init; }
 
+    /// <summary>A run of a project (its path and name) whose Mac Catalyst build trims .NET's own assemblies: the window offers
+    /// over the Run window to keep them whole in its Debug build.</summary>
+    public Action<string, string>? Trimmed { get; init; }
+
+    /// <summary>A program run with the Run window's console, or a Debug tab's, said it needs a terminal: the window offers over
+    /// that console to start it in one.</summary>
+    public Action<TerminalNeed, OutputView>? NeedsTerminal { get; init; }
+
     /// <summary>Lands the files a folder holds in another, as the window writes files (one command of Undo named by the
     /// title, for those in the open folder): the files written, or why not.</summary>
     public Func<string, string, string, Task<(IReadOnlyList<string> Written, string? Problem)>>? LandFiles { get; init; }
@@ -65,8 +74,8 @@ public sealed record BuildRunParts(
     public Action<string, TextPosition>? Navigate { get; init; }
 
     /// <summary>Asks the person whether a container run may replace containers of its Compose project Passenger did not make
-    /// (true), given the configuration, the project and those containers' names; closed unanswered (false) once the start is
-    /// stopped.</summary>
+    /// for its folder (true), given the configuration, the project and those containers' names; closed unanswered (false)
+    /// once the start is stopped.</summary>
     public Func<string, string, IReadOnlyList<string>, CancellationToken, Task<bool>>? AskReplace { get; init; }
 
     /// <summary>Plays a configuration whose game Godot's editor open on the project plays (<see cref="RunConfiguration.GodotInEditor"/>),
@@ -130,6 +139,13 @@ public sealed partial class BuildRunController
     private TogetherBuild? lastTogether;
     private string? buildFramework;
     private string? buildOutput;
+
+    /// <summary>The global properties the build under way is given beyond its configuration's (<see cref="BuildStep.Properties"/>).</summary>
+    private IReadOnlyList<string>? buildProperties;
+
+    /// <summary>The workspace whose build configuration the build under way is given, a run's own (<see cref="ProjectSession.WorkspaceOfAsync"/>);
+    /// null for the folder's, which a build of its own is given.</summary>
+    private WorkspaceModel? buildConfigured;
     private Action<BuildOutcome>? afterBuild;
 
     /// <summary>What a person's build under way checked before each of its dotnet steps (<see cref="UpToDate"/>), kept once
@@ -163,6 +179,7 @@ public sealed partial class BuildRunController
         // A Debug tab that comes or goes brings its app's failed bindings to Problems, or takes them away.
         session.InspectedChanged += (_, _) => ShowBindings();
         session.GameStarted += (_, game) => FollowGame(game);
+        session.Debug.ExceptionRead += (_, stopped) => HearThrown(stopped);
         session.Builder.Line += (_, line) =>
         {
             (Problem? next, bool continued) = BuildOutput.Next(reading, line, builtPaths);
@@ -327,7 +344,7 @@ public sealed partial class BuildRunController
             IdeErrors.Observe(PublishAsync(again with { Folder = null }));
             return;
         }
-        Start(buildKind, lastProjects, null, buildFramework, BuildCause.Explicit, null, null, buildOutput, lastTogether);
+        Start(buildKind, lastProjects, null, buildFramework, BuildCause.Explicit, null, null, buildOutput, lastTogether, buildConfigured, buildProperties);
     }
 
     /// <summary>Builds, rebuilds or cleans the solution, or the projects given one after another (stopping at the first
@@ -338,10 +355,15 @@ public sealed partial class BuildRunController
     public void Build(BuildKind kind, IReadOnlyList<string>? projects = null, Action<BuildOutcome>? then = null, string? framework = null,
         BuildCause cause = BuildCause.Explicit, string? output = null) => Start(kind, projects, then, framework, cause, null, null, output);
 
+    /// <summary>What a dotnet build of a target is given for the build configuration chosen (none for the one MSBuild takes):
+    /// the run's own where the build under way is a run's, else the folder's.</summary>
+    private IReadOnlyList<string> Configured(string target) => (buildConfigured ?? session.Workspace)?.BuildArgumentsFor(target) ?? [];
+
     /// <summary>Starts a build, or the publish given (its work begun already, which the build holds until it ends), or the
-    /// build of projects side by side given (its project the one in <paramref name="projects"/>).</summary>
+    /// build of projects side by side given (its project the one in <paramref name="projects"/>), under a run's own build
+    /// configuration where <paramref name="configured"/> is given.</summary>
     private void Start(BuildKind kind, IReadOnlyList<string>? projects, Action<BuildOutcome>? then, string? framework, BuildCause cause, PublishRequest? publish,
-        Working? work, string? output = null, TogetherBuild? side = null)
+        Working? work, string? output = null, TogetherBuild? side = null, WorkspaceModel? configured = null, IReadOnlyList<string>? properties = null)
     {
         UiThread.Check();
         if (session.Folder is null || IsBuilding || session.IsEnded)
@@ -363,6 +385,8 @@ public sealed partial class BuildRunController
         lastTogether = side;
         buildFramework = projects is { Count: > 0 } ? framework : null;
         buildOutput = projects is { Count: > 0 } ? output : null;
+        buildConfigured = projects is { Count: > 0 } ? configured : null;
+        buildProperties = projects is { Count: > 0 } ? properties : null;
         IReadOnlyList<string> whole = session.Workspace!.BuildTargets(session.Projects);
         buildQueue.Clear();
         // A folder with no solution or project of its own is built only where MSBuild would find one there.
@@ -406,24 +430,37 @@ public sealed partial class BuildRunController
             // It would compile the text on disk, not what the editor shows.
             FinishBuild(new BuildOutcome(BuildStatus.NotStarted, unsaved));
         }
-        else if (FileText.Landings().Count == 0)
-        {
-            BuildNext(first: true);
-        }
         else
         {
-            IdeErrors.Observe(BuildLandedAsync());
+            IdeErrors.Observe(BuildAsSavedAsync());
         }
     }
 
     /// <summary>Starts the build once the saves still landing have (<see cref="EditorArea.LandedAsync"/>), so it compiles what
-    /// was saved: one that never lands, or a stop meanwhile, ends the build unstarted, saying why.</summary>
-    private async Task BuildLandedAsync()
+    /// was saved, and the projects stand as saved (<see cref="ProjectSession.ProjectsAsWrittenAsync"/>), so what it is given
+    /// and checks by them (Windows targeting, a project's frameworks) is as written: one that never lands, or a stop
+    /// meanwhile, ends the build unstarted, saying why.</summary>
+    private async Task BuildAsSavedAsync()
     {
         Working? work = buildWork;
-        if (await EditorArea.LandedAsync(work, work?.Stopping ?? CancellationToken.None) is { } unsaved)
+        CancellationToken stopping = work?.Stopping ?? CancellationToken.None;
+        string stage = work?.Stage ?? string.Empty;
+        if (FileText.Landings().Count > 0 && await EditorArea.LandedAsync(work, stopping) is { } unsaved)
         {
             FinishBuild(work is { IsStopped: true } ? new BuildOutcome(BuildStatus.Stopped, "Build stopped") : new BuildOutcome(BuildStatus.NotStarted, unsaved));
+            return;
+        }
+        try
+        {
+            await session.ProjectsAsWrittenAsync(said => work?.Say(said ?? stage), stopping);
+        }
+        catch (OperationCanceledException) when (stopping.IsCancellationRequested)
+        {
+            // Said below, as a stop while the projects' files were looked at is.
+        }
+        if (work is { IsStopped: true })
+        {
+            FinishBuild(new BuildOutcome(BuildStatus.Stopped, "Build stopped"));
         }
         else if (session.IsEnded)
         {
@@ -469,7 +506,8 @@ public sealed partial class BuildRunController
         parts.Say($"{verb} {what}…");
         buildWork?.Say($"{verb} {what}…");
         bool windows = WindowsTargeting(together?.Projects ?? [target]);
-        IReadOnlyList<string> arguments = publishing is { } publish ? publish.Arguments(windows) : BuildOutput.Arguments(target, buildKind, buildFramework, windows, buildOutput);
+        IReadOnlyList<string> arguments = publishing is { } publish ? publish.Arguments(windows)
+            : BuildOutput.Arguments(target, buildKind, buildFramework, windows, buildOutput, [.. Configured(target), .. buildProperties ?? []]);
         Func<CancellationToken, Task>? after = first ? BeforeFirstStepAsync : null;
         if (checking is { } checks)
         {
@@ -501,7 +539,8 @@ public sealed partial class BuildRunController
     private async Task CheckBeforeAsync(string target, bool windows, List<Checked> checks, CancellationToken stop)
     {
         List<(BuildStep Step, bool MustShow)> steps = session.Projects.FirstOrDefault(p => PathNames.Same(p.Path, target)) is { } project
-            ? buildFramework is null && buildOutput is null && Launched(project) is { } frameworks
+            ? buildProperties is not null ? []
+            : buildFramework is null && buildOutput is null && Launched(project) is { } frameworks
                 ? [.. frameworks.Select(framework => (new BuildStep(target, framework), true))]
                 : [(new BuildStep(target, buildFramework, buildOutput), false)]
             : session.Workspace?.Solution is { } solution && PathNames.Same(solution.Path, target)
@@ -509,14 +548,15 @@ public sealed partial class BuildRunController
                     .SelectMany(p => Launched(p) is { } frameworks ? frameworks.Select(framework => new BuildStep(p.Path, framework)) : [new BuildStep(p.Path, null)])
                     .Select(step => (step, true))]
                 : [];
-        if (steps.Count == 0 || session.Folder is not { } folder || session.IsEnded)
+        if (steps.Count == 0 || session.Folder is not { } folder || session.IsEnded || session.Workspace is not { } configured)
         {
             return;
         }
         // The host is asked of one framework at a time, each framework's projects side by side.
         List<List<(BuildStep Step, bool MustShow)>> asked = [.. steps.GroupBy(step => step.Step.Framework).Select(group => group.ToList())];
         IReadOnlyList<UpToDate.Check?>[] found = await BackgroundWork.Run(() => Task.WhenAll(asked.Select(group => UpToDate.CheckAsync([.. group.Select(step => step.Step)],
-            [.. group.Select(step => BuildOutput.Arguments(step.Step.Project, BuildKind.Build, step.Step.Framework, windows, step.Step.Output))], windows, folder, stop))));
+            [.. group.Select(step => BuildOutput.Arguments(step.Step.Project, BuildKind.Build, step.Step.Framework, windows, step.Step.Output, configured.BuildArgumentsFor(step.Step.Project)))],
+            windows, folder, stop, configured.BuiltWith))));
         checks.AddRange(found.Zip(asked).SelectMany(each => each.First.Zip(each.Second)).Where(each => each.First is not null)
             .Select(each => new Checked(each.First!, each.Second.MustShow)));
     }
@@ -755,13 +795,28 @@ public sealed partial class BuildRunController
         }
     }
 
-    /// <summary>A configuration's plan, with these arguments in place of its own if given, or why it has none.</summary>
+    /// <summary>A configuration's plan, with these arguments in place of its own if given, worked out in the workspace its run
+    /// reads (<see cref="ProjectSession.WorkspaceOfAsync"/>), its projects as the start's save wrote them
+    /// (<see cref="ProjectSession.ProjectsAsWrittenAsync"/>), or why it has none.</summary>
     public async Task<(LaunchPlan? Plan, string? Problem)> ResolvePlanAsync(RunConfiguration chosen, string? arguments, CancellationToken stop = default)
     {
         try
         {
-            return (await LaunchPlan.ResolveAsync(arguments is null ? chosen : chosen with { Arguments = arguments }, session.Projects, session.Workspace, parts.StateFolder(), stop,
-                parts.Settings().GodotExecutable, parts.Editors.Active?.Path, session.GodotEnvironment, parts.Unseen), null);
+            await session.ProjectsAsWrittenAsync(null, stop);
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+            return (null, StoppedStarting(chosen.Name));
+        }
+        (WorkspaceModel? configured, string? unconfigured) = await session.WorkspaceOfAsync(chosen);
+        if (unconfigured is not null)
+        {
+            return (null, unconfigured);
+        }
+        try
+        {
+            return (await LaunchPlan.ResolveAsync(arguments is null ? chosen : chosen with { Arguments = arguments }, session.Projects, configured, parts.StateFolder(), stop,
+                parts.Settings().GodotExecutable, parts.Editors.Active?.Path, session.GodotEnvironment, parts.Unseen, session.Targets.InForce), null);
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)
         {
@@ -829,11 +884,41 @@ public sealed partial class BuildRunController
         }
         using CancellationTokenSource collecting = CancellationTokenSource.CreateLinkedTokenSource(work.Stopping);
         Task<LaunchPlan>? told = collects && Collects(chosen, plan) ? CollectAsync(plan, collecting.Token) : null;
-        if (build && plan.Build is { } step && await BuildForAsync(step, work, reading) is { Succeeded: false } unbuilt)
+        if (build && plan.Build is { } step && await BuildForAsync(step, work, reading, plan.Workspace) is { Succeeded: false } unbuilt)
         {
             await collecting.CancelAsync();
             await AbandonAsync(told);
             return (null, Checkpoint(work, chosen.Name) ?? unbuilt.Message, false);
+        }
+        if (build && plan.Device is { App: null } && session.Projects.FirstOrDefault(p => PathNames.Same(p.Path, plan.Project!)) is { } device)
+        {
+            ProjectSession listing = session;
+            (LaunchPlan? installed, string? uninstalled) = await DeviceLaunches.ReadyAsync(plan, Workspace.ProjectModels.Properties(plan.Workspace, device), parts.Unseen,
+                work.Say, targets => UiThread.Post(() =>
+                {
+                    if (!listing.IsEnded)
+                    {
+                        listing.Targets.List(device, targets);
+                    }
+                }), work.Stopping, listing.Booted);
+            if (installed is null)
+            {
+                await collecting.CancelAsync();
+                await AbandonAsync(told);
+                return (null, Checkpoint(work, chosen.Name) ?? uninstalled, false);
+            }
+            plan = installed;
+        }
+        if (build && plan.MacCatalyst is { App: null } && session.Projects.FirstOrDefault(p => PathNames.Same(p.Path, plan.Project!)) is { } catalyst)
+        {
+            (LaunchPlan? opened, string? unopened) = await Devices.MacCatalystApps.ReadyAsync(plan, Workspace.ProjectModels.Properties(plan.Workspace, catalyst), work.Stopping);
+            if (opened is null)
+            {
+                await collecting.CancelAsync();
+                await AbandonAsync(told);
+                return (null, Checkpoint(work, chosen.Name) ?? unopened, false);
+            }
+            plan = opened;
         }
         if (told is not null)
         {
@@ -955,14 +1040,15 @@ public sealed partial class BuildRunController
     /// <summary>A start's build of what it starts, in the Build window, which comes forward only as Settings says for a build
     /// Run, Debug or Profile begins: stopped as the start is (<paramref name="stopping"/>), as Stop stops a build. What is
     /// open is saved first, <paramref name="reading"/> told just before; a project whose last build here stands
-    /// (<see cref="UpToDate"/>) is not built again, the Build window and the status bar saying so.</summary>
-    public Task<BuildOutcome> BuildForAsync(BuildStep step, CancellationToken stopping, Action? reading = null) =>
-        BuildForAsync([step.Project], stopping, null, step.Framework, step.Output, reading);
+    /// (<see cref="UpToDate"/>) is not built again, the Build window and the status bar saying so. Built as
+    /// <paramref name="configured"/>'s build configuration where given (a run's own), else as the folder's.</summary>
+    public Task<BuildOutcome> BuildForAsync(BuildStep step, CancellationToken stopping, Action? reading = null, WorkspaceModel? configured = null) =>
+        BuildForAsync([step.Project], stopping, null, step.Framework, step.Output, reading, configured, step.Properties);
 
     /// <summary>A start's build of what it starts, as <see cref="BuildForAsync(BuildStep, CancellationToken)"/>, saying in its
     /// work when it waits for a build under way; <paramref name="reading"/> is told as it saves the files its build reads.</summary>
-    public Task<BuildOutcome> BuildForAsync(BuildStep step, Working work, Action? reading = null) =>
-        BuildForAsync([step.Project], work.Stopping, work, step.Framework, step.Output, reading);
+    public Task<BuildOutcome> BuildForAsync(BuildStep step, Working work, Action? reading = null, WorkspaceModel? configured = null) =>
+        BuildForAsync([step.Project], work.Stopping, work, step.Framework, step.Output, reading, configured, step.Properties);
 
     /// <summary>What a start says of a project it did not build: nothing its build reads changed since its last.</summary>
     public static string UpToDateSaid(string project) => $"{project} is up to date: nothing its build reads has changed since it was built, so it was not built again";
@@ -973,10 +1059,11 @@ public sealed partial class BuildRunController
 
     /// <summary>A start's build of its projects (<see cref="BuildForAsync(BuildStep, CancellationToken)"/>), several side by
     /// side in one dotnet build (<see cref="TogetherBuild"/>), after any build under way: none is built when the last build
-    /// here of each stands, and all are when one does not, what each build left then kept for its next start's check.
-    /// <paramref name="reading"/> is told just before each save of the files, which the build then reads as saved.</summary>
+    /// here of each stands, and all are when one does not, what each build left then kept for its next start's check; one
+    /// given <paramref name="properties"/> of its own is always built. <paramref name="reading"/> is told just before each
+    /// save of the files, which the build then reads as saved.</summary>
     private async Task<BuildOutcome> BuildForAsync(IReadOnlyList<string> projects, CancellationToken stopping, Working? work, string? framework = null, string? output = null,
-        Action? reading = null)
+        Action? reading = null, WorkspaceModel? configured = null, IReadOnlyList<string>? properties = null)
     {
         UiThread.Check();
         List<UpToDate.Check> checks = [];
@@ -1010,10 +1097,20 @@ public sealed partial class BuildRunController
             }
             bool windows = WindowsTargeting(projects);
             string state = parts.StateFolder();
+            WorkspaceModel within = configured ?? session.Workspace ?? new WorkspaceModel(folder, null, []);
+            if (properties is not null)
+            {
+                if (IsBuilding)
+                {
+                    continue;
+                }
+                break;
+            }
             (IReadOnlyList<UpToDate.Check?> found, side) = await BackgroundWork.Run(async () => (
                 await UpToDate.CheckAsync([.. projects.Select(project => new BuildStep(project, framework, output))],
-                    [.. projects.Select(project => BuildOutput.Arguments(project, BuildKind.Build, framework, windows, output))], windows, folder, stopping),
-                projects.Count > 1 ? TogetherBuild.Write(state, folder, projects) : null));
+                    [.. projects.Select(project => BuildOutput.Arguments(project, BuildKind.Build, framework, windows, output, within.BuildArgumentsFor(project)))], windows, folder,
+                    stopping, within.BuiltWith),
+                projects.Count > 1 ? TogetherBuild.Write(state, folder, projects, within.BuiltTogetherWith(projects)) : null));
             if (stopping.IsCancellationRequested)
             {
                 return new BuildOutcome(BuildStatus.Stopped, "Build stopped");
@@ -1036,7 +1133,8 @@ public sealed partial class BuildRunController
         work?.Say($"Building {string.Join(", ", projects.Select(Path.GetFileNameWithoutExtension))}…");
         TaskCompletionSource<BuildOutcome> ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
         // Where they cannot be built together (TogetherBuild.Write's null), they are built one after another.
-        Start(BuildKind.Build, side is null ? projects : [side.Project], outcome => ended.TrySetResult(outcome), framework, BuildCause.BeforeLaunch, null, null, output, side);
+        Start(BuildKind.Build, side is null ? projects : [side.Project], outcome => ended.TrySetResult(outcome), framework, BuildCause.BeforeLaunch, null, null, output, side,
+            configured, properties);
         BuildOutcome built;
         // On the window's thread, and only while the build under way is this one; the folder's end stops it itself.
         using (stopping.Register(() => UiThread.Post(() =>
@@ -1103,13 +1201,22 @@ public sealed partial class BuildRunController
         {
             return Said(ActionWork.Busy(profiling));
         }
-        if (session.Profiled is { Run.HasExited: false } profiled)
+        if (session.Profiled is { Run.HasExited: false, Terminal: null } profiled)
         {
             return Said($"{profiled.Name}, which Profile started, uses the Run console: Kill it first");
         }
         if (parts.Work.Begin(AppActions.RunProgram, $"Working out how to run {chosen.Name}…") is not { } work)
         {
             return Said(ActionWork.Busy(parts.Work.Of(AppActions.RunProgram)!));
+        }
+        // What the Run window's last program said it needs is its own: this start is heard afresh where it uses the console.
+        HearNeeds(null, chosen.Name, debugged: false);
+        if (chosen.IsScript)
+        {
+            using (work)
+            {
+                return await RunScriptAsync(chosen, arguments, work);
+            }
         }
         if (chosen.IsContainer)
         {
@@ -1136,15 +1243,18 @@ public sealed partial class BuildRunController
             ShowInRun(null);
             UnfollowWatched();
             // dotnet watch builds the project itself, and runs it again after an edit it cannot apply.
-            bool wanted = (hotReload ?? parts.Settings().HotReload) && chosen.NamesNoOtherProgram(session.Projects);
+            bool functions = chosen.RunsFunctions(session.Projects);
+            bool wanted = (hotReload ?? parts.Settings().HotReload) && chosen.NamesNoOtherProgram(session.Projects) && !functions;
             bool godot = chosen.RunsGodot(session.Projects);
+            // An app on a device, or a Mac Catalyst app, takes its edits through Passenger's relay in it, which holds its start until the debugger attaches.
+            bool elsewhere = RunsOnDevice(chosen) || RunsOnMacCatalyst(chosen);
             // A game's errors, which Godot writes every frame they happen, folded in its console.
             parts.Views.Run.Fold = godot && !chosen.GodotEditor ? new Godot.GodotConsoleFold() : null;
             // An Avalonia or WPF app's XAML edits reach it through the inspector, which the app dotnet watch starts never carries.
             bool markup = wanted && !godot && await RunsXamlAppAsync(chosen);
-            bool watched = wanted && !godot && !markup;
+            bool watched = wanted && !godot && !markup && !elsewhere;
             // A Godot game and a XAML app take their edits through the debugger, attached quietly as each starts held; Godot's editor loads its builds itself.
-            bool reloaded = wanted && (godot && !chosen.GodotEditor || markup);
+            bool reloaded = wanted && (godot && !chosen.GodotEditor || markup || elsewhere);
             watching = watched;
             (LaunchPlan? plan, string? problem, _) = await PrepareAsync(chosen, arguments, work, build: !watched, reading: reloaded ? () =>
             {
@@ -1171,7 +1281,7 @@ public sealed partial class BuildRunController
                 return await RunCopiesAsync(chosen, plan, count, reloaded, work, Take(ref edits));
             }
             // A game of GDScript alone takes its saved scripts over its own connection: no debugger holds its start for C#'s edits.
-            bool heldStart = reloaded && !plan.ScriptsAlone;
+            bool heldStart = reloaded && !plan.ScriptsAlone && plan.Device is null && plan.MacCatalyst is null;
             work.Say($"Starting {chosen.Name}…");
             ran = chosen.Name;
             RunProject = Path.GetDirectoryName(plan.Project);
@@ -1182,10 +1292,34 @@ public sealed partial class BuildRunController
             session.RunPlan = plan;
             string running = watched || reloaded ? $"Running {chosen.Name} with Hot Reload: a save applies its changes"
                 : wanted && godot && !plan.ScriptsAlone ? $"Running {chosen.Name} without Hot Reload: {GodotLaunch.EditorReloads}"
+                : functions && (hotReload ?? parts.Settings().HotReload) ? $"Running {chosen.Name} without Hot Reload: {Refusals.FunctionsUnreloaded}"
                 : $"Running {chosen.Name}";
             // An Avalonia or WPF app is launched with the inspector in it, which tells of its failed bindings while it runs.
             LaunchPlan launched = session.InspectedRun(plan, watched);
             LiveApp? inspected = session.RunApp;
+            // Held from its first step on a device until what it puts in there is out again, which Stop and the folder's end wait for.
+            using Devices.DeviceStart? onDevice = (plan.Device?.App ?? (Devices.IDeviceApp?)plan.MacCatalyst?.App) is { } app ? session.StartsOnDevice(chosen.Name, app) : null;
+            (Devices.RelaySession? relay, UpdateHandlerHook? deviceHandlers, string? unrelayed) = reloaded && onDevice is not null
+                ? await RelayOnDeviceAsync(plan, onDevice, inspected, work) : (null, null, null);
+            handlers ??= deviceHandlers;
+            if (unrelayed is not null)
+            {
+                running = $"Running {chosen.Name} without Hot Reload: {unrelayed}";
+            }
+            if (relay is null && onDevice is not null)
+            {
+                await InspectOnDeviceAsync(onDevice, inspected, work);
+            }
+            if (work.Stopping.IsCancellationRequested)
+            {
+                // Stopped before its program starts (as what it puts on a device went in, say): it never starts, and what went in comes out first.
+                inspected?.Dispose();
+                if (onDevice is not null)
+                {
+                    await onDevice.TakeOutAsync();
+                }
+                return Said(Canceled(work, chosen.Name));
+            }
             ShowBindings();
             // dotnet watch opens no browser of its own: the plan's opens through the window once the program listens.
             Dictionary<string, string> variables = watched
@@ -1206,6 +1340,16 @@ public sealed partial class BuildRunController
                 {
                     (handlers, variables) = (hook, new Dictionary<string, string>(hooked.Environment));
                 }
+            }
+            if (plan.Device?.App is Devices.SimulatorApp simulator)
+            {
+                // A simulator's app takes its variables from simctl's launch: the inspector's, the relay's and the hook's with the plan's.
+                variables = Devices.SimulatorApp.Given(simulator.Variables(variables, inspected?.Device, relay, handlers));
+            }
+            else if (plan.MacCatalyst?.App is { } carried)
+            {
+                // A Mac Catalyst app takes the opener's environment, which the system hands it: the inspector's, the relay's and the hook's with the plan's.
+                variables = carried.Variables(variables, inspected?.Device, relay, handlers);
             }
             if (plan.Console == ConsoleKind.Terminal)
             {
@@ -1228,7 +1372,20 @@ public sealed partial class BuildRunController
                         {
                             return Said(unfollowed.Message);
                         }
-                        await AttachForHotReloadAsync(chosen.Name, inTerminal.Debuggee, null, work, Take(ref edits), running, Take(ref handlers), inspected);
+                        await AttachForHotReloadAsync(chosen.Name, inTerminal.Debuggee, null, work, Take(ref edits), running, Take(ref handlers), inspected, ProgramBuild.Of(plan));
+                    }
+                }
+                if (refused is null && session.InTerminal is { } apart)
+                {
+                    TakeOn(plan, apart.Ended);
+                }
+                if (onDevice is not null)
+                {
+                    onDevice.EndsWith(EndOnDeviceAsync(refused is null && session.InTerminal is { } shell ? shell.Ended : Task.FromResult(0), onDevice));
+                    if (refused is null && relay is not null)
+                    {
+                        await AttachOnDeviceForHotReloadAsync(chosen.Name, onDevice, relay, null, work, Take(ref edits), running, inspected, ProgramBuild.Of(plan),
+                            Take(ref handlers));
                     }
                 }
                 EndWith(inspected, refused is null && session.InTerminal is { } run ? run.Ended : Task.CompletedTask);
@@ -1246,9 +1403,14 @@ public sealed partial class BuildRunController
             {
                 parts.Views.Run.Append($"{note}\n");
             }
+            if (plan is { MacCatalyst.App.Whole: false, Project: { } trimmed })
+            {
+                parts.Trimmed?.Invoke(trimmed, chosen.Name);
+            }
             ShowInRun(dashboard);
             parts.Say(running);
             WatchBindings(inspected, parts.Views.Run);
+            HearNeeds(parts.Views.Run, chosen.Name, debugged: false);
             if (watched)
             {
                 FollowWatched(chosen.Name);
@@ -1259,6 +1421,7 @@ public sealed partial class BuildRunController
                 : await session.Runner.StartAsync(plan.Start(), variables));
             if (notStarted is null)
             {
+                TakeOn(plan, session.Runner.Ended);
                 parts.OpenBrowser(plan, session.Runner.Ended);
             }
             EndWith(inspected, notStarted is null ? session.Runner.Ended : Task.CompletedTask);
@@ -1267,9 +1430,19 @@ public sealed partial class BuildRunController
             {
                 Keep(Take(ref dashboard), session.Runner.Ended, () => session.Runner.WasStopped, said => parts.Views.Run.Append($"{said}\n"));
             }
+            if (onDevice is not null)
+            {
+                // Its shell on the device ends with the app; Stop ends the shell here, so the app is ended there too.
+                onDevice.EndsWith(EndOnDeviceAsync(notStarted is null ? session.Runner.Ended : Task.FromResult(0), onDevice));
+            }
+            if (notStarted is null && relay is not null && onDevice is not null)
+            {
+                await AttachOnDeviceForHotReloadAsync(chosen.Name, onDevice, relay, parts.Views.Run.Sink, work, Take(ref edits), running, inspected, ProgramBuild.Of(plan),
+                    Take(ref handlers));
+            }
             if (notStarted is null && heldStart && session.Runner.ProcessId is int id)
             {
-                await AttachForHotReloadAsync(chosen.Name, id, parts.Views.Run.Sink, work, Take(ref edits), running, Take(ref handlers), inspected);
+                await AttachForHotReloadAsync(chosen.Name, id, parts.Views.Run.Sink, work, Take(ref edits), running, Take(ref handlers), inspected, ProgramBuild.Of(plan));
             }
             return notStarted;
         }
@@ -1279,6 +1452,21 @@ public sealed partial class BuildRunController
             handlers?.Dispose();
             dashboard?.Dispose();
             work.Dispose();
+        }
+    }
+
+    /// <summary>An app the system starts apart from what its run started (a Mac Catalyst app's opener, simctl's launch on a
+    /// simulator) found once it runs by its start's own token, so it ends with Passenger, and a Mac Catalyst app with its run
+    /// as it <paramref name="ended"/>; a simulator's run ends its app through simctl.</summary>
+    private static void TakeOn(LaunchPlan plan, Task ended)
+    {
+        if (plan.MacCatalyst?.App is { } opened)
+        {
+            IdeErrors.Observe(Devices.MacCatalystApps.EndWithAsync(opened, ended));
+        }
+        else if (plan.Device?.App is Devices.SimulatorApp simulator)
+        {
+            IdeErrors.Observe(simulator.TakeOnAsync(ended));
         }
     }
 
@@ -1363,7 +1551,8 @@ public sealed partial class BuildRunController
             edits?.Dispose();
             return unfollowed.Message;
         }
-        await AttachForHotReloadAsync(each.Name, run.Debuggee, null, work, edits, $"Running {each.Name} with Hot Reload: a save applies its changes");
+        await AttachForHotReloadAsync(each.Name, run.Debuggee, null, work, edits, $"Running {each.Name} with Hot Reload: a save applies its changes",
+            builds: ProgramBuild.Of(each));
         return null;
 
         async Task CopyEnded()
@@ -1551,14 +1740,14 @@ public sealed partial class BuildRunController
     /// the program's own) and the status bar, which says <paramref name="running"/> once attached. One the debugger cannot
     /// reach is let go and runs without Hot Reload, saying why.</summary>
     private async Task AttachForHotReloadAsync(string name, int processId, ConsoleSink? console, Working work, BuiltEdits? edits, string running,
-        UpdateHandlerHook? handlers = null, LiveApp? app = null)
+        UpdateHandlerHook? handlers = null, LiveApp? app = null, ProgramBuild? builds = null)
     {
         work.Say($"Attaching to {name} for Hot Reload…");
         string? refused = await session.Debug.AttachForHotReloadAsync(processId, name, (line, error) =>
         {
             console?.Write($"{line}\n", error ? ConsoleStream.Error : ConsoleStream.Output);
             parts.Say(line);
-        }, cancellation: work.Stopping, edits: edits, handlers: handlers, app: app);
+        }, cancellation: work.Stopping, edits: edits, handlers: handlers, app: app, builds: builds);
         if (refused is null)
         {
             parts.Say(running);
@@ -1696,7 +1885,8 @@ public sealed partial class BuildRunController
     /// <summary>dotnet watch's command line for a plan: the project (a file-based program's C# file) for its framework, no
     /// launch profile (the plan has its values already), the program's own arguments after <c>--</c>, but none that are the
     /// project's RunArguments (its RunCommand's program's too), which dotnet watch gives it itself. It runs the program in
-    /// its own working folder, which is the plan's.</summary>
+    /// its own working folder, which is the plan's; the build configuration and platform the plan's workspace gives the
+    /// project (<see cref="LaunchPlan.Workspace"/>).</summary>
     private static List<string> Watch(LaunchPlan plan)
     {
         List<string> watch = ["watch", "--non-interactive", "run", Passenger.Host.ProgramFiles.IsProgram(plan.Project!) ? "--file" : "--project", plan.Project!, "--no-launch-profile"];
@@ -1704,6 +1894,7 @@ public sealed partial class BuildRunController
         {
             watch.AddRange(["--framework", framework]);
         }
+        watch.AddRange(plan.Workspace?.BuildArgumentsFor(plan.Project!, watched: true) ?? []);
         watch.Add("--");
         if (!plan.ArgumentsOfProject)
         {
@@ -1948,7 +2139,8 @@ public sealed partial class BuildRunController
                     return Said(asked);
                 }
                 parts.Dock.Show(ToolWindowIds.Aspire);
-                string? problem = await session.Aspire.StartAsync(configuration, mode, (step, reading) => BuildForAsync(step, work, reading), work.Stopping, https);
+                string? problem = await session.Aspire.StartAsync(configuration, mode, (step, reading, configured) => BuildForAsync(step, work, reading, configured), work.Stopping,
+                    https);
                 if (problem is not null)
                 {
                     return Said(problem);
@@ -2190,6 +2382,10 @@ public sealed partial class BuildRunController
 
     private async Task<string?> DebugAsync(RunConfiguration chosen, string? arguments, CancellationToken cancellation = default)
     {
+        if (chosen.IsScript)
+        {
+            return Said(Refusals.ScriptOnlyRuns(chosen.Name));
+        }
         if (chosen.IsMultiple)
         {
             return await StartProjectsAsync(chosen, debug: true, null, cancellation);
@@ -2221,6 +2417,7 @@ public sealed partial class BuildRunController
         }
         debugged[chosen.Name] = (chosen, arguments);
         profileTabs.Remove(chosen.Name);
+        HearNeeds(null, chosen.Name, debugged: true);
         using IDisposable held = BackgroundWork.Scope();
         if (await EndOwnRunAsync(chosen, work, "debug") is { } left)
         {
@@ -2375,6 +2572,19 @@ public sealed partial class BuildRunController
                 return Canceled(work, chosen.Name);
             }
         }
+        if (plan.Device?.App is { } device)
+        {
+            return await DebugOnDeviceAsync(plan, device, work, edits);
+        }
+        if (plan.MacCatalyst is { } catalyst)
+        {
+            // Its runtime's debugger libraries load only into a Mac Catalyst process: it is debugged through Passenger's relay in it.
+            return catalyst.App is { } opened ? await DebugOnDeviceAsync(plan, opened, work, edits) : $"Could not debug {plan.Name}: its Mac Catalyst app has not been built";
+        }
+        if (plan.Functions)
+        {
+            return await DebugFunctionsAsync(plan, work, edits);
+        }
         work.Say($"Starting {chosen.Name} under the debugger…");
         parts.Dock.Show(ToolWindowIds.Debug);
         parts.Views.Debug.ShowTab(console: true);
@@ -2401,6 +2611,8 @@ public sealed partial class BuildRunController
         // An Avalonia or WPF app is launched with the Live Visual Tree's inspector, held by its tab, ending with this debugging.
         (LaunchPlan launched, LiveApp? inspected) = session.Inspected(listened);
         Task<string?> starting = debug.StartAsync(launched, app: inspected, edits: edits, copies: copies);
+        // Its tab, chosen as the start began, has its console where the program writes there.
+        HearNeeds(copies is null && launched.Console == ConsoleKind.Internal ? debug.Chosen?.Console : null, chosen.Name, debugged: true);
         if (game is not null && debug.Chosen?.Console is { } gameConsole)
         {
             gameConsole.Fold = new Godot.GodotConsoleFold();
@@ -2430,6 +2642,23 @@ public sealed partial class BuildRunController
         else if (refused is null)
         {
             parts.OpenBrowser(plan, ended);
+        }
+        return refused;
+    }
+
+    /// <summary>Debugs a Functions app as func runs it (<see cref="Aspire.FunctionsHost"/>): func started with the app's worker
+    /// held for the debugger, which attaches to the worker once func has started it, func's output the session's console,
+    /// and func ended with the session. Null once the session is open, else why not.</summary>
+    private async Task<string?> DebugFunctionsAsync(LaunchPlan plan, Working work, BuiltEdits? edits)
+    {
+        work.Say($"Starting {plan.Name} by func, its worker held for the debugger…");
+        parts.Dock.Show(ToolWindowIds.Debug);
+        parts.Views.Debug.ShowTab(console: true);
+        DebugProject = Path.GetDirectoryName(plan.Project);
+        string? refused = await session.Debug.StartThroughAsync(Aspire.FunctionsHost.Debugged(plan), Aspire.FunctionsHost.StartedWorkerAsync, Aspire.FunctionsHost.NoWorker, edits);
+        if (refused is null)
+        {
+            parts.OpenBrowser(plan, DebugEnded(session.Debug.SessionNamed(plan.Name)));
         }
         return refused;
     }
@@ -2740,13 +2969,13 @@ public sealed partial class BuildRunController
 
     /// <summary>Stop All, the window's and an agent's stop: as Stop, every program debugged ended rather than the chosen one;
     /// done once each has ended, Run's program has let go of the Run console (its end landed there, so a start after the
-    /// answer finds it free) and a container run's containers are taken down (not left running as its log's end would
-    /// leave them).</summary>
+    /// answer finds it free), a container run's containers are taken down (not left running as its log's end would leave
+    /// them), an app on a device has ended there, and a start on one it stopped has taken out what it had put in.</summary>
     public Task StopAllAsync()
     {
         parts.Work.Stop();
         Task debugged = session.Debug.StopAllAsync();
-        return Task.WhenAll(debugged, StopRest());
+        return Task.WhenAll(debugged, StopRest(), session.EndedOnDevicesAsync());
     }
 
     /// <summary>What every Stop ends besides the debugger's: a container run (done once its containers are down), Run's
@@ -2763,7 +2992,7 @@ public sealed partial class BuildRunController
         Task ran = session.RunProgram.IsRunning ? session.RunProgram.Ended : Task.CompletedTask;
         session.RunProgram.Stop();
         Task copies = EndCopyRunsAsync();
-        session.Profiled?.Run.Kill();
+        session.Profiled?.Kill();
         session.Builder.Stop();
         Task played = parts.StopInGodotEditor?.Invoke() ?? Task.CompletedTask;
         return Task.WhenAll(containers, aspire, ran, copies, played);

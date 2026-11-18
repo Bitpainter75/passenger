@@ -65,7 +65,7 @@ public sealed class HierarchyView : DockPanel
     private const int ExpandAllDepth = 5;
 
     private readonly TreeRows<HierarchyRow> rows = [];
-    private readonly ListBox list;
+    private readonly TreeList list;
     private readonly TextBlock title;
     private readonly ToggleButton first;
     private readonly ToggleButton second;
@@ -92,13 +92,12 @@ public sealed class HierarchyView : DockPanel
         bar = ToolBars.Top(top);
         bar.IsVisible = false;
         Children.Add(bar);
-        list = new ListBox
+        list = new TreeList
         {
             Classes = { StyleClasses.Tree },
             ItemsSource = rows,
         };
         ReusedRows.Use(list, Row);
-        list.DoubleTapped += (_, _) => Go();
         TreeKeys.Attach<HierarchyRow>(list, Toggle, row =>
         {
             GoToRequested?.Invoke(this, row.Node);
@@ -268,14 +267,6 @@ public sealed class HierarchyView : DockPanel
 
     /// <summary>A row opened or closed is the one chosen.</summary>
     private void Choose(HierarchyRow row) => list.SelectedItem = row;
-
-    private void Go()
-    {
-        if (list.SelectedItem is HierarchyRow row)
-        {
-            GoToRequested?.Invoke(this, row.Node);
-        }
-    }
 
     /// <summary>A row for whichever symbol the list hands its container: its chevron, name, and what and where it is.</summary>
     private Control Row()

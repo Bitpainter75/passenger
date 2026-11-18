@@ -50,8 +50,9 @@ public sealed class TerminalPanel : DockPanel
     private readonly TerminalView view = new();
     private readonly Func<string> folder;
     private int opened;
+    private bool firstComing;
 
-    /// <param name="folder">Where a new shell starts: the open folder, else the home folder.</param>
+    /// <param name="folder">Where a new shell starts: the folder the window holds or is opening, else the home folder.</param>
     public TerminalPanel(Func<string> folder)
     {
         this.folder = folder;
@@ -60,21 +61,31 @@ public sealed class TerminalPanel : DockPanel
         {
             ItemsSource = tabs,
             VerticalAlignment = VerticalAlignment.Center,
-            ItemsPanel = new FuncTemplate<Panel?>(() => new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 }),
+            // In a narrow window the last tabs give way first, each name ending in an ellipsis, as the Debug window's do.
+            ItemsPanel = new FuncTemplate<Panel?>(() => new ShrinkingRow { Spacing = 2 }),
         };
         ReusedRows.Use(strip, Tab);
         Children.Add(view);
         Bind(BackgroundProperty, this.GetResourceObservable(TokenKeys.Terminal_Background));
         AttachedToVisualTree += (_, _) =>
         {
-            if (tabs.Count == 0)
+            if (tabs.Count == 0 && !firstComing)
             {
-                IdeErrors.Observe(NewSessionAsync());
+                // After what the window does as it shows, so a layout's Terminal starts in the folder it opens then.
+                firstComing = true;
+                UiThread.Post(() =>
+                {
+                    firstComing = false;
+                    if (tabs.Count == 0)
+                    {
+                        IdeErrors.Observe(NewSessionAsync());
+                    }
+                });
             }
             FocusView();
         };
         Button add = ToolButtons.Of(AppActions.NewTerminalSession, IconKeys.Add, "New Session", action => ActionRequested?.Invoke(this, action));
-        HeaderTools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { strip, add } };
+        HeaderTools = new ShrinkingRow { Spacing = 4, Children = { strip, add } };
     }
 
     /// <summary>Raised when the last shell has ended, so the window can hide.</summary>
@@ -182,14 +193,21 @@ public sealed class TerminalPanel : DockPanel
     }
 
     /// <summary>Starts a shell in a session: the one Settings gives (<see cref="Shell"/>), else the system's; throws saying
-    /// why where Settings names no program.</summary>
+    /// why where Settings names no program. Where the folder's projects take another .NET installation than the one found
+    /// for every folder (<see cref="Dotnet.Apart"/>), the shell finds its dotnet first, through the installation's folder
+    /// where it holds .NET's layout alone, else one lending it that dotnet alone (<see cref="Dotnet.PathFolder"/>), and has
+    /// the installation as DOTNET_ROOT; elsewhere its environment is the IDE's.</summary>
     private static async Task StartShellAsync(TerminalSession session, string at, (string App, string[] Arguments)? shell)
     {
         if (shell is { } given && string.IsNullOrWhiteSpace(given.App))
         {
             throw new InvalidOperationException($"the Shell path in {SettingsDialog.PlaceOfPage(SettingsDialog.TerminalPage)} names no program to start");
         }
-        await session.StartAsync(at, shell?.App, shell?.Arguments);
+        FirstOnPath? first = await BackgroundWork.Run(() => Dotnet.Apart(at) is { } root
+            ? new FirstOnPath(Dotnet.PathFolder(root, State.StateStore.DefaultRoot), RuntimeVariables.Root, root,
+                FirstOnPath.ZshFolder(Path.Combine(State.StateStore.DefaultRoot, "cache", "terminal")))
+            : null);
+        await session.StartAsync(at, shell?.App, shell?.Arguments, first: first);
     }
 
     /// <summary>The name of the tab agents' commands run in.</summary>
@@ -301,6 +319,7 @@ public sealed class TerminalPanel : DockPanel
             each.IsActive = each == tab;
         }
         view.Session = tab.Session;
+        Avalonia.Automation.AutomationProperties.SetName(view, tab.Name);
         if (focus)
         {
             FocusView();

@@ -85,7 +85,7 @@ public sealed class McpAspireTests : McpRig, IClassFixture<RestoredFolders>
             WaitFor(() => window.Configurations.Any(configuration => configuration.Name == StandInAppHost.Configuration), "the stand-in AppHost's Aspire configuration");
             Task<JsonElement> running = Waiting.Apart(() => Call(client, McpTools.Run, new() { ["configuration"] = StandInAppHost.Configuration, ["waitSeconds"] = 0 }));
             Press(Admission(window, "the window to ask whether the agent may work there"), AgentAdmissionDialog.Allow);
-            Press(Question(window, "the question for the agent's run"), "Allow");
+            Press(Question(window, "the question for the agent's run"), AgentToolDialog.AllowForSession);
             WaitFor(() => running.IsCompleted || window.CertificateQuestion is not null, "the agent's run", TimeSpan.FromMinutes(2));
             Assert.Null(window.CertificateQuestion);
             const string Said = "StandIn.AppHost over HTTP for this run: the development certificate is not trusted, and an agent's call started this run, and asks no one";
@@ -130,7 +130,7 @@ public sealed class McpAspireTests : McpRig, IClassFixture<RestoredFolders>
             using System.Net.WebSockets.ClientWebSocket subscribed = notified;
             Assert.False((int)answer is >= 200 and < 300, "The IDE started a service its configuration says not to start");
             backend.PushResource(project.Refused());
-            WaitFor(() => window.Aspire.ResourceSnapshots.Any(resource => resource.Name == "apiservice" && resource.State == "FailedToStart"), "DCP's word of the refused start");
+            WaitFor(() => window.Aspire.ResourceSnapshots.Any(resource => resource.Name == "apiservice" && resource.State == Passenger.App.Aspire.AspireStates.FailedToStart), "DCP's word of the refused start");
             client = Await(Waiting.Apart(() => Start(["--mcp-attach", ProcessId])), "the agent attaching");
             Task<JsonElement> asked = Waiting.Apart(() => Call(client, McpTools.Workspace));
             WaitFor(() => asked.IsCompleted, "the agent's workspace");
@@ -227,7 +227,7 @@ public sealed class McpAspireTests : McpRig, IClassFixture<RestoredFolders>
                 new() { ["configuration"] = configuration }, giveUp.Token));
             Window permission = Question(window, "permission for the Aspire startup");
             // Not settled: the start the answer lets go holds background work until it is given up.
-            Ui.Click(permission.GetVisualDescendants().OfType<Button>().Single(button => Equals(button.Content, "Allow")), settle: false);
+            Ui.Click(permission.GetVisualDescendants().OfType<Button>().Single(button => Equals(button.Content, AgentToolDialog.AllowForSession)), settle: false);
             Ui.PumpUntil(() => File.Exists(pidFile) || starting.IsCompleted, "the starting AppHost process", TimeSpan.FromMinutes(5));
             Assert.True(File.Exists(pidFile), $"The AppHost process did not start: {(starting.IsCompletedSuccessfully ? Text(starting.Result) : window.Status)}{Said()}");
             int processId = Processes.WrittenId(pidFile, "the starting AppHost PID");
@@ -449,8 +449,11 @@ public sealed class McpAspireTests : McpRig, IClassFixture<RestoredFolders>
             int[] orchestrator = [.. Processes.Listed().Where(process => process.Value.Contains("dcp start-apiserver", StringComparison.Ordinal)
                 && process.Value.Contains($"--monitor {host.ToString(CultureInfo.InvariantCulture)} ", StringComparison.Ordinal)).Select(process => process.Key)];
             Assert.NotEmpty(orchestrator);
-            // The orchestrator first, which would take its containers down as its AppHost goes, and Passenger last.
-            int[] killed = [.. orchestrator, .. orchestrator.SelectMany(Processes.Descendants), .. Processes.Descendants(passenger.Id), passenger.Id];
+            // The orchestrator first, which would take its containers down as its AppHost goes, the watchdog, and Passenger last.
+            string watchdog = ChildProcesses.WatchdogOf(passenger.Id);
+            int[] killed = [.. orchestrator, .. orchestrator.SelectMany(Processes.Descendants),
+                .. Processes.Listed().Where(process => process.Value.EndsWith(watchdog, StringComparison.Ordinal)).Select(process => process.Key),
+                .. Processes.Descendants(passenger.Id), passenger.Id];
             foreach (int id in killed.Distinct())
             {
                 OwnProcess.Of(id).Kill(alone: true);

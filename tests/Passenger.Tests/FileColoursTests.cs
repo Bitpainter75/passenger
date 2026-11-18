@@ -251,14 +251,15 @@ public sealed class FileColoursTests : FileColoursFolder
         MainWindow window = Window();
         try
         {
-            // Each "<a" sends the grammar's first search of the line far along it: tens of milliseconds in all, however warm.
-            string comment = "// " + string.Concat(Enumerable.Repeat("<a ", 6400));
+            // JSDoc tags the grammar has no name for keep it searching along the line: tens of milliseconds, however warm.
+            string comment = "/** " + string.Concat(Enumerable.Repeat("@a ", 6600)) + "*/";
             CodeEditor editor = Open(window, "site.js", comment + "\nfunction greet(name) {\n    return \"Hello, \" + name;\n}\n");
             TextMateHighlighter colours = (TextMateHighlighter)window.EditorArea.Active!.Highlighter!;
             Assert.True(colours.LinesOutOfTime > 0, "The grammar read the long comment within a millisecond, twice, so nothing here ran out of its time");
             Assert.True(KindOf(editor, "function") == TokenKind.Keyword,
                 $"The line after a comment the grammar ran out of time on is coloured {KindOf(editor, "function")?.ToString() ?? "in several kinds"}: the comment's rule reached past its line");
-            Assert.Equal(TokenKind.Comment, KindOf(editor, comment[..30]));
+            // Its tags take their own colour wherever the reading reached them, so only the comment's opening is the comment's.
+            Assert.Equal(TokenKind.Comment, KindOf(editor, "/**"));
         }
         finally
         {
@@ -650,10 +651,10 @@ public sealed class FileColoursTests : FileColoursFolder
         window.Close();
     }
 
-    /// <summary>Settings' Colour scheme: Rider's colours for the code under either theme, at once, the editor keeping the
+    /// <summary>Settings' Colour scheme: the themes repository's code colour scheme (Reef) for the code under either theme, at once, the editor keeping the
     /// theme's ground; the theme's own scheme back again.</summary>
     [AvaloniaFact]
-    public void Riders_colour_scheme_draws_the_code_in_riders_colours_on_the_themes_ground_under_either_theme()
+    public void A_code_colour_scheme_from_the_repository_draws_the_code_in_its_colours_on_the_themes_ground_under_either_theme()
     {
         MainWindow window = Window();
         try
@@ -661,20 +662,22 @@ public sealed class FileColoursTests : FileColoursFolder
             CodeEditor editor = Open(window, "Shapes.csproj", Project);
             int tag = Project.IndexOf("PropertyGroup", StringComparison.Ordinal);
             ThemeVariant theme = window.ActualThemeVariant;
-            foreach (Look look in (Look[])[Look.Passenger, Look.Harbour])
+            foreach (SourcedTheme? look in (SourcedTheme?[])[null, SourcedTheme.Repository("Harbour")])
             {
-                window.ApplySettings(window.Settings with { Look = look, ColourScheme = ColourScheme.Theme });
+                window.ApplySettings(window.Settings with { Look = look, ColourScheme = null });
+                Ui.Settle();
                 Color own = Token(theme, TokenKeys.Syntax_Tag);
                 Color ground = Token(theme, TokenKeys.Editor_Background);
-                Assert.True(Distance(Ink(window, editor, tag, "PropertyGroup".Length), own) < 90, $"Under {look}'s own scheme a tag is not drawn in its {own}");
+                Assert.True(Distance(Ink(window, editor, tag, "PropertyGroup".Length), own) < 90, $"Under {look?.Name ?? "Passenger"}'s own scheme a tag is not drawn in its {own}");
 
-                window.ApplySettings(window.Settings with { ColourScheme = ColourScheme.Rider });
-                Color rider = Token(theme, TokenKeys.Syntax_Tag);
+                window.ApplySettings(window.Settings with { ColourScheme = SourcedTheme.Repository(ThemeSource.FormerScheme) });
+                Ui.Settle();
+                Color reef = Token(theme, TokenKeys.Syntax_Tag);
                 Color ink = Ink(window, editor, tag, "PropertyGroup".Length);
-                Assert.True(Distance(ink, rider) < Distance(ink, own) && Distance(ink, rider) < 90,
-                    $"Under {look} with Rider's colour scheme a tag is drawn {ink}, not Rider's {rider} (the theme's own is {own})");
+                Assert.True(Distance(ink, reef) < Distance(ink, own) && Distance(ink, reef) < 90,
+                    $"Under {look?.Name ?? "Passenger"} with Reef's colours a tag is drawn {ink}, not Reef's {reef} (the theme's own is {own})");
                 Assert.True(Token(theme, TokenKeys.Editor_Background) == ground && Ui.Pixel(window, editor.TranslatePoint(new Point(editor.Bounds.Width - 40, editor.Bounds.Height - 20), window)!.Value) == ground,
-                    $"Under {look} with Rider's colour scheme the editor is not on the theme's ground {ground}");
+                    $"Under {look?.Name ?? "Passenger"} with Reef's colours the editor is not on the theme's ground {ground}");
             }
         }
         finally

@@ -100,15 +100,18 @@ public sealed partial class BuildRunController
         RunDashboard?[] dashboards = new RunDashboard?[starts.Count];
         try
         {
-            foreach (IGrouping<(string? Framework, string? Output), BuildStep> together in starts.Select(s => s.Plan.Build).OfType<BuildStep>()
-                .DistinctBy(step => (step.Project, step.Framework, step.Output)).GroupBy(step => (step.Framework, step.Output)))
+            // Those built as one build configuration are built together, each as its own configuration names.
+            foreach (IGrouping<(string? Framework, string? Output, string? As), (BuildStep Step, WorkspaceModel? Workspace)> together in starts
+                .Where(s => s.Plan.Build is not null).Select(s => (Step: s.Plan.Build!, s.Plan.Workspace))
+                .DistinctBy(each => (each.Step.Project, each.Step.Framework, each.Step.Output, each.Workspace?.Build?.Chosen.Key))
+                .GroupBy(each => (each.Step.Framework, each.Step.Output, each.Workspace?.Build?.Chosen.Key)))
             {
-                BuildOutcome built = await BuildForAsync([.. together.Select(step => step.Project)], work.Stopping, work, together.Key.Framework, together.Key.Output,
+                BuildOutcome built = await BuildForAsync([.. together.Select(each => each.Step.Project)], work.Stopping, work, together.Key.Framework, together.Key.Output,
                     followsEdits ? () =>
                     {
                         edits?.Dispose();
                         edits = session.Debug.Building(debug ? session.Debug.HotReloadOn() : true);
-                    } : null);
+                    } : null, together.First().Workspace);
                 if (!built.Succeeded)
                 {
                     return Checkpoint(work, chosen.Name) ?? built.Message;
@@ -163,7 +166,7 @@ public sealed partial class BuildRunController
                 }
                 else
                 {
-                    notStarted = await RunProjectAsync(chosen, configuration, plan, i + 1, hotReload && configuration.NamesNoOtherProgram(session.Projects), work, its, ran);
+                    notStarted = await RunProjectAsync(chosen, configuration, plan, i + 1, hotReload && configuration.NamesNoOtherProgram(session.Projects) && !plan.Functions, work, its, ran);
                     if (notStarted is null && ran.Count > 0 && ran[^1].Name == plan.Name)
                     {
                         TerminalRun run = ran[^1];
@@ -252,7 +255,8 @@ public sealed partial class BuildRunController
             edits?.Dispose();
             return null;
         }
-        await AttachForHotReloadAsync(plan.Name, run.Debuggee, null, work, edits, $"Running {plan.Name} with Hot Reload: a save applies its changes");
+        await AttachForHotReloadAsync(plan.Name, run.Debuggee, null, work, edits, $"Running {plan.Name} with Hot Reload: a save applies its changes",
+            builds: ProgramBuild.Of(plan));
         return null;
 
         async Task ProjectEnded()

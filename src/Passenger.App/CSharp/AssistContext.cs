@@ -152,7 +152,9 @@ internal sealed class AssistContext(EditorArea editors, Func<CSharpService?> ser
         return itself.Count > 0 ? itself : await csharp.UntakenAsync(document, offset(), CancellationToken.None);
     }
 
-    private void SayWaiting(string? waiting) => Say(waiting is null ? string.Empty : $"Waiting for the C# language server to load {Path.GetFileName(waiting)} into its project…");
+    private void SayWaiting(string? waiting) => Say(waiting is null ? string.Empty
+        : global::Passenger.Workspace.WorkspaceModel.IsProjectFile(waiting) ? $"Waiting for the C# language server to load {Path.GetFileName(waiting)} again…"
+        : $"Waiting for the C# language server to load {Path.GetFileName(waiting)} into its project…");
 
     /// <summary>The window's actions' work, which a change says its waits through.</summary>
     public ActionWork? Work { get; set; }
@@ -178,7 +180,9 @@ internal sealed class AssistContext(EditorArea editors, Func<CSharpService?> ser
     }
 
     private static string? NotTakenIn(IReadOnlyList<(string Path, string Project)> left) =>
-        left.Count == 0 ? null : Refusals.NotTakenIn(Path.GetFileName(left[0].Path), Path.GetFileNameWithoutExtension(left[0].Project));
+        left.Count == 0 ? null
+        : CSharpService.IsReload(left[0]) ? Refusals.NotLoadedAgain(Path.GetFileNameWithoutExtension(left[0].Project))
+        : Refusals.NotTakenIn(Path.GetFileName(left[0].Path), Path.GetFileNameWithoutExtension(left[0].Project));
 
     /// <summary>The folder the open file's places are named from: the C# server's, else the web servers'.</summary>
     public string? Root => service()?.Session?.Folder ?? Web?.Invoke()?.Folder;
@@ -191,6 +195,10 @@ internal sealed class AssistContext(EditorArea editors, Func<CSharpService?> ser
 
     /// <summary>A place to go: a file and a line and column (from zero).</summary>
     public void Navigate((string Path, TextPosition Position) place) => Navigated?.Invoke(this, place);
+
+    /// <summary>Whether places to choose from (several declarations, implementations, base or derived symbols) are kept in
+    /// the Find window rather than chosen in a popup.</summary>
+    public Func<bool> KeepsPlaces { get; set; } = () => false;
 
     /// <summary>Find Usages' answer, for the Find window, or Show Usages' for its popup at an offset: what was searched for,
     /// where it is used, and what the answer went without, when it did.</summary>
@@ -225,7 +233,16 @@ internal sealed class AssistContext(EditorArea editors, Func<CSharpService?> ser
     /// <summary>A file's text as the editor has it, else the disk's (<see cref="EditorArea.TextOf"/>); empty when it cannot be read.</summary>
     public string ReadOpenOrDisk(string path) => editors.TextOf(path)?.ToString() ?? string.Empty;
 
-    public static bool IsIdentifierChar(char c) => char.IsLetterOrDigit(c) || c == '_';
+    /// <summary>Whether a character is a C# name's, as Roslyn reads one: a letter, a decimal digit, connector punctuation, a
+    /// combining mark or a format character. The names of XAML, MSBuild and a shader are read by it too.</summary>
+    public static bool IsIdentifierChar(char c) => Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsIdentifierPartCharacter(c);
+
+    /// <summary>Whether a C# name may start with a character, as Roslyn reads one: a letter or '_'.</summary>
+    public static bool IsIdentifierStart(char c) => Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsIdentifierStartCharacter(c);
+
+    /// <summary>Whether the character just typed before an offset of the editor's text starts a name there: one a name may
+    /// start with, after none of a name's.</summary>
+    public bool StartsName(char typed, int caret) => IsIdentifierStart(typed) && WordStart(caret) == caret - 1;
 
     /// <summary>Where the identifier before an offset of the editor's text starts.</summary>
     public int WordStart(int caret)
@@ -246,6 +263,6 @@ internal sealed class AssistContext(EditorArea editors, Func<CSharpService?> ser
     public static string NameAt(TextSnapshot text, int offset)
     {
         TextRange word = TextNavigation.WordAt(text, Math.Min(offset, text.Length));
-        return word.Length > 0 && TextNavigation.IsWordChar(text[word.Start]) ? text.GetText(word) : string.Empty;
+        return word.Length > 0 && WordCharacters.IsWord(text[word.Start]) ? text.GetText(word) : string.Empty;
     }
 }

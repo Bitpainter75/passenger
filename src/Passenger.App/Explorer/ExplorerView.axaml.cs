@@ -289,8 +289,11 @@ public partial class ExplorerView : UserControl
         Refresh();
     }
 
-    /// <summary>Projects MSBuild evaluated again: their rows show them anew, every other row as it was (open, chosen,
-    /// focused), and a file waiting to be chosen is chosen once it shows.</summary>
+    /// <summary>The folder's Node packages as last read, which their folders' rows name.</summary>
+    public void ShowPackages(IReadOnlyList<Passenger.Workspace.NodePackage> packages) => Tree.ShowPackages(packages);
+
+    /// <summary>Projects MSBuild evaluated again, or Docker Compose projects whose text was written: their rows show them
+    /// anew, every other row as it was (open, chosen, focused), and a file waiting to be chosen is chosen once it shows.</summary>
     public void UpdateProjects(WorkspaceModel workspace, IEnumerable<ProjectModel> updated)
     {
         // A row made again takes the keys with it: they stay the Explorer's, on the row chosen, for the next Paste.
@@ -614,27 +617,6 @@ public partial class ExplorerView : UserControl
         Rows.SelectedItem = node;
         Rows.ScrollIntoView(node);
         return true;
-    }
-
-    private void Activate(ExplorerNode node)
-    {
-        if (node.IsFile && node.Path is { } path)
-        {
-            FileOpened?.Invoke(this, path);
-        }
-        else if (node.HasChildren)
-        {
-            Tree.Toggle(node);
-        }
-    }
-
-    private void OnRowDoubleTapped(object? sender, TappedEventArgs e)
-    {
-        if (Rows.SelectedItem is ExplorerNode node)
-        {
-            Activate(node);
-            e.Handled = true;
-        }
     }
 
     private void OnChevronPressed(object? sender, PointerPressedEventArgs e)

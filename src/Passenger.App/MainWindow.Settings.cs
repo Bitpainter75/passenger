@@ -25,9 +25,18 @@ public partial class MainWindow
         Editors.ForEachEditor(editor => ApplyTo(editor, settingsStore.Effective));
         settingsStore.Changed += OnSettingsChanged;
         settingsStore.PreviewChanged += OnPreviewChanged;
-        Activated += (_, _) => settingsStore.LookAgain();
+        Activated += (_, _) =>
+        {
+            settingsStore.LookAgain();
+            SystemMotion.LookAgain();
+        };
+        Themes.SaidChanged += OnThemesSaid;
+        Themes.FontsChanged += OnThemeFonts;
+        OnThemesSaid(null, EventArgs.Empty);
         Closed += (_, _) =>
         {
+            Themes.SaidChanged -= OnThemesSaid;
+            Themes.FontsChanged -= OnThemeFonts;
             settingsStore.Changed -= OnSettingsChanged;
             settingsStore.PreviewChanged -= OnPreviewChanged;
             if (!settingsStore.IsKept)
@@ -43,7 +52,7 @@ public partial class MainWindow
     }
 
     /// <summary>The window a person uses follows the settings kept in its <see cref="StateFolder"/>, which every other
-    /// window keeping its state there follows too, and opens on them; headless ones keep the defaults.</summary>
+    /// window keeping its state there follows too, and opens on them; headless ones keep their own (<see cref="OpenOnSettings"/>).</summary>
     public void KeepSettings()
     {
         SettingsStore kept = Store().Settings;
@@ -51,15 +60,46 @@ public partial class MainWindow
         {
             return;
         }
+        keepsSettings = true;
+        Take(kept);
+    }
+
+    /// <summary>A window nobody sees opens on the settings given (those kept where PASSENGER_SETTINGS names), its own from
+    /// then on: kept nowhere, so its changes stay its own and no other Passenger's reach it.</summary>
+    public void OpenOnSettings(AppSettings opening)
+    {
+        keepsSettings = false;
+        Take(SettingsStore.Unkept(opening));
+    }
+
+    /// <summary>The window of a process nobody sees (an agent's <c>--mcp</c>, a screenshot) opens on the settings kept where
+    /// PASSENGER_SETTINGS names, as the process read them (<see cref="SettingsStore.KeptWhereNamed"/>), as a person's window
+    /// opens on theirs, keeping nothing; with none (no folder named, or no settings kept there) on the defaults, so the
+    /// person's own reach no Passenger they don't see. The command line's theme stands.</summary>
+    public void OpenOnNamedSettings(LaunchOptions launch, AppSettings? named)
+    {
+        if (named is not null)
+        {
+            OpenOnSettings(named);
+            Program.ApplyTheme(Avalonia.Application.Current!, launch);
+        }
+    }
+
+    /// <summary>The settings the window follows from now on, the process's share of them put in force; a store of the
+    /// window's own it followed before is let go.</summary>
+    private void Take(SettingsStore next)
+    {
         settingsStore.Changed -= OnSettingsChanged;
         settingsStore.PreviewChanged -= OnPreviewChanged;
-        settingsStore.Dispose();
-        settingsStore = kept;
-        kept.Changed += OnSettingsChanged;
-        kept.PreviewChanged += OnPreviewChanged;
-        keepsSettings = true;
-        kept.PutInForce();
-        Follow(kept.Value);
+        if (!settingsStore.IsKept)
+        {
+            settingsStore.Dispose();
+        }
+        settingsStore = next;
+        next.Changed += OnSettingsChanged;
+        next.PreviewChanged += OnPreviewChanged;
+        next.PutInForce();
+        Follow(next.Value);
         OnPreviewChanged(this, EventArgs.Empty);
     }
 
@@ -69,6 +109,9 @@ public partial class MainWindow
 
     /// <summary>The settings as this window last showed them, a Settings dialog's preview too.</summary>
     private AppSettings visualSettings = new();
+
+    /// <summary>The editors take the theme's code size where the person set none.</summary>
+    private void OnThemeFonts(object? sender, EventArgs args) => Editors.ForEachEditor(editor => ApplyTo(editor, settingsStore.Effective));
 
     /// <summary>The window's share of the look follows the settings shown: each editor's, the title bar's, the menu's, the
     /// terminal's.</summary>
@@ -80,7 +123,10 @@ public partial class MainWindow
             ApplyTo(group.Editor, next);
         }
         FollowViewSettings(visualSettings, next);
+        FollowArrangement(next);
         FollowTitleBar(next);
+        // The layout's smallest at the scale shown: SmallestWidth units of content, however large they are drawn.
+        HoldAtLeast(new Avalonia.Size(SmallestWidth * next.DisplayScale, SmallestHeight * next.DisplayScale));
         FollowMainMenu(next);
         if (terminal is { } panel)
         {
@@ -91,6 +137,26 @@ public partial class MainWindow
     }
 
     private void OnSettingsChanged(object? sender, SettingsChange change) => Follow(change.After);
+
+    /// <summary>The status bar says a chosen theme being fetched, or why it could not be, a click on it opening Appearance;
+    /// words said for the themes before go once the theme came.</summary>
+    private void OnThemesSaid(object? sender, EventArgs args)
+    {
+        if (Themes.Said is { } said)
+        {
+            themesSaid = said;
+            status.Say(said, Themes.SaidProblem ? Run.ProblemSeverity.Warning : null,
+                new StatusPlace($"choose a theme in {SettingsDialog.PlaceOfPage(SettingsDialog.Appearance)}", () => ShowSettings().Page = SettingsDialog.Appearance));
+        }
+        else if (themesSaid is not null && status.Text == themesSaid)
+        {
+            status.Text = null;
+            themesSaid = null;
+        }
+    }
+
+    /// <summary>What the status bar last said of the themes.</summary>
+    private string? themesSaid;
 
     /// <summary>The window's share of settings come into force: each editor's, the terminal's, the consoles', the menus'
     /// shortcuts and the rest that is this window's.</summary>
@@ -117,6 +183,7 @@ public partial class MainWindow
         {
             MoveDiffs(next.OpenDiffsIn);
         }
+        chordWait.Interval = TimeSpan.FromSeconds(next.ChordWaitSeconds);
         Explorer.NestFiles = next.NestFiles;
         Explorer.OpensOnClick = next.OpenFilesWithSingleClick;
         if (next.AlwaysSelectOpenedFile && !before.AlwaysSelectOpenedFile && Editors.Active?.Path is { } shown)
@@ -124,9 +191,12 @@ public partial class MainWindow
             Explorer.Reveal(shown);
         }
         FollowXamlWorkspace(before);
+        FollowVimMappings(next.VimMode);
         assist.Templates = CSharp.TemplateSet.Of(next);
+        assist.CompletionParentheses = next.CompletionParentheses;
         assist.XamlFormat = next.XamlFormat;
         assist.GDScriptFormat = (next.GDScriptFormat, next.GDScriptFormatOnSave);
+        assist.ReformatsOnSave = next.ReformatOnSave;
         if (terminal is { } panel)
         {
             FollowTerminalSettings(panel, next, before);
@@ -154,20 +224,23 @@ public partial class MainWindow
     /// <summary>Settings (Ctrl+Alt+S, Cmd+, on the Mac), over this window until OK or Cancel.</summary>
     public SettingsDialog ShowSettings()
     {
-        SettingsDialog dialog = new(settings, actions!, (from, to) => settingsStore.Apply(from, to), Mcp.AgentSetup.Here(Folder, settings.TerminalShell), settingsStore.BeginPreview());
+        SettingsDialog dialog = new(settings, actions!, (from, to) => settingsStore.Apply(from, to), Mcp.AgentSetup.Here(Folder, settings.TerminalShell), settingsStore.BeginPreview(),
+            session.EditorConfigs, keepsWorkspace ? new TrustAnswers(Store().Trust.Value, ApplyTrust) : null);
         IdeErrors.Observe(dialog.ShowDialog(this));
         return dialog;
     }
 
     private static void ApplyTo(CodeEditor editor, AppSettings with)
     {
-        editor.FontSize = with.EditorFontSize;
+        editor.FontSize = with.CodeSize();
         editor.LineSpacing = with.EditorLineSpacing;
         editor.Ligatures = with.Ligatures;
         editor.ShowLineNumbers = with.ShowLineNumbers;
         editor.ShowParameterHints = with.ParameterHints;
         editor.ShowTypeHints = with.TypeHints;
         editor.RainbowBraces = with.RainbowBraces;
+        editor.UsesVim = with.VimMode;
+        editor.VimLeavesKeys = Declared.VimKeysToKeymap.Given(with);
         editor.ClosesTags = with.CloseTags;
         editor.WrapIndent = with.SoftWrapIndent;
         editor.ZoomsWithWheel = with.WheelZoom;

@@ -371,7 +371,7 @@ public static class AspireOrchestration
             {
                 throw new InvalidOperationException($"{service.Name} does not have a unique Aspire resource name: rename the project or add its resource by hand");
             }
-            string relative = Path.GetRelativePath(Path.GetDirectoryName(host)!, service.Path).Replace('\\', '/');
+            string relative = PathNames.Route(service.Path, Path.GetDirectoryName(host)!);
             string generatedType = Path.GetFileNameWithoutExtension(service.Path).Replace('.', '_').Replace('-', '_');
             bool SameProject((InvocationExpressionSyntax Call, string Name, string? ProjectPath, string? ProjectType) project)
             {
@@ -572,7 +572,7 @@ public static class AspireOrchestration
         if (builders.Count != 1 || builders[0].Builder.Ancestors().OfType<StatementSyntax>().FirstOrDefault()
             is not LocalDeclarationStatementSyntax { Declaration.Variables.Count: 1 })
         {
-            throw new InvalidOperationException($"{path}: expected one local builder created with {string.Join(" or ", types)}.CreateBuilder; no file was changed");
+            throw new InvalidOperationException($"{path}: expected one local builder created with {Plural.Either(types)}.CreateBuilder; no file was changed");
         }
         return builders[0];
     }

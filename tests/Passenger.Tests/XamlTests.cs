@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Input;
@@ -1892,10 +1893,10 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         string xaml = PathNames.Canonical(app.PathOf("MainWindow.axaml"));
         IReadOnlyList<Passenger.Roslyn.Extension.TextHeld> held = Ui.Await(session.HeldTextsAsync([xaml]), "the language server's text of MainWindow.axaml");
         bool asOnDisk = held is [{ Hash: { } hash }] && Passenger.Lsp.HeldTexts.OnDisk(xaml, hash) == true;
-        DateTime? told = session.Server.WatchedFiles.ToldAt(xaml);
+        long? told = session.Server.WatchedFiles.ToldAt(xaml);
         Assert.True(asOnDisk && told is null,
             $"The language server started for the test {(asOnDisk ? "holds MainWindow.axaml as on disk" : "holds MainWindow.axaml otherwise than the disk, or no document of it")} "
-            + $"and {(told is { } at ? $"was told of a change of it {(DateTime.UtcNow - at).TotalSeconds:0.00} s ago" : "was told of no change of it")}, so it may read the XAML "
+            + $"and {(told is { } at ? $"was told of a change of it {Stopwatch.GetElapsedTime(at).TotalSeconds:0.00} s ago" : "was told of no change of it")}, so it may read the XAML "
             + "the test writes with no word of the write, leaving the rename nothing to wait for");
         return window;
     }
@@ -2344,6 +2345,49 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
+    /// <summary>A theme's picture lies over the editor alone: the XAML preview beside it draws the app's frame and its own
+    /// ground as it does with no picture, so the app's colours and edges read as the app draws them (#1892).</summary>
+    [AvaloniaFact]
+    public void A_themes_picture_lies_over_the_editor_and_never_over_the_xaml_preview_beside_it()
+    {
+        MainWindow window = app.Open(app.PathOf("MainWindow.axaml"), languageServer: false);
+        try
+        {
+            CodeEditor editor = window.EditorArea.CodeEditor;
+            OpenDocument document = window.EditorArea.Active!;
+            Ui.Run(window, AppActions.Build);
+            Ui.Settle();
+            Assert.True(window.Perform(AppActions.XamlPreview), $"XAML Preview could not run: {window.Status}");
+            Passenger.App.Xaml.XamlPreview preview = window.PreviewOf(document) ?? throw new InvalidOperationException("XAML Preview showed no preview beside the file");
+            Passenger.App.Xaml.XamlPreviewPane pane = window.PreviewPaneOf(document)!;
+            Ui.WaitFor(() => preview.Frame is not null, "the previewer's first frame", TimeSpan.FromSeconds(60));
+            Ui.Settle();
+            Point Of(Avalonia.Controls.Control control, Point at) => control.TranslatePoint(at, window) ?? throw new InvalidOperationException($"The {control.GetType().Name} is not on the window");
+            Dictionary<string, Point> places = new()
+            {
+                ["the editor"] = Of(editor, new Point(editor.Bounds.Width * 0.6, editor.Bounds.Height - 30)),
+                ["the preview's ground"] = Of(pane, new Point(8, pane.Bounds.Height / 2)),
+                ["the app's frame"] = Of(pane.Frame, pane.Frame.Bounds.Center),
+            };
+            Dictionary<string, Color> plain = places.ToDictionary(p => p.Key, p => Ui.Pixel(window, p.Value));
+
+            ThemeBackgroundTests.Wear(window, $"Pictured {Guid.NewGuid():N}", """{"image": "red.png", "opacity": 0.3}""");
+            Dictionary<string, Color> pictured = places.ToDictionary(p => p.Key, p => Ui.Pixel(window, p.Value));
+            Assert.True(pictured["the editor"].R > plain["the editor"].R + 20,
+                $"The theme's picture is not over the editor beside the preview: its ground {plain["the editor"]} drew {pictured["the editor"]}");
+            foreach (string place in new[] { "the preview's ground", "the app's frame" })
+            {
+                Assert.True(pictured[place] == plain[place],
+                    $"The theme's picture drew over {place}: {plain[place]} became {pictured[place]}, so the preview no longer shows the app's own colours");
+            }
+        }
+        finally
+        {
+            window.ApplySettings(new Passenger.App.Settings.AppSettings());
+            window.Close();
+        }
+    }
+
     /// <summary>In the XAML workspace, with no app running, the preview shows under its frame what the caret's element sets
     /// itself, as its XAML says it: the title's binding with its path, the button's own content and its resource with its key,
     /// and the Name each takes as a property; turned off, it shows none.</summary>
@@ -2430,6 +2474,49 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         Assert.True(window.Perform(AppActions.XamlPreview) && window.PreviewOf(document) is null, "XAML Preview stayed on");
         window.Close();
     }
+
+    /// <summary>An Avalonia preview draws its root at a phone's and a tablet's size beside its design's (#1549): chosen
+    /// beside the preview's title, the frame takes the size chosen as the root lays itself out there, the file's text stays as
+    /// written, and Design size brings the design's back.</summary>
+    [AvaloniaFact]
+    public void An_avalonia_preview_draws_its_root_at_a_phones_and_a_tablets_size_beside_its_design_size()
+    {
+        MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
+        OpenDocument document = window.EditorArea.Active!;
+        string written = document.Text.Snapshot.ToString();
+        Ui.Run(window, AppActions.Build);
+        Ui.Settle();
+        Assert.True(window.Perform(AppActions.XamlPreview), $"XAML Preview could not run: {window.Status}");
+        Ui.Settle();
+        Passenger.App.Xaml.XamlPreview preview = window.PreviewOf(document) ?? throw new InvalidOperationException("XAML Preview showed no preview beside the file");
+        Passenger.App.Xaml.XamlPreviewPane pane = window.PreviewPaneOf(document)!;
+        Ui.WaitFor(() => preview.Frame is not null && preview.FrameSize.Width > 0, () => $"the previewer's first frame; the preview says: {preview.Status} {preview.Error}",
+            TimeSpan.FromSeconds(60));
+        Size design = preview.FrameSize;
+        Assert.True(pane.Sizes.IsVisible, "The preview of a window offers no sizes beside its design's");
+        Assert.Equal([Passenger.App.Xaml.XamlPreviewPane.DesignSize, "Phone (412 × 915)", "Phone, turned (915 × 412)", "Tablet (800 × 1280)", "Tablet, turned (1280 × 800)"],
+            pane.Sizes.Items.Cast<string>());
+        foreach (int chosen in (int[])[1, 3, 0])
+        {
+            pane.Sizes.SelectedIndex = chosen;
+            Size wanted = chosen == 0 ? design : new Size(Passenger.Xaml.Features.PreviewSize.Offered[chosen - 1].Width, Passenger.Xaml.Features.PreviewSize.Offered[chosen - 1].Height);
+            Ui.WaitFor(() => DrawnAt(preview, wanted), () => $"the frame at {pane.Sizes.SelectedItem}; it is {preview.FrameSize} in its units, {preview.Frame?.PixelSize} pixels drawn at "
+                + $"{preview.Scaling:0.####} in the pane {pane.Bounds.Size}: {preview.Status} {preview.Error}", TimeSpan.FromSeconds(60));
+            Assert.Null(preview.Error);
+        }
+        Assert.Equal(written, document.Text.Snapshot.ToString());
+        // XAML Preview is kept on for the next window, which the class's other tests open with it off.
+        Assert.True(window.Perform(AppActions.XamlPreview) && window.PreviewOf(document) is null, "XAML Preview stayed on");
+        window.Close();
+    }
+
+    /// <summary>Whether the frame is a root of this size in the window's units drawn at the scale it was: a frame drawn
+    /// smaller for a narrow pane is whole pixels, and Avalonia rounds its layout up to whole pixels, so it stands up to two
+    /// pixels past the size times its scale, which read back in units is several units at a small scale.</summary>
+    internal static bool DrawnAt(Passenger.App.Xaml.XamlPreview preview, Size wanted) =>
+        preview.Frame is { } frame && preview.FrameSize.Width > 0 && preview.FrameSize.Height > 0
+        && Math.Abs(frame.PixelSize.Width - (wanted.Width * frame.PixelSize.Width / preview.FrameSize.Width)) <= 2
+        && Math.Abs(frame.PixelSize.Height - (wanted.Height * frame.PixelSize.Height / preview.FrameSize.Height)) <= 2;
 
     /// <summary>An app still on Avalonia 11, whose package carries its previewer under tools/netstandard2.0 where Avalonia
     /// 12's are under tools/net8.0 and later, and whose Directory.Build.props moves its obj and bin folders, previews as

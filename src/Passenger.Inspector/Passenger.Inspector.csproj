@@ -51,13 +51,21 @@
     <Compile Include="../Passenger.Core/ApartThreads.cs" Link="ApartThreads.cs" />
     <!-- Passenger's requests read as every JSON-lines peer reads its messages. -->
     <Compile Include="../Passenger.Core/JsonLines.cs" Link="JsonLines.cs" />
+    <!-- The system's command key, which an agent's primary holds. -->
+    <Compile Include="../Passenger.Core/CommandKey.cs" Link="CommandKey.cs" />
     <!-- C#'s keywords for the types of the values shown. -->
     <Compile Include="../Passenger.Core/PrimitiveTypes.cs" Link="PrimitiveTypes.cs" />
+    <!-- A handler's name read as C# reads a name, for what XAML Hot Reload says of one the class lacks. -->
+    <Compile Include="../Passenger.Core/CSharpNames.cs" Link="CSharpNames.cs" />
     <!-- A XAML file's path compared with where the app's build recorded it, as the rest of Passenger compares paths. -->
     <Compile Include="../Passenger.Core/PathNames.cs" Link="PathNames.cs" />
+    <!-- The Windows calls PathNames makes, declared once. -->
+    <Compile Include="../Passenger.Core/Kernel32.cs" Link="Kernel32.cs" />
     <Compile Include="../Passenger.Core/PathComparer.cs" Link="PathComparer.cs" />
     <!-- A socket's path checked against what a Unix socket's address holds, as Passenger checks the paths it makes. -->
     <Compile Include="../Passenger.Core/SocketFolders.Limit.cs" Link="SocketFolders.Limit.cs" />
+    <!-- A wait's limit on the clock that stops while the machine sleeps, as Passenger's own waits keep one. -->
+    <Compile Include="../Passenger.Core/Deadline.cs" Link="Deadline.cs" />
   </ItemGroup>
 
   <!-- What Passenger carries under inspector/ beside the inspector's own assembly: XAML Hot Reload's compiler and the

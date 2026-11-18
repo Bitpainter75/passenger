@@ -69,15 +69,20 @@ public enum ProfilerPage
 public sealed class ProfilerView : DockPanel
 {
     private readonly TreeRows<CallRow> rows = [];
-    private readonly ListBox tree;
+    private readonly TreeList tree;
     private readonly ListBox spots;
     private readonly TreeRows<CallRow> traces = [];
     private readonly ListBox types;
-    private readonly ListBox backTraces;
+    private readonly TreeList backTraces;
     private readonly PaneSplit allocations;
     private readonly TextBlock collectionsSummary;
     private readonly ListBox collections;
     private readonly DockPanel garbage;
+    private readonly Banner offer = new();
+    private readonly Button offerLink;
+
+    /// <summary>The console whose offer the window shows over its run, while it shows one.</summary>
+    private OutputView? offering;
     private readonly MemoryView memory;
     private readonly FramesView frames;
     private readonly GameFramesView game;
@@ -103,52 +108,32 @@ public sealed class ProfilerView : DockPanel
 
     public ProfilerView()
     {
-        tree = new ListBox
+        tree = new TreeList
         {
             Classes = { StyleClasses.Tree },
             ItemsSource = rows,
         };
         ReusedRows.Use(tree, Row);
-        tree.DoubleTapped += (_, _) =>
-        {
-            if (tree.SelectedItem is CallRow row)
-            {
-                OpenRow(row);
-            }
-        };
         TreeKeys.Attach<CallRow>(tree, Toggle, OpenRow);
         spots = new ListBox
         {
             Classes = { StyleClasses.Tree },
         };
         ReusedRows.Use(spots, Spot);
-        spots.DoubleTapped += (_, _) =>
-        {
-            if (spots.SelectedItem is HotSpot spot)
-            {
-                Open(spot.Name, spot.Code);
-            }
-        };
+        ListKeys.Act(spots, new ListActs { Open = OpenSpot, Source = OpenSpot });
         types = new ListBox
         {
             Classes = { StyleClasses.Tree },
         };
         ReusedRows.Use(types, Allocated);
         types.SelectionChanged += (_, _) => ShowBackTraces();
-        backTraces = new ListBox
+        backTraces = new TreeList
         {
             Classes = { StyleClasses.Tree },
             ItemsSource = traces,
         };
         ReusedRows.Use(backTraces, Row);
-        TreeKeys.Attach<CallRow>(backTraces, Toggle, OpenRow);
-        backTraces.DoubleTapped += (_, _) =>
-        {
-            if (backTraces.SelectedItem is CallRow row)
-            {
-                Open(row.Node.Name, row.Node.Code);
-            }
-        };
+        TreeKeys.Attach<CallRow>(backTraces, Toggle, row => Open(row.Node.Name, row.Node.Code));
         allocations = new PaneSplit(types, backTraces, "2*,1,3*");
         collectionsSummary = new TextBlock { Margin = new Thickness(12, 8), TextWrapping = TextWrapping.Wrap };
         collections = new ListBox
@@ -172,15 +157,7 @@ public sealed class ProfilerView : DockPanel
             Classes = { StyleClasses.Tree },
         };
         ReusedRows.Use(kept, KeptRow);
-        kept.DoubleTapped += (_, _) => OpenKept();
-        kept.KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Enter)
-            {
-                OpenKept();
-                e.Handled = true;
-            }
-        };
+        ListKeys.Act(kept, new ListActs { Open = OpenKept });
         keptSummary = new TextBlock { Margin = new Thickness(12, 8), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
         Button reveal = new()
         {
@@ -235,6 +212,8 @@ public sealed class ProfilerView : DockPanel
         bar.Children.Add(left);
         Border top = ToolBars.Top(bar);
         Children.Add(top);
+        offerLink = offer.Link(null, () => offering?.TakeOffer());
+        Children.Add(offer);
         timeline = new Timeline();
         timeline.Chosen += (_, stretch) => IdeErrors.Observe(ChooseAsync(stretch));
         timelineBand = new Border { [DockProperty] = Dock.Top, BorderThickness = new Thickness(0, 0, 0, 1), Child = timeline, IsVisible = false, Padding = new Thickness(0, 4) };
@@ -242,7 +221,7 @@ public sealed class ProfilerView : DockPanel
         Children.Add(timelineBand);
         Children.Add(new Panel { Children = { tree, spots, flameScroll, framesPage, allocations, garbage, memory, keptPage, placeholder } });
         ticking = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
-        ticking.Tick += (_, _) => status.Text = $"Profiling {running}: {elapsed?.Invoke().TotalSeconds:0.0} s";
+        ticking.Tick += (_, _) => status.Text = $"Profiling {running}: {Durations.Said(elapsed?.Invoke() ?? TimeSpan.Zero)}";
         ShowPage(ProfilerPage.CallTree);
         foreach (ToggleButton page in pages)
         {
@@ -319,6 +298,14 @@ public sealed class ProfilerView : DockPanel
         ShowPage(Snapshot is null && Memory is null && !ticking.IsEnabled && files.Count > 0 ? ProfilerPage.Snapshots : (ProfilerPage)Math.Max(0, current));
     }
 
+    private void OpenSpot()
+    {
+        if (spots.SelectedItem is HotSpot spot)
+        {
+            Open(spot.Name, spot.Code);
+        }
+    }
+
     private void OpenKept()
     {
         if (kept.SelectedItem is SnapshotFile file)
@@ -337,7 +324,7 @@ public sealed class ProfilerView : DockPanel
         return row.Showing<SnapshotFile>(file =>
         {
             when.Text = file.Written.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.CurrentCulture);
-            size.Text = $"{file.Bytes / 1048576.0,7:N1} MB";
+            size.Text = Sizes.Said(file.Bytes).PadLeft(10);
             // Named for its program and when it ran, which the row says already.
             program.Text = System.Text.RegularExpressions.Regex.Replace(file.Name, @"-\d{8}-\d{6}(-\d+)?$", string.Empty);
         });
@@ -357,6 +344,43 @@ public sealed class ProfilerView : DockPanel
     public FlameGraph Flame => flame;
 
     public string Status => status.Text ?? string.Empty;
+
+    /// <summary>Offers over the run what a console offers of its program (a terminal, for one needing it), until that
+    /// console's offer goes.</summary>
+    public void Offer(OutputView console)
+    {
+        if (offering != console)
+        {
+            LetGoOfOffer();
+            offering = console;
+            console.OfferChanged += ShowOffer;
+        }
+        ShowOffer(console, EventArgs.Empty);
+    }
+
+    private void LetGoOfOffer()
+    {
+        if (offering is not null)
+        {
+            offering.OfferChanged -= ShowOffer;
+            offering = null;
+        }
+    }
+
+    /// <summary>What the window offers over its run, null while it offers nothing.</summary>
+    public string? Offered => offer.Said;
+
+    private void ShowOffer(object? sender, EventArgs e)
+    {
+        if (offering?.Offered is not { } said)
+        {
+            LetGoOfOffer();
+            offer.Say(null);
+            return;
+        }
+        offerLink.Content = offering.OfferLink;
+        offer.Say(said);
+    }
 
     /// <summary>A run is starting, its program not yet at the profiler: Kill ends it, and nothing is recorded to snapshot.</summary>
     public void Starting(string name)
@@ -466,9 +490,9 @@ public sealed class ProfilerView : DockPanel
         Snapshot = snapshot;
         Snapshot whole = snapshot.Whole;
         status.Text = snapshot.FramesAlone
-            ? $"{snapshotName}: {snapshot.Duration.TotalSeconds:0.0} s, {Plural.Of(snapshot.GameFrames.Count, "frame")} as Godot's profiler measured them; no samples, as a game of GDScript alone runs no .NET code"
+            ? $"{snapshotName}: {Durations.Said(snapshot.Duration)}, {Plural.Of(snapshot.GameFrames.Count, "frame")} as Godot's profiler measured them; no samples, as a game of GDScript alone runs no .NET code"
             : ReferenceEquals(whole, snapshot)
-            ? $"{snapshotName}: {snapshot.Duration.TotalSeconds:0.0} s, {Plural.Of(snapshot.Threads.Count, "thread")}, {snapshot.Samples:N0} samples"
+            ? $"{snapshotName}: {Durations.Said(snapshot.Duration)}, {Plural.Of(snapshot.Threads.Count, "thread")}, {snapshot.Samples:N0} samples{(snapshot.CutShort is null ? string.Empty : ", its trace cut short")}"
             : $"{snapshotName}: {snapshot.StartMs - whole.StartMs:N0} to {snapshot.EndMs - whole.StartMs:N0} ms of {whole.Duration.TotalMilliseconds:N0}, {snapshot.Samples:N0} samples";
         foreach (ToggleButton page in pages)
         {
@@ -573,7 +597,7 @@ public sealed class ProfilerView : DockPanel
         return row.Showing<AllocatedType>(type =>
         {
             long whole = Snapshot?.Allocations.Sum(a => a.Bytes) ?? 0;
-            size.Text = $"{(whole > 0 ? 100.0 * type.Bytes / whole : 0),5:0.0}%  {type.Bytes / 1048576.0,8:N1} MB";
+            size.Text = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{(whole > 0 ? 100.0 * type.Bytes / whole : 0),5:0.0}%  {Sizes.Said(type.Bytes),11}");
             name.Text = type.Name;
         });
     }

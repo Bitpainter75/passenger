@@ -16,6 +16,12 @@ namespace Passenger.App.Settings;
 /// Shortcuts; Find Actions by Shortcut keeps only the actions a keystroke or chord pressed into it starts.</summary>
 public sealed partial class SettingsDialog
 {
+    /// <summary>What the keymap in force does with a keystroke, as Settings names it beside Vim mode's Ctrl keys: the
+    /// action's title, the chords it begins, or nothing.</summary>
+    public static string KeymapDoes(ActionRegistry actions, Keystroke stroke) =>
+        actions.Keymap.ActionFor(new Shortcut(stroke)) is { } id ? actions[id]?.Title ?? id
+            : actions.Keymap.StartsChord(stroke) ? "the chords it begins" : "nothing";
+
     private const string ConflictWarning = "This shortcut is already assigned to other actions. Do you want to remove the other assignments?";
 
     private readonly Dictionary<string, ActionRow> keymapRows = [];
@@ -155,9 +161,9 @@ public sealed partial class SettingsDialog
         Keymap current = Current;
         foreach (IdeAction action in actions.All.OrderBy(a => a.Title, StringComparer.Ordinal))
         {
-            WrapPanel keys = new() { Width = 300, VerticalAlignment = VerticalAlignment.Center };
+            WrapPanel keys = new() { VerticalAlignment = VerticalAlignment.Center };
             Button edit = ToolButtons.Of(IconKeys.More, "Edit Shortcuts");
-            StackPanel editor = new() { Orientation = Orientation.Horizontal, Spacing = 6, Children = { keys, edit } };
+            NarrowingField editor = new(keys, edit) { MaxWidth = OptionRow.EditorWidth };
             Panel row = (Panel)Add(KeymapPage, action.Title, editor, RowWords(action, ShownOf(current, action.Id)), action: action.Id);
             // Transparent so a click anywhere along the row is the row's.
             row.Background = Brushes.Transparent;
@@ -422,7 +428,8 @@ public sealed partial class SettingsDialog
         FilterByShortcut(null);
     }
 
-    /// <summary>Which options a shortcut filter keeps: every one but the Keymap page's actions it does not start.</summary>
+    /// <summary>Which options a shortcut filter keeps: every one but the Keymap page's actions it does not start and its own
+    /// settings, which no keystroke starts.</summary>
     private Func<Option, bool> ShortcutFiltered()
     {
         if (shortcutFilter is not { } filter)
@@ -430,7 +437,7 @@ public sealed partial class SettingsDialog
             return _ => true;
         }
         Keymap current = Current;
-        return option => option.Action is null || current.ShortcutsFor(option.Action).Any(s => s.StartsWith(filter));
+        return option => option.Action is null ? option.Page != KeymapPage : current.ShortcutsFor(option.Action).Any(s => s.StartsWith(filter));
     }
 
     /// <summary>Where an action is listed: its main menu's path, Editor Actions for the editor's own (its mouse's too),

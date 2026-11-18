@@ -29,15 +29,9 @@ public sealed record ReleaseFeed(Uri Latest, TimeSpan Timeout)
     /// else the same path on the feed's own host.</summary>
     public Uri Downloads => Latest == GitHub ? new Uri("https://github.com/Zaneris/passenger/releases/download/") : new Uri(Latest, "/Zaneris/passenger/releases/download/");
 
-    /// <summary>GitHub's, or the one <c>PASSENGER_RELEASES</c> names; a value there that is no http or https URL is
-    /// fatal.</summary>
-    public static ReleaseFeed Default => Environment.GetEnvironmentVariable(Variable) is { Length: > 0 } named
-        ? new ReleaseFeed(Parse(named), ShortTimeout)
-        : new ReleaseFeed(GitHub, ShortTimeout);
-
-    private static Uri Parse(string text) =>
-        WebAddress.Of(text)
-        ?? throw new FormatException($"{Variable} takes the http or https URL of a latest release as GitHub's API answers it, not '{text}'");
+    /// <summary>GitHub's, or the one <c>PASSENGER_RELEASES</c> names (<see cref="EnvironmentValues.Address(string, string)"/>).</summary>
+    public static ReleaseFeed Default =>
+        new(EnvironmentValues.Address(Variable, "of a latest release as GitHub's API answers it") ?? GitHub, ShortTimeout);
 }
 
 /// <summary>A release newer than the running Passenger: its version ("0.2.0"), its tag ("v0.2.0"), and what its link
@@ -49,6 +43,10 @@ public sealed record LatestRelease(string Version, string Tag, Uri Link, string?
 
     /// <summary>Every file the release carries that downloads over http or https, by name: what an update downloads.</summary>
     public IReadOnlyList<ReleaseFile> Files { get; init; } = [];
+
+    /// <summary>What a security release says it fixes, its notes' Security section's first line (<see cref="ReleaseNotes.SecurityOf"/>),
+    /// empty where they say nothing more; null for any other release.</summary>
+    public string? Security { get; init; }
 
     /// <summary>The file the release carries by this name, or null.</summary>
     public ReleaseFile? File(string name) => Files.FirstOrDefault(f => f.Name == name);
@@ -125,7 +123,7 @@ public static partial class Releases
         }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
         {
-            return Failed(feed, FormattableString.Invariant($"no answer in {feed.Timeout.TotalSeconds:0.#} s"));
+            return Failed(feed, FormattableString.Invariant($"no answer in {Durations.Said(feed.Timeout)}"));
         }
         catch (OperationCanceledException)
         {
@@ -161,8 +159,9 @@ public static partial class Releases
         Uri? download = files.FirstOrDefault(f => f.Name == asset)?.Url;
         Uri page = WebAddress.Of(release.HtmlUrl) ?? ReleaseFeed.GitHubReleases;
         Uri link = download ?? page;
-        return new ReleaseAnswer.Newer(new LatestRelease(number, tag, link, download is null ? null : asset) { Page = page, Files = files },
-            $"Passenger {number} is out ({tag}; this is {running}): {link}");
+        string? security = release.Body is { } body ? ReleaseNotes.SecurityOf(body) : null;
+        return new ReleaseAnswer.Newer(new LatestRelease(number, tag, link, download is null ? null : asset) { Page = page, Files = files, Security = security },
+            $"Passenger {number} is out ({tag}; this is {running}){(security is null ? string.Empty : ", a security release")}: {link}");
     }
 
     private static ReleaseAnswer.Failed Failed(ReleaseFeed feed, string reason) =>
@@ -173,9 +172,9 @@ public static partial class Releases
     [GeneratedRegex(@"^[vV]?(?<version>\d+(?:\.\d+){1,3})(?<label>-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")]
     private static partial Regex Tag();
 
-    /// <summary>What Passenger reads of GitHub's release: its tag and page, whether it is a draft or a pre-release, and
-    /// its downloads by name.</summary>
-    private sealed record GitHubRelease(string? TagName, string? HtmlUrl, bool Draft, bool Prerelease, GitHubAsset[]? Assets);
+    /// <summary>What Passenger reads of GitHub's release: its tag and page, whether it is a draft or a pre-release, its
+    /// downloads by name, and its notes.</summary>
+    private sealed record GitHubRelease(string? TagName, string? HtmlUrl, bool Draft, bool Prerelease, GitHubAsset[]? Assets, string? Body);
 
     private sealed record GitHubAsset(string? Name, string? BrowserDownloadUrl, long Size);
 }

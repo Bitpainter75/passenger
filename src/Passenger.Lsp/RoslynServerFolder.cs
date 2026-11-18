@@ -18,6 +18,31 @@ public static class RoslynServerFolder
     /// <summary>Where the app carries the server.</summary>
     public static string Carried => Path.Combine(AppContext.BaseDirectory, "roslyn");
 
+    /// <summary>The variable a program on Linux takes its temporary folder from.</summary>
+    public const string TemporaryVariable = "TMPDIR";
+
+    /// <summary>The temporary folder the server takes (TMPDIR), where it writes what Go to Declaration opens of a library
+    /// (MetadataAsSource): on Linux, whose /tmp every user shares, a folder of the person's own for the state's cache
+    /// (<see cref="UserTemporary.Of"/>, made theirs by <see cref="UserTemporary.Own"/>), so another user's folder there
+    /// neither takes its writes nor fails it; null where the server takes Passenger's own, the person's alone elsewhere,
+    /// or where none of theirs could be made.</summary>
+    public static string? Temporary(string stateCache)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return null;
+        }
+        try
+        {
+            return UserTemporary.Own(UserTemporary.Of(stateCache, "roslyn"));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            PassengerLog.Write($"The C# language server takes the shared temporary folder: {error.Message}");
+            return null;
+        }
+    }
+
     /// <summary>The folder the server writes its caches to, under the one it runs from: never part of a copy or its stamp.</summary>
     private const string Written = "cache";
 
@@ -41,7 +66,8 @@ public static class RoslynServerFolder
     internal static async Task<string?> CopyAsync(string? stateCache, CancellationToken cancel)
     {
         string carried = PathNames.Canonical(Carried);
-        if (stateCache is null || (!InAppBundle(carried) && CanWrite(carried)))
+        // A file added inside a macOS app bundle breaks its seal.
+        if (stateCache is null || (!(OperatingSystem.IsMacOS() && MacBundles.Holds(carried)) && CanWrite(carried)))
         {
             return null;
         }
@@ -91,24 +117,6 @@ public static class RoslynServerFolder
 
     /// <summary>The copies under the state's cache, each a folder kept by its mark.</summary>
     private static UsedCache Copies(string copies) => new(copies, UsedEntries.Folders(1, UsedMark), new UsedLimits(Unused, Unused, null, Unused));
-
-    /// <summary>Whether a folder is inside a macOS app bundle (<c>X.app/Contents/…</c>), whose seal a file added breaks.</summary>
-    private static bool InAppBundle(string folder)
-    {
-        if (!OperatingSystem.IsMacOS())
-        {
-            return false;
-        }
-        for (string? at = Path.GetDirectoryName(folder); at is not null; at = Path.GetDirectoryName(at))
-        {
-            if (Path.GetFileName(at) == "Contents" && Path.GetFileName(Path.GetDirectoryName(at)) is { } app
-                && app.EndsWith(".app", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
 
     /// <summary>Whether the server can write its caches beside itself: a file can be made where it writes them.</summary>
     private static bool CanWrite(string carried)

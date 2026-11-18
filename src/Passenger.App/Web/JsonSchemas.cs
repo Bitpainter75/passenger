@@ -7,8 +7,10 @@ namespace Passenger.App.Web;
 /// Node.js project (package.json, tsconfig.json, jsconfig.json, appsettings.json, launchSettings.json and a file-based
 /// program's .run.json, global.json) take SchemaStore's, and compose files the Compose specification's, carried under
 /// <c>web/schemas/</c> with those they refer to and never downloaded. A schema a file names itself (its <c>$schema</c>) is
-/// downloaded while Settings allow it, over HTTP or HTTPS, kept for the process; <c>PASSENGER_SCHEMAS</c> names another
-/// place to ask for them. Called on any thread.</summary>
+/// downloaded while Settings allow it, over HTTP or HTTPS, kept for the process, or read from a file on this machine's own
+/// disks (<see cref="FoundPaths.OfFileAddress"/>), never another machine's or a share's; <c>PASSENGER_SCHEMAS</c> names
+/// another place to ask for them. The JSON server asks here for every schema, a file's too, and the YAML server, through
+/// Passenger's preload (<see cref="YamlPreload"/>), for every schema's file and one over HTTP. Called on any thread.</summary>
 public sealed class JsonSchemas(Func<bool> download)
 {
     [IdentifierHome]
@@ -37,8 +39,16 @@ public sealed class JsonSchemas(Func<bool> download)
     /// <summary>Where the carried schemas are, beside the app.</summary>
     public static string Folder => Path.Combine(WebLanguages.Carried, "schemas");
 
-    /// <summary>The Compose specification's schema, carried, as the YAML server reads it from disk.</summary>
+    /// <summary>The Compose specification's schema, carried, as the YAML server asks for it by its file's URL.</summary>
     public static string ComposeUri => new Uri(Path.Combine(Folder, "compose-spec.json")).AbsoluteUri;
+
+    /// <summary>Passenger's preload for the YAML server, carried beside the web language servers, which has it ask here for
+    /// each schema's file it would read itself (<c>web/passenger/yaml-schemas.mjs</c>).</summary>
+    public static string YamlPreload => Path.Combine(WebLanguages.Carried, "passenger", "yaml-schemas.mjs");
+
+    /// <summary>The Node.js the YAML server's preload runs on, beside what the server's package needs: one with
+    /// <c>module.registerHooks</c>.</summary>
+    public const string YamlPreloadNode = "^22.15.0 || >=23.5.0";
 
     /// <summary>The globs compose files take the Compose specification's schema by (<see cref="Containers.ComposeFiles.SchemaGlobs"/>).</summary>
     public static readonly string[] ComposeFiles = [.. Containers.ComposeFiles.SchemaGlobs];
@@ -46,8 +56,8 @@ public sealed class JsonSchemas(Func<bool> download)
     /// <summary>The associations as the JSON server's <c>json/schemaAssociations</c> takes them.</summary>
     public static object Notification => Associations.Select(a => new { fileMatch = a.FileMatch, uri = a.Uri }).ToArray();
 
-    /// <summary>A schema's text by its URI: a carried one's, else one downloaded when Settings allow it; a failure says
-    /// why, which the JSON server shows where the file names the schema.</summary>
+    /// <summary>A schema's text by its URI: a carried one's, a file's on this machine's own disks, else one downloaded when
+    /// Settings allow it; a failure says why, which the JSON server shows where the file names the schema.</summary>
     public async Task<string> ContentAsync(string uri, CancellationToken cancel)
     {
         if (!Uri.TryCreate(uri, UriKind.Absolute, out Uri? asked))
@@ -57,6 +67,11 @@ public sealed class JsonSchemas(Func<bool> download)
         if (Carried(asked) is { } path)
         {
             return await File.ReadAllTextAsync(path, cancel);
+        }
+        if (asked.IsFile)
+        {
+            return FoundPaths.OfFileAddress(asked) is { } file ? await ReadAsync(file, cancel)
+                : throw new InvalidOperationException($"Passenger reads a schema's file only from this machine's own disks, never another machine's or a share's ({uri})");
         }
         if (asked.Scheme != Uri.UriSchemeHttps && asked.Scheme != Uri.UriSchemeHttp)
         {
@@ -77,6 +92,19 @@ public sealed class JsonSchemas(Func<bool> download)
         }
     }
 
+    /// <summary>A schema's file on this machine, its failure to read said.</summary>
+    private static async Task<string> ReadAsync(string path, CancellationToken cancel)
+    {
+        try
+        {
+            return await File.ReadAllTextAsync(path, cancel);
+        }
+        catch (Exception unread) when (unread is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException($"{path} could not be read: {unread.Message}", unread);
+        }
+    }
+
     /// <summary>The carried schema a URI names: SchemaStore's by its file's name (its <c>$id</c> leaves out ".json").</summary>
     private static string? Carried(Uri uri)
     {
@@ -93,22 +121,12 @@ public sealed class JsonSchemas(Func<bool> download)
         return File.Exists(path) ? path : null;
     }
 
-    /// <summary>Where a schema is asked for: its own URL, or under the place <c>PASSENGER_SCHEMAS</c> names, its path kept.</summary>
-    private static Uri From(Uri schema)
-    {
-        if (Environment.GetEnvironmentVariable(Variable) is not { Length: > 0 } named)
-        {
-            return schema;
-        }
-        if (!Uri.TryCreate(named, UriKind.Absolute, out Uri? place) || (place.Scheme != Uri.UriSchemeHttp && place.Scheme != Uri.UriSchemeHttps))
-        {
-            throw new FormatException($"{Variable} takes the http or https URL schemas are asked for at, not '{named}'");
-        }
-        return new Uri(place, schema.PathAndQuery);
-    }
+    /// <summary>The place <c>PASSENGER_SCHEMAS</c> names to ask for schemas at in place of their own hosts; null for none
+    /// (<see cref="EnvironmentValues.Address(string, string)"/>).</summary>
+    public static Uri? Place => EnvironmentValues.Address(Variable, "schemas are asked for at");
 
-    /// <summary>Checks <c>PASSENGER_SCHEMAS</c> as the IDE starts, a malformed one being fatal.</summary>
-    public static void CheckVariable() => From(new Uri("https://json.schemastore.org/"));
+    /// <summary>Where a schema is asked for: its own URL, or at <see cref="Place"/>, its path kept.</summary>
+    private static Uri From(Uri schema) => Place is { } place ? new Uri(place, schema.PathAndQuery) : schema;
 
     private static async Task<string> DownloadAsync(Uri uri)
     {

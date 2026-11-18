@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Input.Raw;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Passenger.App.State;
@@ -24,10 +25,15 @@ namespace Passenger.Tests;
 /// a desktop.</summary>
 public static class TestApp
 {
+    /// <summary>The application's menu as the test's app ended its setup, where macOS's platform takes it before any
+    /// window is made, showing Avalonia's own About in place of none.</summary>
+    public static NativeMenu? ApplicationMenuAtSetup { get; private set; }
+
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<Passenger.App.App>()
         .UseSkia()
         .UseHarfBuzz()
-        .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false });
+        .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
+        .AfterSetup(built => ApplicationMenuAtSetup = NativeMenu.GetMenu(built.Instance!));
 }
 
 /// <summary>What the whole run shares, set before anything reads it and never changed: a folder of the run's own in the
@@ -100,6 +106,8 @@ public sealed class TestRun : IAsyncDisposable
         Nice.Normal();
         // What the IDE has in flight is recorded from the first window on, for the quiet wait (Ui.Settle) to wait out.
         Passenger.Core.InFlight.Watched = true;
+        // Every folder a test opens is trusted, but one it holds to the person's answer (WorkspaceTrust.Ask).
+        Passenger.Core.WorkspaceTrust.TrustEverything();
         foreach (string left in Directory.EnumerateDirectories(Path.GetTempPath(), Prefix + "*"))
         {
             // A run still going has its process; one killed has none, and only an id reused since keeps its folder.
@@ -118,9 +126,10 @@ public sealed class TestRun : IAsyncDisposable
         Environment.SetEnvironmentVariable(StateStore.Variable, Settings);
         Environment.SetEnvironmentVariable("GIT_CONFIG_GLOBAL", gitConfig);
         Environment.SetEnvironmentVariable("GIT_CONFIG_NOSYSTEM", "1");
-        // Configuration given on git's command line through the environment, which would come before the file's.
-        OwnEnvironment.Set("GIT_CONFIG_PARAMETERS", null);
-        OwnEnvironment.Set("GIT_CONFIG_COUNT", null);
+        // Configuration git takes from the environment, over the files' or (git config's) in place of them.
+        OwnEnvironment.Set(GitVariables.ConfigParameters, null);
+        OwnEnvironment.Set(GitVariables.Config, null);
+        OwnEnvironment.Set(GitVariables.ConfigCount, null);
         // Nor the person's ssh-agent, which ssh-keygen asks first for the key a commit is signed with.
         OwnEnvironment.Set("SSH_AUTH_SOCK", null);
         // Nor the person's GnuPG keyring and agent: gpg keeps a signing test's keys in the run's.
@@ -149,10 +158,16 @@ public sealed class TestRun : IAsyncDisposable
         Environment.SetEnvironmentVariable(Passenger.App.Xaml.SourceLink.Variable, "http://127.0.0.1:9/");
         // Nor the web for a JSON schema a file names: those Passenger does not carry are asked of where nothing listens.
         Environment.SetEnvironmentVariable(Passenger.App.Web.JsonSchemas.Variable, "http://127.0.0.1:9/");
+        // Nor Open VSX for VS Code themes: the explorer and a theme's base without a stand-in of the test's ask where nothing listens.
+        Environment.SetEnvironmentVariable(Passenger.App.OpenVsx.Variable, "http://127.0.0.1:9/");
+        // Nor GitHub for Passenger's themes repository: it is read from the copy the tests carry.
+        Environment.SetEnvironmentVariable(Passenger.App.ThemeSource.Variable, Path.Combine(AppContext.BaseDirectory, "Themes"));
         // Nor Docker Hub for an image's tags: a Dockerfile server without a stand-in asks where nothing listens.
         Environment.SetEnvironmentVariable(Passenger.App.Web.DockerHubTags.Variable, "http://127.0.0.1:9/");
         // Nor a registry for a Dockerfile's base images: BuildKit's checks are off but in the one test that turns them on.
         Environment.SetEnvironmentVariable(Passenger.App.Containers.BuildKitChecks.Variable, "off");
+        // Nor the person's motion and caret settings: carets blink at Passenger's own rate but where a test stands in.
+        Environment.SetEnvironmentVariable(Passenger.App.SystemMotion.Variable, "full,blink=530");
         // Nor the person's user secrets: a container run mounts a project's from the run's own folder, which a test writes.
         Environment.SetEnvironmentVariable(Passenger.App.Containers.ContainerPlans.UserSecretsVariable, UserSecrets);
         // Nor the person's Passenger: an agent's call with no window to join starts this build headless, in the run's state.
@@ -161,9 +176,12 @@ public sealed class TestRun : IAsyncDisposable
         Environment.SetEnvironmentVariable(Passenger.App.Discord.DiscordIpc.Variable, DiscordNowhere);
         // Nor npm's registry: an npm install the IDE runs takes only what the run's own empty cache has.
         string npmConfig = Path.Combine(Root, "npmrc");
+        string npmGlobalConfig = Path.Combine(Root, "npmrc-global");
         File.WriteAllText(npmConfig, string.Empty);
+        // A file of its own, as npm 11 ends at once on one file read as both.
+        File.WriteAllText(npmGlobalConfig, string.Empty);
         Environment.SetEnvironmentVariable("npm_config_userconfig", npmConfig);
-        Environment.SetEnvironmentVariable("npm_config_globalconfig", npmConfig);
+        Environment.SetEnvironmentVariable("npm_config_globalconfig", npmGlobalConfig);
         Environment.SetEnvironmentVariable("npm_config_cache", Path.Combine(Root, "npm-cache"));
         Environment.SetEnvironmentVariable("npm_config_offline", "true");
         Environment.SetEnvironmentVariable("npm_config_update_notifier", "false");
@@ -360,6 +378,13 @@ public sealed class TestRun : IAsyncDisposable
 public static class Limits
 {
     public static TimeSpan Scaled(this TimeSpan limit) => limit == Timeout.InfiniteTimeSpan ? limit : limit * TestRun.TimeScale;
+}
+
+/// <summary>A while as the IDE says one (<see cref="Durations.Said"/>), as a regular expression: its number to a tenth and its
+/// unit, for words that say how long something took.</summary>
+public static class SaidWhile
+{
+    public const string Pattern = @"[\d,]+(\.\d)? (ms|s|minutes?|hours?)";
 }
 
 /// <summary>The run's nice value on macOS and Linux. MSBuild keeps no idle node for the next build at any nice value but 0,
@@ -739,6 +764,19 @@ public static class TestFolders
         return path;
     }
 
+    /// <summary>A stand-in program in a test's folder running one command, <paramref name="cmd"/> as a Windows .cmd (as npm
+    /// writes a package's command), else <paramref name="sh"/> as a shell script; its path.</summary>
+    public static string StandIn(string folder, string name, string cmd, string sh)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return Write(folder, $"{name}.cmd", $"@echo off\r\n{cmd}\r\n");
+        }
+        string program = Write(folder, name, $"#!/bin/sh\n{sh}\n");
+        File.SetUnixFileMode(program, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return program;
+    }
+
     /// <summary>Many files of a test's folder written as <see cref="Write"/> writes each, several at once: Windows scans a
     /// file as it is made, which a test of a thousand files written one after another waits out a thousand times.</summary>
     public static void WriteAll(string folder, IEnumerable<(string Relative, string Text)> files) =>
@@ -910,8 +948,9 @@ public static class Ui
 
     /// <summary>A key that types, pressed as a keyboard presses it: the key, carrying the character the layout gives it
     /// ("ł" for a Polish AltGr+L, which Windows sends as Ctrl+Alt+L), then that character as text unless the key was taken
-    /// as a shortcut, which keeps the platform from typing it.</summary>
-    public static void Type(TopLevel window, string keys, string text)
+    /// as a shortcut, which keeps the platform from typing it; what it ran let land unless <paramref name="settle"/> is
+    /// false, as for a key typed right after it.</summary>
+    public static void Type(TopLevel window, string keys, string text, bool settle = true)
     {
         Keystroke stroke = Keystroke.Parse(keys.Replace('+', ' '));
         RawInputModifiers modifiers = Raw(stroke.Modifiers);
@@ -925,7 +964,10 @@ public static class Ui
             window.KeyTextInput(text);
         }
         window.KeyRelease(stroke.Key, modifiers, PhysicalKey.None, text);
-        Settle();
+        if (settle)
+        {
+            Settle();
+        }
     }
 
     /// <summary>Long enough for the language server to start and load a small project, on a developer's machine.</summary>
@@ -1035,9 +1077,9 @@ public static class Ui
     /// piece of work in flight, with how long it had been under way.</summary>
     public static string Busy()
     {
-        DateTime now = DateTime.UtcNow;
-        IReadOnlyList<(string What, DateTime Since)> held = BackgroundWork.Held();
-        IReadOnlyList<(string What, DateTime Since)> flying = Passenger.Core.InFlight.Now();
+        long now = Stopwatch.GetTimestamp();
+        IReadOnlyList<(string What, long Since)> held = BackgroundWork.Held();
+        IReadOnlyList<(string What, long Since)> flying = Passenger.Core.InFlight.Now();
         int unnamed = BackgroundWork.Pending - held.Count;
         string busy = Passenger.Core.InFlight.Describe(held.Concat(flying).OrderBy(b => b.Since), now);
         return (busy.Length == 0 && unnamed <= 0 ? "  nothing named" : busy)
@@ -1163,6 +1205,38 @@ public static class Ui
             ?? throw new InvalidOperationException($"Avalonia's headless window no longer tells its window it was left through Deactivated ({shown.GetType().Name})");
         ((Action?)deactivated.GetValue(shown))?.Invoke();
         Settle();
+    }
+
+    /// <summary>A finger's fling: put down on the window at <paramref name="from"/>, drawn to <paramref name="to"/> in
+    /// <paramref name="moves"/> moves and let go there, given through the window's own way in as its platform gives touch,
+    /// each stamped a frame after the last with no frame drawn between, as Avalonia's velocity tracker takes a finger at
+    /// rest from a move stamped over 40 ms after the last or a release over 40 ms after it, which a slow machine's frames
+    /// between headless moves make of every fling.</summary>
+    public static void Fling(Window window, Point from, Point to, int moves)
+    {
+        object shown = window.PlatformImpl ?? throw new InvalidOperationException($"{window.Title} has no window of the platform's to touch");
+        Assembly avalonia = typeof(RawInputModifiers).Assembly;
+        Type touch = avalonia.GetType("Avalonia.Input.Raw.RawTouchEventArgs") ?? throw Unreachable("RawTouchEventArgs");
+        Type finger = avalonia.GetType("Avalonia.Input.TouchDevice") ?? throw Unreachable("TouchDevice");
+        object root = shown.GetType().GetProperty("InputRoot")?.GetValue(shown) ?? throw Unreachable("its window's InputRoot");
+        Delegate input = shown.GetType().GetProperty("Input")?.GetValue(shown) as Delegate ?? throw Unreachable("its window's Input");
+        using IDisposable device = (IDisposable)(Activator.CreateInstance(finger) ?? throw Unreachable("a TouchDevice made"));
+        ulong stamp = 0;
+        void Give(RawPointerEventType type, Point at)
+        {
+            stamp += 16;
+            input.DynamicInvoke(Activator.CreateInstance(touch, device, stamp, root, type, at, RawInputModifiers.None, 1L));
+        }
+        Give(RawPointerEventType.TouchBegin, from);
+        for (int move = 1; move <= moves; move++)
+        {
+            Give(RawPointerEventType.TouchUpdate, from + (to - from) * move / moves);
+        }
+        Give(RawPointerEventType.TouchEnd, to);
+        Draw();
+
+        static InvalidOperationException Unreachable(string what) =>
+            new($"Avalonia's touch input is no longer reachable as a platform gives it: {what} is gone");
     }
 
     /// <summary>Closes a window as the application's shutdown does (the application menu's Quit on macOS): its owned windows
@@ -1340,6 +1414,29 @@ public static class Ui
     public static void Click(Control control, Point? at = null, RawInputModifiers modifiers = RawInputModifiers.None, bool settle = true) =>
         Click(control, at, MouseButton.Left, modifiers, settle);
 
+    /// <summary>A click as <see cref="Click(Control, Point?, RawInputModifiers, bool)"/> makes one, its button held down while
+    /// <paramref name="meanwhile"/> runs (work landing between a person's press and release), then let go where it went down.</summary>
+    public static void ClickAcross(Control control, Action meanwhile)
+    {
+        (TopLevel top, Point point) = Aim(control, null);
+        Apart(top, point);
+        top.MouseDown(point, MouseButton.Left);
+        meanwhile();
+        top.MouseUp(point, MouseButton.Left);
+        Clicked(top, point);
+        Settle();
+    }
+
+    /// <summary>The pointer brought to rest over a control (its centre, or a point in it) as a person's mouse brings it,
+    /// once the control is drawn and is what the pointer finds there, as <see cref="Click(Control, Point?, RawInputModifiers, bool)"/>
+    /// aims; then lets what it ran land.</summary>
+    public static void Hover(Control control, Point? at = null)
+    {
+        (TopLevel top, Point point) = Aim(control, at);
+        top.MouseMove(point);
+        Settle();
+    }
+
     /// <summary>A right click as <see cref="Click(Control, Point?, RawInputModifiers, bool)"/> makes a click, which opens
     /// the menu of what is there.</summary>
     public static void RightClick(Control control, Point? at = null) => Click(control, at, MouseButton.Right, RawInputModifiers.None, settle: true);
@@ -1418,7 +1515,16 @@ public static class Ui
         Dragged(window, from, to, button, modifiers);
     }
 
-    private static void Dragged(TopLevel window, Point from, Point to, MouseButton button, RawInputModifiers modifiers)
+    /// <summary>A drag with the left button as <see cref="Drag(TopLevel, Point, Point)"/> makes one, a frame drawn after the
+    /// press and after each move, as the screen follows a person's hand: each frame draws what the moves so far changed
+    /// over what the frame before it drew.</summary>
+    public static void DragDrawn(TopLevel window, Point from, Point to)
+    {
+        Apart(window, from);
+        Dragged(window, from, to, MouseButton.Left, RawInputModifiers.None, drawn: true);
+    }
+
+    private static void Dragged(TopLevel window, Point from, Point to, MouseButton button, RawInputModifiers modifiers, bool drawn = false)
     {
         RawInputModifiers held = modifiers | button switch
         {
@@ -1430,7 +1536,15 @@ public static class Ui
         window.MouseDown(from, button, modifiers);
         for (int step = 1; step <= 10; step++)
         {
+            if (drawn)
+            {
+                Draw();
+            }
             window.MouseMove(from + ((to - from) * (step / 10.0)), held);
+        }
+        if (drawn)
+        {
+            Draw();
         }
         window.MouseUp(to, button, modifiers);
         Clicked(window, from);
@@ -1545,12 +1659,27 @@ public static class Ui
     private static string Covering(Control control) => control.TemplatedParent is Control owner ? $"{Named(control)} of {Covering(owner)}"
         : string.Join(" in ", control.GetVisualAncestors().OfType<Control>().Take(6).Prepend(control).Select(Named));
 
+    /// <summary>Every tool window serving the window's folder whatever it holds, for a test of the dock or of a window's own
+    /// parts, whose subject is not which windows a folder's projects bring (ToolWindowServesTests is).</summary>
+    public static void ServeEveryWindow(Passenger.App.MainWindow window)
+    {
+        window.DockHost.WhyUnserved = _ => null;
+        window.DockHost.Serve();
+        Settle();
+    }
+
     /// <summary>A person's window shown on a folder, once the folder's opening work has landed; without the C# language
     /// server for a test that asks nothing of C# (<see cref="Passenger.App.MainWindow.StartsLanguageServer"/>), which then
-    /// waits for no server's start, load or restore; saving only when asked for a test that reads what it left unsaved.</summary>
-    public static Passenger.App.MainWindow OpenFolder(string folder, double width = 1200, double height = 800, bool languageServer = true, bool autosaves = true)
+    /// waits for no server's start, load or restore; saving only when asked for a test that reads what it left unsaved; on
+    /// <paramref name="engine"/> in place of the machine's container engine where given.</summary>
+    public static Passenger.App.MainWindow OpenFolder(string folder, double width = 1200, double height = 800, bool languageServer = true, bool autosaves = true,
+        Passenger.App.Containers.ContainerEngine? engine = null)
     {
-        Passenger.App.MainWindow window = new() { Width = width, Height = height, StartsLanguageServer = languageServer, Autosaves = autosaves };
+        Passenger.App.MainWindow window = new()
+        {
+            Width = width, Height = height, StartsLanguageServer = languageServer, Autosaves = autosaves,
+            Engine = engine ?? Passenger.App.Containers.ContainerEngine.Shared,
+        };
         window.Show();
         window.OpenFolder(folder);
         Settle();
@@ -1584,6 +1713,15 @@ public static class Ui
             ?? throw new Xunit.Sdk.XunitException($"No button says {words}: [{string.Join(", ", buttons.Select(b => b.Content).OfType<string>())}]"));
     }
 
+    /// <summary>A line's links as a console or the terminal draws them once the disk has answered for every path they name,
+    /// which it is asked off the window's thread.</summary>
+    public static Passenger.App.ToolWindows.FoundLink[] LinksIn(Passenger.App.ToolWindows.ConsoleLinks links, string line)
+    {
+        links.In(line);
+        WaitFor(() => !links.Looking, () => $"the disk's answers for the paths in: {line}");
+        return links.In(line);
+    }
+
     /// <summary>A click on a console line's link to a file, at its first character, as a person clicks it: the pointer
     /// rested there first, failing unless that underlines the link.</summary>
     public static void ClickLink(Passenger.App.ToolWindows.OutputView console, string line) =>
@@ -1595,7 +1733,7 @@ public static class Ui
     public static void ClickLink(Passenger.App.ToolWindows.OutputView console, string line, Func<Passenger.App.ToolWindows.FoundLink, bool> which)
     {
         CodeEditor editor = console.Editor;
-        Passenger.App.ToolWindows.FoundLink link = console.Links.In(line).Single(which);
+        Passenger.App.ToolWindows.FoundLink link = LinksIn(console.Links, line).Single(which);
         int offset = editor.Document.Snapshot.ToString().IndexOf(line, StringComparison.Ordinal) + link.Start;
         editor.GoTo(editor.Document.Snapshot.GetPosition(offset));
         Settle();
@@ -1751,7 +1889,7 @@ public static class Ui
         for (int i = 0; i < path.Length; i++)
         {
             string step = path[i];
-            MenuItem item = items.FirstOrDefault(m => (string?)m.Header == step)
+            MenuItem item = items.FirstOrDefault(m => m.Header as string == step)
                 ?? throw new InvalidOperationException($"{where} has no {step}: [{string.Join(", ", items.Select(m => $"{m.Header}{(m.IsEnabled ? "" : " (disabled)")}"))}]");
             if (!item.IsEffectivelyEnabled)
             {
@@ -1968,6 +2106,54 @@ public static class Ui
     }
 }
 
+/// <summary>A window's diffs wherever Settings' Open diffs in shows them, in a tab of the editors
+/// (<see cref="Passenger.App.Vcs.DiffTab"/>) or in a window of their own (<see cref="Passenger.App.Vcs.DiffWindow"/>): a test
+/// finds, reads and works a diff through these, never taking it to be either, so what it checks holds of both.</summary>
+public static class OpenDiffs
+{
+    /// <summary>The diffs open: the editors' tabs, then the windows over the IDE's.</summary>
+    public static IReadOnlyList<Passenger.App.Vcs.IDiffHost> In(Passenger.App.MainWindow window) =>
+        [.. window.EditorArea.Diffs.Select(d => d.Diff!), .. window.OwnedWindows.OfType<Passenger.App.Vcs.DiffWindow>().Where(w => w.IsVisible)];
+
+    /// <summary>The diff the person sees: the diff window over the others, else the diff tab the editors show; null for none.</summary>
+    public static Passenger.App.Vcs.IDiffHost? Shown(Passenger.App.MainWindow window) =>
+        window.OwnedWindows.OfType<Passenger.App.Vcs.DiffWindow>().LastOrDefault(w => w.IsVisible) ?? (Passenger.App.Vcs.IDiffHost?)window.EditorArea.Active?.Diff;
+
+    /// <summary>The diff an action opened (a key, a double click, a menu's choice), once the window's work has landed;
+    /// fails saying <paramref name="what"/> never showed.</summary>
+    public static Passenger.App.Vcs.IDiffHost Landed(Passenger.App.MainWindow window, string what)
+    {
+        Ui.Landed(() => Shown(window) is not null, $"{what}, where the status bar says \"{window.Status}\"");
+        return Shown(window)!;
+    }
+
+    /// <summary>Its view, as its window or the group showing its tab has it; fails where none shows it.</summary>
+    public static Passenger.App.Vcs.DiffView ViewOf(Passenger.App.Vcs.IDiffHost diff) => diff.View
+        ?? throw new Xunit.Sdk.XunitException($"The diff \"{diff.Shown.Title}\" is in a tab no group shows in front, so nothing in it can be seen or worked");
+
+    /// <summary>Where its keys go: its own window, or the window whose editors show its tab.</summary>
+    public static TopLevel KeysOf(Passenger.App.Vcs.IDiffHost diff) => TopLevel.GetTopLevel(ViewOf(diff))
+        ?? throw new Xunit.Sdk.XunitException($"The diff \"{diff.Shown.Title}\" is in no window, so no key can reach it");
+
+    /// <summary>Its title as the person reads it: its window's, or its tab's.</summary>
+    public static string TitleOf(Passenger.App.Vcs.IDiffHost diff) => diff switch
+    {
+        Passenger.App.Vcs.DiffWindow shown => shown.Title ?? string.Empty,
+        Passenger.App.Vcs.DiffTab tab => tab.Document.Title,
+        _ => throw new ArgumentException($"A diff is shown in a window or a tab, not in a {diff.GetType().Name}", nameof(diff)),
+    };
+
+    /// <summary>Whether it is still open.</summary>
+    public static bool IsOpen(Passenger.App.MainWindow window, Passenger.App.Vcs.IDiffHost diff) => In(window).Contains(diff);
+
+    /// <summary>Fails where a diff is open, naming each, as <paramref name="why"/> says it should not be.</summary>
+    public static void None(Passenger.App.MainWindow window, string why)
+    {
+        IReadOnlyList<Passenger.App.Vcs.IDiffHost> open = In(window);
+        Assert.True(open.Count == 0, $"{why}: {string.Join(", ", open.Select(TitleOf))} open");
+    }
+}
+
 /// <summary>The project files tests write, as short as dotnet new's: each targets <see cref="Framework"/>, so moving the tests
 /// to the next .NET changes one line.</summary>
 public static class TestProjects
@@ -2024,6 +2210,9 @@ public static class TestPackages
 
     /// <summary>xunit v3 on the Testing Platform alone, its second line (the tests' own xunit v3 is on its first).</summary>
     public static string XunitApp { get; } = AvaloniaApp.Metadata("XunitAppVersion");
+
+    /// <summary>Reqnroll on xunit v3 (Reqnroll.xunit.v3), beside the tests' own xunit v3, adapter and test SDK.</summary>
+    public static string Reqnroll { get; } = AvaloniaApp.Metadata("ReqnrollVersion");
 }
 
 public static class ExplorerRows
@@ -2356,6 +2545,9 @@ public static class TestGit
 
     public static Task<string> RunAsync(string folder, params string[] arguments) => RunAsync(folder, arguments, null);
 
+    /// <summary><see cref="RunAsync(string, string[])"/> with what git reads given it, off the UI thread.</summary>
+    public static Task<string> FeedAsync(string folder, string input, params string[] arguments) => RunAsync(folder, arguments, input);
+
     private static async Task<string> RunAsync(string folder, string[] arguments, string? input)
     {
         Passenger.Core.ChildResult result;
@@ -2502,16 +2694,17 @@ public static class TestGpgKeys
     /// <summary>Why a test that signs with GPG cannot run here, or null.</summary>
     public static string? WhyNot => Gpg is null ? "gpg is not on the PATH, so no commit can be signed with a GPG key here" : null;
 
-    /// <summary>A new key for tests@passenger.invalid guarded by <paramref name="passphrase"/>, given gpg on its input,
-    /// never its command line; its id, the agent ended after so the passphrase is asked for again.</summary>
-    public static async Task<string> MakeAsync(string passphrase, string? gpg = null)
+    /// <summary>A new key for <paramref name="user"/> (tests@passenger.invalid's where none is given) guarded by
+    /// <paramref name="passphrase"/>, given gpg on its input, never its command line; its id, the agent ended after so the
+    /// passphrase is asked for again.</summary>
+    public static async Task<string> MakeAsync(string passphrase, string? gpg = null, string user = "Passenger Tests <tests@passenger.invalid>")
     {
         gpg ??= Gpg!;
         Passenger.Core.ChildResult made = await Passenger.Core.ChildProcesses.RunAsync(Of(gpg,
-            ["--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--quick-gen-key", "Passenger Tests <tests@passenger.invalid>", "ed25519", "sign", "never"]),
+            ["--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--quick-gen-key", user, "ed25519", "sign", "never"]),
             passphrase + "\n", Limit.Scaled());
         Assert.True(made.Succeeded, $"gpg made no key to sign with, exiting {made.ExitCode}: {made.Error}");
-        Passenger.Core.ChildResult listed = await Passenger.Core.ChildProcesses.RunAsync(Of(gpg, ["--list-secret-keys", "--with-colons", "tests@passenger.invalid"]),
+        Passenger.Core.ChildResult listed = await Passenger.Core.ChildProcesses.RunAsync(Of(gpg, ["--list-secret-keys", "--with-colons", $"={user}"]),
             limit: Limit.Scaled());
         string id = listed.Output.Split('\n').Select(l => l.Split(':')).First(f => f[0] == "sec")[4];
         await EndAgentAsync(gpg);

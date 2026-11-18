@@ -8,22 +8,40 @@ using Passenger.Workspace;
 
 namespace Passenger.App;
 
-/// <summary>The command line: <c>passenger [PATH] [--file F]... [--caret L:C [--zero-based]] [--theme T] [--look L] [--scheme S]
+/// <summary>The command line: <c>passenger [PATH] [--file F]... [--caret L:C [--zero-based]] [--theme T] [--look L|SOURCE::NAME] [--scheme S|SOURCE::NAME]
 /// [--run [NAME] | --debug [NAME]]</c>, PATH a folder, a file, or a solution or project opened as the workspace, whose run
 /// configuration NAME (as Edit Configurations names it; the one chosen without) Run or Debug starts once its projects are
 /// read, a name none has fatal; a screenshot with the steps before it, <c>--run</c> and <c>--debug</c> steps too; or the
 /// Model Context Protocol server: <c>--mcp [PATH]</c> (an IDE with no window, on standard input and output),
 /// <c>--mcp-attach [PID] [FOLDER]</c> (the agent's server, joining the window over the folder at its first call), and
 /// <c>--no-mcp</c> (a window that never lets agents in; a screenshot's lets in only its own <c>--agent</c>);
-/// <c>--headless</c> is a person's window with nobody at it. A flag it does not know, a value it cannot read or out of
+/// <c>--headless</c> is a person's window with nobody at it; <c>--new-window</c> a window with nothing open. A flag it does not know, a value it cannot read or out of
 /// range, or one the mode does not take is fatal, never ignored.</summary>
 public sealed record LaunchOptions(string? Folder, IReadOnlyList<string> Files, TextPosition? Caret, ThemeChoice? Theme, ScreenshotOptions? Screenshot)
 {
+    /// <summary>What sets a theme's source apart from its name on the command line.</summary>
+    private const string SourceAndName = "::";
+
+    /// <summary>A theme or scheme as <c>SOURCE::NAME</c> names it: its source as Settings | Appearance takes one (a folder's
+    /// full path, owner/name, an address), then its name; fetched and kept as a person's choice is where not kept yet.</summary>
+    private static NamedTheme Sourced(string flag, string text)
+    {
+        int split = text.LastIndexOf(SourceAndName, StringComparison.Ordinal);
+        string name = text[(split + SourceAndName.Length)..].Trim();
+        if (split <= 0 || name.Length == 0)
+        {
+            throw new FormatException($"{flag} takes SOURCE::NAME, a source and a theme's name, not '{text}'");
+        }
+        ThemeSource source = ThemeSource.Of(text[..split], out string? why)
+            ?? throw new FormatException($"{flag} '{text}' names no source Passenger reads: {why}");
+        return new NamedTheme(new SourcedTheme(source.Name, name));
+    }
+
     /// <summary>The flags that may be given more than once: each is one more file or one more step.</summary>
     private static readonly HashSet<string> Repeatable = ["--file", "--type", "--key", "--click", "--click-name", "--double-click", "--right-click", "--drag", "--drag-hold", "--hover", "--wait", "--open", "--agent"];
 
     /// <summary>What only a screenshot takes: its window, its picture and the steps before it.</summary>
-    private static readonly HashSet<string> ScreenshotOnly = ["--size", "--scale", "--crop", "--window-buttons", "--type", "--key", "--click", "--click-name", "--double-click", "--right-click", "--drag", "--drag-hold", "--hover", "--wait", "--open", "--agent"];
+    private static readonly HashSet<string> ScreenshotOnly = ["--size", "--scale", "--crop", "--window-buttons", "--untrusted", "--first-start", "--type", "--key", "--click", "--click-name", "--double-click", "--right-click", "--drag", "--drag-hold", "--hover", "--wait", "--open", "--agent"];
 
     /// <summary>A screenshot's longest side in pixels: a frame 16384 pixels square is already a gigabyte, and the headless
     /// window draws none at 24000.</summary>
@@ -46,15 +64,24 @@ public sealed record LaunchOptions(string? Folder, IReadOnlyList<string> Files, 
     /// <see cref="Folder"/>, its own folder.</summary>
     public string? Workspace { get; init; }
 
-    /// <summary>The theme <c>--look</c> names over the one kept, or null for that one.</summary>
-    public Look? Look { get; init; }
+    /// <summary>The theme <c>--look</c> names over the one kept, or null for that one: Passenger's own, one it carries, one
+    /// it carried before its themes moved to its themes repository, read from there, or any by <c>SOURCE::NAME</c>.</summary>
+    public NamedTheme? Look { get; init; }
 
-    /// <summary>The code's colours <c>--scheme</c> names over the ones kept, or null for those.</summary>
-    public ColourScheme? Scheme { get; init; }
+    /// <summary>The code's colours <c>--scheme</c> names over the ones kept, or null for those: the theme's own, the
+    /// scheme Passenger carried before, read from its themes repository, or any by <c>SOURCE::NAME</c>.</summary>
+    public NamedTheme? Scheme { get; init; }
 
     /// <summary>The run configuration <c>--run</c> or <c>--debug</c> starts in the window once the folder opened has read
     /// its projects (<see cref="MainWindow.StartedRun"/>), or null; a screenshot's is one of its steps.</summary>
     public ConfigurationStart? Starts { get; init; }
+
+    /// <summary><c>--new-window</c>: a window with nothing open, the running Passenger's when one takes the launch, else the
+    /// first window, which then reopens nothing.</summary>
+    public bool NewWindow { get; init; }
+
+    /// <summary>The flag asking for <see cref="NewWindow"/>, which the taskbar's New Window task starts Passenger with.</summary>
+    public const string NewWindowFlag = "--new-window";
 
     public static LaunchOptions Empty { get; } = new(null, [], null, null, null);
 
@@ -71,20 +98,22 @@ public sealed record LaunchOptions(string? Folder, IReadOnlyList<string> Files, 
         string? caretText = null;
         bool zeroBased = false;
         ThemeChoice? theme = null;
-        global::Passenger.App.Look? look = null;
-        ColourScheme? scheme = null;
+        NamedTheme? look = null;
+        NamedTheme? scheme = null;
         string? shot = null;
         LogicalSize size = new(1600, 1000);
         double scale = 2;
         Rect? crop = null;
         string? cropText = null;
         bool windowButtons = false;
+        bool untrusted = false;
         List<ScriptStep> steps = [];
         List<(string Flag, string Text, Point At)> points = [];
         McpMode mcp = McpMode.None;
         int? attachTo = null;
         bool listen = true;
         bool headless = false;
+        bool newWindow = false;
         ConfigurationStart? start = null;
         // Whether a screenshot's step opened a folder before its start's step, for a start given no PATH.
         bool openedFirst = false;
@@ -128,6 +157,9 @@ public sealed record LaunchOptions(string? Folder, IReadOnlyList<string> Files, 
                 case "--headless":
                     headless = true;
                     break;
+                case NewWindowFlag:
+                    newWindow = true;
+                    break;
                 case "--no-mcp":
                     listen = false;
                     break;
@@ -145,18 +177,20 @@ public sealed record LaunchOptions(string? Folder, IReadOnlyList<string> Files, 
                     break;
                 case "--look":
                     string lookText = Value(args, ref i, flag);
-                    global::Passenger.App.Look[] looks = Enum.GetValues<global::Passenger.App.Look>();
-                    look = looks.Cast<global::Passenger.App.Look?>().FirstOrDefault(l => l.ToString()!.ToLowerInvariant() == lookText)
-                        ?? throw new FormatException($"--look takes {string.Join(", ", looks.Select(l => l.ToString().ToLowerInvariant()))}, not '{lookText}'");
+                    look = lookText == "passenger" ? new NamedTheme(null)
+                        : ThemeSource.Carried.FirstOrDefault(n => n.ToLowerInvariant() == lookText) is { } own ? new NamedTheme(SourcedTheme.BuiltIn(own))
+                        : ThemeSource.FormerlyCarried.FirstOrDefault(n => n.ToLowerInvariant() == lookText) is { } carried ? new NamedTheme(SourcedTheme.Repository(carried))
+                        : lookText.Contains(SourceAndName, StringComparison.Ordinal) ? Sourced(flag, lookText)
+                        : throw new FormatException($"--look takes passenger, {string.Join(", ", ThemeSource.Carried.Concat(ThemeSource.FormerlyCarried).Select(n => n.ToLowerInvariant()))} "
+                            + $"or SOURCE::NAME, not '{lookText}'");
                     break;
                 case "--scheme":
                     string schemeText = Value(args, ref i, flag);
-                    scheme = schemeText switch
-                    {
-                        "theme" => ColourScheme.Theme,
-                        "rider" => ColourScheme.Rider,
-                        _ => throw new FormatException($"--scheme takes theme or rider, not '{schemeText}'"),
-                    };
+                    // "rider" is the word 0.3 took for the same scheme.
+                    scheme = schemeText == "theme" ? new NamedTheme(null)
+                        : schemeText == ThemeSource.FormerScheme.ToLowerInvariant() || schemeText == "rider" ? new NamedTheme(SourcedTheme.Repository(ThemeSource.FormerScheme))
+                        : schemeText.Contains(SourceAndName, StringComparison.Ordinal) ? Sourced(flag, schemeText)
+                        : throw new FormatException($"--scheme takes theme, {ThemeSource.FormerScheme.ToLowerInvariant()} or SOURCE::NAME, not '{schemeText}'");
                     break;
                 case "--screenshot":
                     shot = Value(args, ref i, flag);
@@ -184,6 +218,12 @@ public sealed record LaunchOptions(string? Folder, IReadOnlyList<string> Files, 
                     break;
                 case "--window-buttons":
                     windowButtons = true;
+                    break;
+                case "--untrusted":
+                    untrusted = true;
+                    break;
+                case "--first-start":
+                    steps.Add(new ScriptStep.FirstStart());
                     break;
                 case "--type":
                     steps.Add(new ScriptStep.Type(Value(args, ref i, flag)));
@@ -254,6 +294,10 @@ public sealed record LaunchOptions(string? Folder, IReadOnlyList<string> Files, 
         {
             throw new FormatException("--headless is a person's window with nobody at it, a test run's: it takes a path, files and a caret, not --mcp, --mcp-attach, --screenshot or --no-mcp");
         }
+        if (newWindow && given.FirstOrDefault(g => g != NewWindowFlag) is { } more)
+        {
+            throw new FormatException($"{NewWindowFlag} opens a window with nothing open, and takes nothing else, not {more}");
+        }
         (string? folder, string? workspace, List<string> files) = Opened(path, named);
         if (mcp == McpMode.Attach && files.Count > 0)
         {
@@ -267,10 +311,10 @@ public sealed record LaunchOptions(string? Folder, IReadOnlyList<string> Files, 
         {
             throw new FormatException(start.NoFolder);
         }
-        ScreenshotOptions? screenshot = shot is null ? null : Checked(new ScreenshotOptions(shot, size, scale, steps, crop) { WindowButtons = windowButtons }, cropText, points);
+        ScreenshotOptions? screenshot = shot is null ? null : Checked(new ScreenshotOptions(shot, size, scale, steps, crop) { WindowButtons = windowButtons, Untrusted = untrusted }, cropText, points);
         return new LaunchOptions(folder, files, caret, theme, screenshot)
         {
-            Workspace = workspace, Mcp = mcp, AttachTo = attachTo, ListenForAgents = listen, Headless = headless, Look = look, Scheme = scheme,
+            Workspace = workspace, Mcp = mcp, AttachTo = attachTo, ListenForAgents = listen, Headless = headless, Look = look, Scheme = scheme, NewWindow = newWindow,
             Starts = shot is null ? start : null,
         };
     }
@@ -355,8 +399,9 @@ public sealed record LaunchOptions(string? Folder, IReadOnlyList<string> Files, 
         return (folder, workspace, files);
     }
 
-    /// <summary>The screenshot, refused unless its PNG has a folder to go in, its frame is one the headless window draws,
-    /// and its crop and every point its steps press or move to lie in the window.</summary>
+    /// <summary>The screenshot, its PNG's path made whole (Passenger leaves the folder it was started in), refused unless the
+    /// PNG has a folder to go in, its frame is one the headless window draws, and its crop and every point its steps press
+    /// or move to lie in the window.</summary>
     private static ScreenshotOptions Checked(ScreenshotOptions shot, string? cropText, List<(string Flag, string Text, Point At)> points)
     {
         string full = Path.GetFullPath(shot.Path);
@@ -384,7 +429,7 @@ public sealed record LaunchOptions(string? Folder, IReadOnlyList<string> Files, 
                 throw new FormatException(FormattableString.Invariant($"{flag} {text} is outside the {width}x{height} window"));
             }
         }
-        return shot;
+        return shot with { Path = full };
     }
 
     /// <summary>An agent's command line, split as a run configuration's arguments are, its program a file (from the working
@@ -399,7 +444,7 @@ public sealed record LaunchOptions(string? Folder, IReadOnlyList<string> Files, 
         string program = words[0];
         string? found = program.Contains('/') || program.Contains(Path.DirectorySeparatorChar)
             ? (File.Exists(program) ? Path.GetFullPath(program) : null)
-            : Core.Programs.OnPath(program) ?? (OperatingSystem.IsWindows() ? Core.Programs.OnPath(program + ".exe") : null);
+            : Core.Programs.Command(program);
         return found is null
             ? throw new FormatException($"--agent's program '{program}' is neither a file nor on the PATH")
             : [found, .. words.Skip(1)];
@@ -494,6 +539,10 @@ public sealed record ScreenshotOptions(string Path, LogicalSize Size, double Sca
     /// <summary>Whether macOS's window buttons, which the headless capture has none of, are drawn in as a person sees
     /// them (<c>--window-buttons</c>); where Windows and Linux are pictured the bar's own are there already.</summary>
     public bool WindowButtons { get; init; }
+
+    /// <summary>Whether the folder opens held to the person's answer, as in their own window (<c>--untrusted</c>): its trust
+    /// question asked and its banner shown, none of its code run until the steps trust it.</summary>
+    public bool Untrusted { get; init; }
 }
 
 public readonly record struct LogicalSize(double Width, double Height);
@@ -531,6 +580,10 @@ public abstract record ScriptStep
     /// through <c>$PASSENGER --mcp-attach $PASSENGER_PID</c>, and uses every tool unasked, since nobody is at a capture to
     /// answer.</summary>
     public sealed record Agent(string Text, IReadOnlyList<string> Command) : ScriptStep;
+
+    /// <summary>The first start's question of the theme and of dark or light laid over the window, as a new state's first
+    /// start shows it, its keys and clicks the next steps'.</summary>
+    public sealed record FirstStart : ScriptStep;
 
     /// <summary>A folder, solution or project opened as File, Open opens the one chosen: with one open already, Open
     /// Solution asks where (Settings' default), and a window of its own opens on New Window.</summary>

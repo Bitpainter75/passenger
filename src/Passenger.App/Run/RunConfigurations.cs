@@ -54,6 +54,17 @@ public sealed class RunConfigurations(string? folder, Func<WorkspaceModel?>? wor
         Configure(projects, picked ? preferred : null);
     }
 
+    /// <summary>The folder's Node packages, whose scripts are configurations (<see cref="Web.NodeFiles"/>).</summary>
+    public IReadOnlyList<NodePackage> Packages { get; private set; } = [];
+
+    /// <summary>Takes the folder's Node packages as last read.</summary>
+    public void ConfigurePackages(IReadOnlyList<NodePackage> packages)
+    {
+        UiThread.Check();
+        Packages = packages;
+        Configure(projects, picked ? preferred : null);
+    }
+
     /// <summary>The list or the one chosen changed, for the toolbar's widget.</summary>
     public event EventHandler? Changed;
 
@@ -82,7 +93,7 @@ public sealed class RunConfigurations(string? folder, Func<WorkspaceModel?>? wor
     private void Configure(IReadOnlyList<ProjectModel> projects, string? keep)
     {
         this.projects = projects;
-        IReadOnlyList<RunConfiguration> generated = [.. RunConfiguration.Generate(projects, workspace?.Invoke(), SingleFileAppHosts).Select(Edited)];
+        IReadOnlyList<RunConfiguration> generated = [.. RunConfiguration.Generate(projects, workspace?.Invoke(), SingleFileAppHosts, Packages).Select(Edited)];
         (Profiles, ProfileProblems) = Solution is { } solution ? Read(solution, [.. generated.Select(g => g.Name), .. own.Select(o => o.Name)]) : ([], []);
         All = [.. generated, .. Profiles, .. own];
         // With none picked, an AppHost's before its services', which it runs as the person means.
@@ -153,7 +164,13 @@ public sealed class RunConfigurations(string? folder, Func<WorkspaceModel?>? wor
         {
             return named.Unsupported is { } unsupported ? (null, $"its launch profile {start.LaunchProfile} cannot run here: {unsupported}") : (named, null);
         }
-        return LaunchProfile.Read(project).FirstOrDefault(p => p.Name == start.LaunchProfile) is { } profile
+        LaunchProfile? profile = LaunchProfile.Read(project).FirstOrDefault(p => p.Name == start.LaunchProfile);
+        if (profile is { Unsupported: null, RunsInContainer: false })
+        {
+            // A profile tied to a platform makes no configuration of its own (DeviceTargets.OwnProfiles), but runs as named.
+            return (RunConfiguration.From(project, profile) with { Name = RunConfiguration.NameOf(project, profile.Name), Generated = true }, null);
+        }
+        return profile is not null
             ? (null, profile.RunsInContainer ? $"its launch profile {start.LaunchProfile} runs a container, which a configuration of its own runs"
                 : $"its launch profile {start.LaunchProfile} cannot run here: {profile.Unsupported}")
             : (null, $"{name}'s {LaunchProfile.SettingsName(project.Path)} has no launch profile named {start.LaunchProfile}");
@@ -176,6 +193,25 @@ public sealed class RunConfigurations(string? folder, Func<WorkspaceModel?>? wor
         Changed?.Invoke(this, EventArgs.Empty);
         Write();
         return true;
+    }
+
+    /// <summary>The choice as it stands: the one chosen, and whether the person picked it.</summary>
+    public RunChoice Held => new(Chosen?.Name, preferred, picked);
+
+    /// <summary>Puts back a choice held before another was made for a launch that never began, as it stood, unless it
+    /// stands so still.</summary>
+    public void PutBack(RunChoice held)
+    {
+        UiThread.Check();
+        if (Held == held)
+        {
+            return;
+        }
+        preferred = held.Preferred;
+        picked = held.Picked;
+        Chosen = All.FirstOrDefault(c => string.Equals(c.Name, held.Chosen, StringComparison.OrdinalIgnoreCase)) ?? Chosen;
+        Changed?.Invoke(this, EventArgs.Empty);
+        Write();
     }
 
     /// <summary>Takes the folder's own as Edit Configurations leaves them, and the one chosen there.</summary>
@@ -201,17 +237,27 @@ public sealed class RunConfigurations(string? folder, Func<WorkspaceModel?>? wor
     /// <summary>Turns a configuration's Collect logs and traces on or off, kept as Edit Configurations keeps its box (a
     /// generated one's as its change, the folder's own in place), the choice of configuration left as it was; false where
     /// none has the name.</summary>
-    public bool Collect(string name, bool on)
+    public bool Collect(string name, bool on) => Alter(name, found => found.Telemetry == on ? null : found with { Telemetry = on });
+
+    /// <summary>Has a configuration's program run in a tab of the Terminal window or the Run and Debug windows' consoles, kept
+    /// as Edit Configurations keeps its Use external console, the choice of configuration left as it was; false where none
+    /// has the name.</summary>
+    public bool UseConsole(string name, ConsoleKind console) => Alter(name, found => found.Console == console ? null : found with { Console = console });
+
+    /// <summary>A configuration changed as Edit Configurations keeps a change (a generated one's as its change, the folder's
+    /// own in place), the choice of configuration left as it was: <paramref name="change"/> gives it changed, or null where
+    /// it stands so already; false where none has the name.</summary>
+    private bool Alter(string name, Func<RunConfiguration, RunConfiguration?> change)
     {
         UiThread.Check();
         if (All.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase)) is not { } found)
         {
             return false;
         }
-        if (found.Telemetry != on)
+        if (change(found) is { } made)
         {
             // A generated one changed for the first time has no source yet: what it is now is what its project makes.
-            RunConfiguration changed = found with { Telemetry = on, Source = found.Generated ? found.Source ?? found : null };
+            RunConfiguration changed = made with { Source = found.Generated ? found.Source ?? found : null };
             Set(found.Generated ? own : [.. own.Select(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase) ? changed : c)],
                 found.Generated ? [changed] : [], null, projects);
         }
@@ -334,9 +380,11 @@ public sealed class RunConfigurations(string? folder, Func<WorkspaceModel?>? wor
         ServiceProjects = configuration.ServiceProjects.ToDictionary(p => p.Key, p => Full(p.Value)),
     };
 
-    private string Relative(string path) => folder is not null && path.Length > 0 && (PathNames.IsUnder(path, folder) || PathNames.Same(path, folder))
-        ? Path.GetRelativePath(folder, path).Replace('\\', '/')
-        : path;
+    private string Relative(string path) => folder is not null && path.Length > 0 && PathNames.Relative(path, folder) is { } relative ? relative : path;
 
     private string Full(string path) => folder is null || path.Length == 0 ? path : PathNames.Canonical(Path.Combine(folder, path));
 }
+
+/// <summary>The run configuration chosen at a moment (<see cref="RunConfigurations.Held"/>): its name, the name kept as the
+/// person's, and whether they picked it.</summary>
+public sealed record RunChoice(string? Chosen, string? Preferred, bool Picked);

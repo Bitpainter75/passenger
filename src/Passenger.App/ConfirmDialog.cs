@@ -3,8 +3,8 @@ using Avalonia.Controls;
 namespace Passenger.App;
 
 /// <summary>Asks before something that cannot be undone: what happens, what it happens to when there is a list of it
-/// (Rollback's files), the button that does it and the one that does not (Cancel, or a choice of its own, as File Cache
-/// Conflict's Keep Memory Changes), closing with whether the person agreed. Escape answers no.</summary>
+/// (Rollback's files), the button that does it and the one that does not (Cancel, or a choice of its own, as the Android
+/// licences' Decline), closing with whether the person agreed. Escape answers no.</summary>
 public sealed class ConfirmDialog : IdeWindow
 {
     private readonly Button confirm;
@@ -29,8 +29,18 @@ public sealed class ConfirmDialog : IdeWindow
     /// closes.</summary>
     public bool? Answered { get; private set; }
 
+    /// <summary>Why only the person answers it (an install's, a change of their shell's), which no agent's input reaches
+    /// (<see cref="MainWindow.KeptFromAgents"/>); null for a question an agent's input may answer.</summary>
+    public string? PersonsAlone { get; init; }
+
+    /// <summary>The answer, which an agent's input never gives to a question only the person answers
+    /// (<see cref="AgentAsks.PersonsAlone"/>): it stays asking.</summary>
     private void Answer(bool agreed)
     {
+        if (PersonsAlone is { } why && AgentAsks.PersonsAlone(why))
+        {
+            return;
+        }
         Answered = agreed;
         Close(agreed);
     }

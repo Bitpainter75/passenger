@@ -38,7 +38,8 @@ public partial class MainWindow
     /// <summary>The loaded project a file or folder (a canonical path) belongs to; null outside them all.</summary>
     public ProjectModel? ProjectOf(string path) => session.ProjectOf(path);
 
-    private string ProjectNameOf(string path) => session.ProjectNameOf(path);
+    /// <summary>The name of the project a file belongs to, as Find and Problems group by it (<see cref="ProjectSession.ProjectNameOf"/>).</summary>
+    public string ProjectNameOf(string path) => session.ProjectNameOf(path);
 
     /// <summary>The read of the open folder under way, done once it has landed.</summary>
     public Task WorkspaceRead => session.WorkspaceRead;
@@ -105,6 +106,8 @@ public partial class MainWindow
         Navigate = NavigateTo,
         ProfileService = RecordRunServiceAsync,
         ShowFolder = ShowInFileManager,
+        Trimmed = OfferWhole,
+        NeedsTerminal = OfferTerminal,
         LandFiles = LandFilesAsync,
         InGodotEditor = PlayInGodotEditorAsync,
         StopInGodotEditor = StopInGodotEditorAsync,
@@ -136,6 +139,10 @@ public partial class MainWindow
             {
                 return OpenHeldAsync(held, path, opening, opened);
             }
+            if (opener is null && AsksOfLetGo)
+            {
+                return OpenLetGoAsync(path, opening, opened);
+            }
             if (!LeaveFolder())
             {
                 return Task.CompletedTask;
@@ -148,7 +155,7 @@ public partial class MainWindow
         Task none = session.LeaveAsync();
         ending = ending.IsCompleted ? none : Task.WhenAll(ending, none);
         // The folder's documents read off the window's thread meanwhile, so its restore takes them in with no read.
-        Task reading = keepsWorkspace ? Hold(opening).ReadAsync() : Task.CompletedTask;
+        Task reading = keepsWorkspace ? Task.WhenAll(Hold(opening).ReadAsync(), TakeKeptTrustAsync()) : Task.CompletedTask;
         int open = ++opens;
         if (ending.IsCompleted && reading.IsCompleted)
         {
@@ -224,6 +231,11 @@ public partial class MainWindow
         ShowUnreadSolution();
         Remember();
         IdeErrors.Observe(KeepSnapshotsAsync());
+        // Untrusted, the folder is asked of once the window has it, nothing of its code begun meanwhile.
+        if (!opened.Trusted)
+        {
+            AskTrust(folder);
+        }
         RunWaitingToOpen(folder);
     }
 
@@ -266,8 +278,20 @@ public partial class MainWindow
     private void Bind(ProjectSession next)
     {
         session = next;
+        // The tool windows follow what the folder holds, before anything of the session shows one.
+        Dock.Serve();
+        next.HoldsChanged += (_, _) =>
+        {
+            if (session == next)
+            {
+                Dock.Serve();
+            }
+        };
         ForgetRunMarks();
         buildRun = new BuildRunController(next, BuildRunParts());
+        BuildRunController runs = buildRun;
+        // Detach acts on the container run under way: whole from the Run window or with nothing chosen, else the chosen service alone.
+        next.Debug.RunDetach = new(runs.DetachesContainers, runs.WhyNotDetachContainers, runs.DetachContainersAsync);
         BindAspire(next);
         buildRun.RunningChanged += (_, _) =>
         {
@@ -296,7 +320,9 @@ public partial class MainWindow
         BindBookmarks(next);
         BindGamePane(next);
         BindErrorPins(next);
+        BindStepRuns(next);
         BindEndpoints(next);
+        BindStepLibrary(next);
         BindMigrations(next);
         BindPackages(next);
         BindContainers(next);
@@ -330,6 +356,7 @@ public partial class MainWindow
         }
         ShowStop();
         ShowHotReloadButtons();
+        ShowTrust();
         // The last folder's build said nothing of this one.
         Bottom.Problems.ForgetBuild();
         buildRun.ShowBindings();
@@ -427,6 +454,8 @@ public partial class MainWindow
         godotEditorOffered = false;
         ShowDotnet();
         ShowSdk();
+        // The installation the new folder's projects take may be another (Dotnet.Find(folder)).
+        IdeErrors.Observe(ReadDotnetAsync());
         unreadSaid = null;
         next.WorkspaceChanged += (_, _) =>
         {
@@ -463,11 +492,20 @@ public partial class MainWindow
                 }
             }
         };
+        next.NodeFiles.Changed += (_, _) =>
+        {
+            if (session == next)
+            {
+                Explorer.ShowPackages(next.NodeFiles.Packages);
+            }
+        };
+        Explorer.ShowPackages(next.NodeFiles.Packages);
         next.Configurations.Changed += (_, _) =>
         {
             if (session == next)
             {
                 ShowChosenConfiguration(next.Configurations);
+                ShowRunTarget();
                 // An AppHost evaluated or found since: its open files' resources are read, the others' kept.
                 ReadOpenAspireMarks(again: false);
                 // A file shown before its AppHost was evaluated pulled its diagnostics as no service's.
@@ -490,6 +528,9 @@ public partial class MainWindow
         BindPreviews(next);
         BindXamlWorkspace(next);
         BindTargetFrameworks(next);
+        BindRunTargets(next);
+        BindBuildConfigurations(next);
+        BindMobile(next);
     }
 
     /// <summary>A session's debugger in the window: what it asks to run, what it says, where it stops and the toolbar's
@@ -567,6 +608,8 @@ public partial class MainWindow
             service.Connected += (_, _) => structure?.FollowServer();
             service.StateChanged += (_, _) => RoutesServerChanged(service);
             service.ProjectsLoaded += (_, _) => RoutesProjectsLoaded(service);
+            service.StateChanged += (_, _) => StepsServerChanged(service);
+            service.ProjectsLoaded += (_, _) => StepsServerChanged(service, loaded: true);
             service.StateChanged += (_, _) =>
             {
                 // Ready, as it loaded the folder's projects: the open AppHosts' resources are read from it once.
@@ -592,6 +635,11 @@ public partial class MainWindow
                 if (said.Problem is not null && session.Models.MissingSdk is { } missing)
                 {
                     SaySdk(missing);
+                    return;
+                }
+                // A mobile project's load problem for want of a workload, the Android SDK, a JDK or Xcode: the banner's words say what to get.
+                if (SayMobile(said))
+                {
                     return;
                 }
                 status.Say(said.Text, said.Severity, said.Problem is { } problem ? LoadProblemPlace(problem) : null);

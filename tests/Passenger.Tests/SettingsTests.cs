@@ -1,9 +1,12 @@
 using System.Text.Json.Nodes;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Layout;
+using Avalonia.LogicalTree;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using Passenger.App;
@@ -153,6 +156,191 @@ public sealed class SettingsTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void Display_scale_applies_to_open_windows_and_popups_and_is_kept()
+    {
+        string file = Path.Combine(folder, "Scale.cs");
+        File.WriteAllText(file, "class Scale { }\n");
+        MainWindow window = Open();
+        try
+        {
+            window.KeepSettings();
+            window.OpenFile(file);
+            SettingsDialog dialog = window.ShowSettings();
+            dialog.Page = SettingsDialog.Appearance;
+            Ui.Settle();
+            ComboBox factor = Editor<ComboBox>(dialog, "Display scale");
+            Assert.Equal("100%", factor.SelectedItem);
+            factor.SelectedItem = "150%";
+            Ui.Settle();
+            Assert.Equal(1, window.Settings.DisplayScale);
+            Assert.True(Scale(window.EditorArea.CodeEditor) == 1.5, "Settings did not show the display scale chosen before Apply");
+            dialog.Apply();
+            Ui.Settle();
+            Assert.Equal(1.5, window.Settings.DisplayScale);
+            Assert.Equal(1.5, Scale(factor));
+            Assert.Equal(1.5, Scale(window.EditorArea.CodeEditor));
+            Assert.Equal(13, window.EditorArea.CodeEditor.FontSize);
+            dialog.Close();
+
+            Button target = window.GetVisualDescendants().OfType<Button>().First(b => b.IsEffectivelyVisible);
+            Panel host = window.GetVisualDescendants().OfType<Panel>().First();
+            foreach (bool overlay in new[] { false, true })
+            {
+                int clicked = 0;
+                Button choice = new() { Content = "Scaled popup choice" };
+                choice.Click += (_, _) => clicked++;
+                Panel choices = new() { Children = { choice } };
+                Popup popup = new() { PlacementTarget = target, Child = choices, ShouldUseOverlayLayer = overlay };
+                host.Children.Add(popup);
+                try
+                {
+                    popup.Open();
+                    Ui.Settle();
+                    Assert.Equal(1.5, Scale(choice));
+                    Ui.Click(choice);
+                    Assert.Equal(1, clicked);
+                    Button nestedChoice = new() { Content = "Nested choice" };
+                    Popup nested = new() { PlacementTarget = choice, Child = nestedChoice, ShouldUseOverlayLayer = overlay };
+                    choices.Children.Add(nested);
+                    try
+                    {
+                        nested.Open();
+                        Ui.Settle();
+                        Assert.Equal(1.5, Scale(nestedChoice));
+                    }
+                    finally
+                    {
+                        nested.Close();
+                        choices.Children.Remove(nested);
+                    }
+                }
+                finally
+                {
+                    popup.Close();
+                    host.Children.Remove(popup);
+                }
+            }
+
+            window.Close();
+            window = Open();
+            window.KeepSettings();
+            window.OpenFile(file);
+            Ui.Settle();
+            Assert.Equal(1.5, window.Settings.DisplayScale);
+            dialog = window.ShowSettings();
+            dialog.Page = SettingsDialog.Appearance;
+            Ui.Settle();
+            factor = Editor<ComboBox>(dialog, "Display scale");
+            Assert.Equal("150%", factor.SelectedItem);
+            Assert.Equal(1.5, Scale(factor));
+            factor.SelectedItem = "200%";
+            Ui.Settle();
+            Assert.Equal(2, Scale(window.EditorArea.CodeEditor));
+            dialog.Close();
+            Ui.Settle();
+            Assert.True(Scale(window.EditorArea.CodeEditor) == 1.5, "Settings closed unapplied, but the window keeps the display scale it showed");
+            dialog = window.ShowSettings();
+            dialog.Page = SettingsDialog.Appearance;
+            Ui.Settle();
+            factor = Editor<ComboBox>(dialog, "Display scale");
+            factor.SelectedItem = "125%";
+            dialog.Apply();
+            Ui.Settle();
+            Assert.Equal(1.25, Scale(factor));
+            Assert.Equal(1.25, Scale(window.EditorArea.CodeEditor));
+            factor.SelectedItem = "100%";
+            dialog.Ok();
+            Ui.Settle();
+            Assert.Equal(1, Scale(window.EditorArea.CodeEditor));
+        }
+        finally
+        {
+            window.ApplySettings(window.Settings with { DisplayScale = 1 });
+            window.Close();
+        }
+
+        static double Scale(Control control) => control.TransformToVisual(TopLevel.GetTopLevel(control)!)!.Value.M11;
+    }
+
+    /// <summary>A display scale is chosen from a list of sizes that closes as the pointer chooses one, so the size the
+    /// window then takes moves nothing the pointer is on, each choice landing where a spin box's arrows moved out from under
+    /// it; at each the main window holds its layout's smallest width and height (640 by 500 units of content however large
+    /// they are drawn), and the Settings dialog, grown with its content, stays on its screen by the windows' one rule.</summary>
+    [AvaloniaFact]
+    public void A_display_scale_is_chosen_from_a_list_that_closes_and_every_window_holds_its_layout_and_its_screen_at_each()
+    {
+        string file = Path.Combine(folder, "Scaled.cs");
+        File.WriteAllText(file, "class Scaled { }\n");
+        MainWindow window = Open();
+        try
+        {
+            window.OpenFile(file);
+            SettingsDialog dialog = window.ShowSettings();
+            dialog.Page = SettingsDialog.Appearance;
+            Ui.Settle();
+            Avalonia.Platform.Screen screen = dialog.Screens.ScreenFromWindow(dialog) ?? dialog.Screens.Primary!;
+            Size area = screen.WorkingArea.Size.ToSize(screen.Scaling);
+            foreach ((double size, string chosen) in new[] { (1.25, "125%"), (1.5, "150%"), (2.0, "200%"), (3.0, "300%") })
+            {
+                ComboBox box = Editor<ComboBox>(dialog, "Display scale");
+                Ui.Click(box);
+                Assert.True(box.IsDropDownOpen, "A click on the display scale's box did not open its list");
+                ComboBoxItem item = Assert.IsType<ComboBoxItem>(box.ContainerFromIndex(Array.IndexOf((string[])box.ItemsSource!, chosen)));
+                Ui.Click(item);
+                Assert.False(box.IsDropDownOpen, $"The list stayed open under the pointer after {chosen} was chosen");
+                Assert.Equal(size, Scale(window.EditorArea.CodeEditor));
+                Assert.Equal(chosen, Editor<ComboBox>(dialog, "Display scale").SelectedItem);
+
+                Assert.True(window.MinWidth == Math.Min(MainWindow.SmallestWidth * size, area.Width) && window.MinHeight == Math.Min(MainWindow.SmallestHeight * size, area.Height),
+                    $"At {chosen} the main window's least size was {window.MinWidth}x{window.MinHeight} on a {area} screen");
+                window.Width = MainWindow.SmallestWidth;
+                Ui.Settle();
+                Control content = window.GetVisualDescendants().OfType<LayoutTransformControl>().First().Child!;
+                Assert.True(content.Bounds.Width >= Math.Min(MainWindow.SmallestWidth, Math.Floor(area.Width / size)),
+                    $"At {chosen} the main window made {MainWindow.SmallestWidth} wide laid its content out {content.Bounds.Width} units wide");
+                PixelRect frame = new(dialog.Position, PixelSize.FromSize(dialog.FrameSize ?? dialog.ClientSize, dialog.DesktopScaling));
+                Assert.True(screen.WorkingArea.Contains(frame), $"At {chosen} the Settings dialog's frame {frame} left the screen's working area {screen.WorkingArea}");
+            }
+            dialog.Close();
+            Ui.Settle();
+            Assert.True(window.MinWidth == MainWindow.SmallestWidth && Scale(window.EditorArea.CodeEditor) == 1,
+                $"Settings closed unapplied left the window's least width {window.MinWidth} and its scale {Scale(window.EditorArea.CodeEditor)}");
+        }
+        finally
+        {
+            window.Close();
+        }
+
+        static double Scale(Control control) => control.TransformToVisual(TopLevel.GetTopLevel(control)!)!.Value.M11;
+    }
+
+    [AvaloniaTheory]
+    [InlineData(0, 1)]
+    [InlineData(10, 3)]
+    [InlineData(1, 1)]
+    [InlineData(1.2, 1.2)]
+    [InlineData(1.5, 1.5)]
+    public void Display_scale_outside_its_range_still_opens_usable_settings(double given, double expected)
+    {
+        MainWindow window = Open();
+        try
+        {
+            window.ApplySettings(window.Settings with { DisplayScale = given });
+            SettingsDialog dialog = window.ShowSettings();
+            dialog.Page = SettingsDialog.Appearance;
+            Ui.Settle();
+            Assert.Equal(expected, window.Settings.DisplayScale);
+            Assert.Equal(SizeSetting.Percent(expected), Editor<ComboBox>(dialog, "Display scale").SelectedItem);
+            dialog.Close();
+        }
+        finally
+        {
+            window.ApplySettings(window.Settings with { DisplayScale = 1 });
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Terminal_preferences_apply_to_the_view_and_are_kept_for_the_next_window()
     {
         string font = OtherTerminalFont();
@@ -293,7 +481,7 @@ public sealed class SettingsTests : IDisposable
         // The Keymap page has Increase, Decrease and Reset Font Size.
         Assert.Equal([SettingsDialog.Appearance, SettingsDialog.EditorPage, SettingsDialog.TerminalPage, SettingsDialog.KeymapPage], dialog.Pages);
         Assert.Equal(SettingsDialog.Appearance, dialog.Page);
-        Assert.Equal(["Font family"], dialog.Shown);
+        Assert.Equal(["Font family", "Display scale"], dialog.Shown);
         dialog.Page = SettingsDialog.EditorPage;
         Ui.Settle();
         Assert.Contains("Font size", dialog.Shown);
@@ -606,8 +794,9 @@ public sealed class SettingsTests : IDisposable
         again.Close();
     }
 
-    /// <summary>Appearance's Theme: Passenger's own or another (Harbour here), each in the dark or light the next row says,
-    /// the window dressed in the one chosen the moment it is applied; Editor's Colour scheme: the theme's own or Rider's.</summary>
+    /// <summary>Appearance's Theme: Passenger's own or one of a source's (Harbour of Passenger's themes repository here), each
+    /// in the dark or light the next row says, listed by name and source once the drop-down opens, the window dressed in the
+    /// one chosen the moment it is chosen, before Apply; the Colour scheme beside it: the theme's own or the repository's.</summary>
     [AvaloniaFact]
     public void Harbour_chosen_as_the_theme_dresses_the_window_at_once_beside_passengers_own()
     {
@@ -616,36 +805,44 @@ public sealed class SettingsTests : IDisposable
         {
             SettingsDialog dialog = window.ShowSettings();
             Ui.Settle();
-            Assert.Equal(["Theme", "Dark or light"], dialog.Shown.Take(2));
-            ComboBox theme = Editor<ComboBox>(dialog, "Theme");
-            Assert.Equal("Passenger", theme.SelectedItem);
+            Assert.Equal(["Theme", "Dark or light", "Colour scheme"], dialog.Shown.Take(3));
+            ThemePicker theme = dialog.ThemePicker;
+            Assert.Equal("Passenger", theme.Listed[0]);
+            Assert.Equal(0, theme.Box.SelectedIndex);
             Assert.Equal(["System", "Dark", "Light"], Editor<ComboBox>(dialog, "Dark or light").Items.Cast<string>());
+            theme.Box.IsDropDownOpen = true;
+            // Passenger's own, then those it carries, then the repository's; themes another test added from a file come after.
+            string[] repository = ["Passenger", .. ThemeSource.Carried, .. ThemeSource.FormerlyCarried.Select(n => $"{n} ({ThemeSource.RepositoryName})")];
+            Ui.WaitFor(() => theme.Listed.Take(repository.Length).SequenceEqual(repository), () => $"every theme of the repository listed in its order, where it lists {string.Join(", ", theme.Listed)}");
+            theme.Box.IsDropDownOpen = false;
             Border stripe = window.GetVisualDescendants().OfType<Border>().First(b => b.Classes.Contains(StyleClasses.StripeBar) && b.IsEffectivelyVisible);
             Point bare = Bare(window, stripe);
             Color passenger = Ui.Pixel(window, bare);
 
-            theme.SelectedItem = "Harbour";
+            theme.Choose("Harbour");
             Ui.Settle();
             Color harbour = Ui.Pixel(window, bare);
             Assert.True(window.TryFindResource(TokenKeys.Frame, window.ActualThemeVariant, out object? frame) && frame is ISolidColorBrush desk && desk.Color == harbour && harbour != passenger,
                 $"With Harbour applied the window's frame is {harbour}, where it was {passenger} under Passenger's own: Harbour's desk did not take its place");
+            Assert.True(KeptThemes.Holds(ThemeSource.Repository, false, "Harbour"), "Harbour chosen is not kept, so it would not draw without its source");
 
-            Assert.Equal(Look.Passenger, window.Settings.Look);
-            theme.SelectedItem = "Passenger";
+            Assert.Null(window.Settings.Look);
+            theme.Choose("Passenger");
             Ui.Settle();
             Assert.Equal(passenger, Ui.Pixel(window, bare));
-            theme.SelectedItem = "Harbour";
+            theme.Choose("Harbour");
             Ui.Settle();
             dialog.Close();
             Ui.Settle();
             Assert.Equal(passenger, Ui.Pixel(window, bare));
             dialog = window.ShowSettings();
-            dialog.Change(s => s with { Look = Look.Harbour });
+            dialog.Change(s => s with { Look = SourcedTheme.Repository("Harbour") });
             dialog.Apply();
-            Assert.Equal(Look.Harbour, window.Settings.Look);
-            dialog.Page = SettingsDialog.EditorPage;
-            Ui.Settle();
-            Assert.Equal(["Same as theme", "Rider"], Editor<ComboBox>(dialog, "Colour scheme").Items.Cast<string>());
+            Assert.Equal(SourcedTheme.Repository("Harbour"), window.Settings.Look);
+            dialog.SchemePicker.Box.IsDropDownOpen = true;
+            Ui.WaitFor(() => dialog.SchemePicker.Listed.Take(2).SequenceEqual(["Same as theme", $"{ThemeSource.FormerScheme} ({ThemeSource.RepositoryName})"]),
+                () => $"the repository's code colour scheme listed after the theme's own, where it lists {string.Join(", ", dialog.SchemePicker.Listed)}");
+            dialog.SchemePicker.Box.IsDropDownOpen = false;
             dialog.Close();
         }
         finally
@@ -683,7 +880,7 @@ public sealed class SettingsTests : IDisposable
         window.KeepSettings();
         StateStore store = StateStore.Open(settings);
         string file = Path.Combine(settings, StateStore.SettingsFile);
-        FileSystemWatcher watcher = store.Settings.Watcher ?? throw new InvalidOperationException($"{file} is not watched");
+        FileSystemWatcher watcher = store.Settings.Watched?.Watcher ?? throw new InvalidOperationException($"{file} is not watched");
         try
         {
             watcher.EnableRaisingEvents = false;
@@ -720,7 +917,7 @@ public sealed class SettingsTests : IDisposable
         window.KeepSettings();
         StateStore store = StateStore.Open(settings);
         string file = Path.Combine(settings, StateStore.SettingsFile);
-        FileSystemWatcher watcher = store.Settings.Watcher ?? throw new InvalidOperationException($"{file} is not watched");
+        FileSystemWatcher watcher = store.Settings.Watched?.Watcher ?? throw new InvalidOperationException($"{file} is not watched");
         try
         {
             // Deaf, so its word of the window's own write, which comes when the system sends it, is no part of the test.
@@ -745,6 +942,43 @@ public sealed class SettingsTests : IDisposable
             watcher.EnableRaisingEvents = true;
             store.Release();
             window.Close();
+        }
+    }
+
+    /// <summary>settings.json kept as a link into a dotfiles folder: another Passenger's change, written to the file the link
+    /// names, is followed each time the window comes in front, though no watcher of the state folder hears a write there
+    /// and the link itself stays as it was made.</summary>
+    [AvaloniaFact]
+    public void A_change_to_settings_json_kept_as_a_link_is_followed_each_time_the_window_comes_in_front()
+    {
+        string dotfiles = TestFolders.Create("dotfiles-");
+        MainWindow window = Open();
+        window.KeepSettings();
+        StateStore store = StateStore.Open(settings);
+        string file = Path.Combine(settings, StateStore.SettingsFile);
+        string kept = Path.Combine(dotfiles, StateStore.SettingsFile);
+        try
+        {
+            window.ApplySettings(window.Settings with { EditorFontSize = 15 });
+            store.Settings.Flush();
+            File.Move(file, kept);
+            TestFolders.Link(file, kept);
+            window.Activate();
+            Ui.Settle();
+
+            foreach (int size in (int[])[21, 19])
+            {
+                WrittenElsewhere(kept, size);
+                window.Activate();
+                Ui.WaitFor(() => window.EditorArea.CodeEditor.FontSize == size,
+                    () => $"the window come in front to follow another Passenger's change to the settings.json a link names, to {size} (its font is {window.EditorArea.CodeEditor.FontSize})");
+            }
+        }
+        finally
+        {
+            store.Release();
+            window.Close();
+            TestFolders.Delete(dotfiles);
         }
     }
 
@@ -838,6 +1072,186 @@ public sealed class SettingsTests : IDisposable
         Assert.False(Editor<NumericUpDown>(dialog, "Right margin (columns)").IsEnabled, "Right margin stayed editable with both wraps off");
         dialog.Close();
         window.Close();
+    }
+
+    /// <summary>At its smallest size, Settings' every page keeps what it shows within its width, so each row's label,
+    /// editor and note is read whole and reached by scrolling down alone: the rows stand their labels above their
+    /// editors, which narrow to the page, and the list pages their lists above what they show. At its own size the
+    /// labels stand beside the editors as ever.</summary>
+    [AvaloniaFact]
+    public void Every_page_keeps_its_rows_within_its_width_at_the_dialogs_smallest_size()
+    {
+        MainWindow window = Open();
+        SettingsDialog dialog = window.ShowSettings();
+        try
+        {
+            Ui.Settle();
+            OptionRow theme = dialog.GetVisualDescendants().OfType<OptionRow>().First(r => r.Label.Text == "Theme");
+            Assert.False(theme.IsStacked, "At Settings' own size, Appearance's Theme label stands above its editor rather than beside it");
+            dialog.Width = dialog.MinWidth;
+            dialog.Height = dialog.MinHeight;
+            Ui.Settle();
+            Assert.True(theme.IsStacked, $"At Settings' smallest size ({dialog.Bounds.Size}), Appearance's Theme label stands beside its editor, which has no room there");
+            List<string> cut = [];
+            foreach (string page in dialog.Pages.ToList())
+            {
+                dialog.Page = page;
+                Ui.Settle();
+                ScrollViewer scroll = dialog.GetVisualDescendants().OfType<ScrollViewer>().First(s => s.Content is StackPanel && s.IsEffectivelyVisible);
+                Control column = (Control)scroll.GetVisualParent()!;
+                foreach (Visual part in column.GetVisualChildren().Where(v => v != scroll).Append((Visual)scroll.Content!))
+                {
+                    Cut(part, column, column.Bounds.Width, page, cut);
+                }
+            }
+            Assert.True(cut.Count == 0, $"At Settings' smallest size ({dialog.Bounds.Size}), these run past the page's right edge, cut off "
+                + $"and reached by no scrolling:\n{string.Join("\n", cut.Distinct().Take(40))}");
+        }
+        finally
+        {
+            dialog.Close();
+            window.Close();
+        }
+
+        // What is drawn of a part and inside it, but for what a control clips to itself (a list's rows, a box's text).
+        static void Cut(Visual part, Visual column, double width, string page, List<string> cut)
+        {
+            if (!part.IsEffectivelyVisible || part.Bounds.Width <= 0)
+            {
+                return;
+            }
+            Rect at = new Rect(part.Bounds.Size).TransformToAABB(part.TransformToVisual(column)!.Value);
+            if (at.Right > width + 0.5 || at.X < -0.5)
+            {
+                string words = part.GetSelfAndVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => !string.IsNullOrEmpty(t.Text))?.Text ?? string.Empty;
+                cut.Add($"{page}: a {part.GetType().Name} '{words[..Math.Min(words.Length, 40)]}' from {at.X:0} to {at.Right:0} of {width:0}");
+                return;
+            }
+            if (part.ClipToBounds)
+            {
+                return;
+            }
+            foreach (Visual inside in part.GetVisualChildren())
+            {
+                Cut(inside, column, width, page, cut);
+            }
+        }
+    }
+
+    /// <summary>At its smallest size, and at its own, no row of any page runs under the page's scroll bar, which shows over
+    /// the page's right: every label, editor and note keeps to the left of where the bar stands, so a note's last words are
+    /// never drawn under its thumb.</summary>
+    [AvaloniaFact]
+    public void No_row_of_any_page_runs_under_its_scroll_bar_at_the_dialogs_smallest_size_or_its_own()
+    {
+        MainWindow window = Open();
+        SettingsDialog dialog = window.ShowSettings();
+        try
+        {
+            List<string> under = [];
+            foreach ((double width, double height) in new[] { (dialog.Width, dialog.Height), (dialog.MinWidth, dialog.MinHeight) })
+            {
+                dialog.Width = width;
+                dialog.Height = height;
+                Ui.Settle();
+                bool scrolled = false;
+                foreach (string page in dialog.Pages.ToList())
+                {
+                    dialog.Page = page;
+                    Ui.Settle();
+                    ScrollViewer scroll = dialog.GetVisualDescendants().OfType<ScrollViewer>().First(s => s.Content is StackPanel && s.IsEffectivelyVisible);
+                    ScrollBar bar = scroll.GetVisualDescendants().OfType<ScrollBar>().First(b => b.Orientation == Avalonia.Layout.Orientation.Vertical);
+                    scrolled |= bar.IsEffectivelyVisible;
+                    // Where the bar stands, shown or not: the scroller's right, its own width in.
+                    double barLeft = scroll.Bounds.Width - bar.Width;
+                    foreach (Control row in ((StackPanel)scroll.Content!).Children.Where(r => r.IsEffectivelyVisible))
+                    {
+                        Rect at = new Rect(row.Bounds.Size).TransformToAABB(row.TransformToVisual(scroll)!.Value);
+                        if (at.Right > barLeft + 0.5)
+                        {
+                            string words = row.GetSelfAndVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => !string.IsNullOrEmpty(t.Text))?.Text ?? string.Empty;
+                            under.Add($"{width:0} wide, {page}: '{words[..Math.Min(words.Length, 40)]}' to {at.Right:0}, the bar from {barLeft:0}");
+                        }
+                    }
+                }
+                Assert.True(scrolled, $"At {width:0} by {height:0} no page of Settings scrolled, so none showed its scroll bar to keep clear of");
+            }
+            Assert.True(under.Count == 0, $"These rows of Settings run under the page's scroll bar, their right drawn under its thumb:\n{string.Join("\n", under.Take(40))}");
+        }
+        finally
+        {
+            dialog.Close();
+            window.Close();
+        }
+    }
+
+    /// <summary>At Settings' own size, between, and at its smallest, every row's editor that takes a line of text or
+    /// lists several (a path, a glob, the theme sources) and every note under an editor reach one right edge: the widest
+    /// editor's where the page has room, the page's where it has not, so none stands narrower than its neighbours nor
+    /// wider than a narrow page; and every number box stands at a number's width.</summary>
+    [AvaloniaFact]
+    public void Every_rows_text_box_list_and_note_reach_one_edge_and_narrow_with_the_page()
+    {
+        MainWindow window = Open();
+        SettingsDialog dialog = window.ShowSettings();
+        try
+        {
+            List<string> off = [];
+            int fields = 0;
+            int notes = 0;
+            foreach ((double width, double height) in new[] { (dialog.Width, dialog.Height), (800.0, 600.0), (dialog.MinWidth, dialog.MinHeight) })
+            {
+                dialog.Width = width;
+                dialog.Height = height;
+                Ui.Settle();
+                foreach (string page in dialog.Pages.ToList())
+                {
+                    dialog.Page = page;
+                    Ui.Settle();
+                    foreach (OptionRow row in dialog.GetVisualDescendants().OfType<OptionRow>().Where(r => r.IsEffectivelyVisible))
+                    {
+                        // Where the row's editors start, and the edge none of them passes.
+                        double left = row.IsStacked ? 0 : OptionRow.LabelWidth;
+                        double edge = Math.Min(row.Bounds.Width, left + OptionRow.EditorWidth);
+                        string where = $"{width:0} wide, {page}, {row.Label.Text}";
+                        // The theme explorer lays itself under the theme picker's row, as wide as that row.
+                        if (row.Editor is not ThemeExplorer && row.Editor.GetSelfAndLogicalDescendants().Any(c => c is TextBox or ListBox))
+                        {
+                            fields++;
+                            if (Math.Abs(row.Editor.Bounds.Right - edge) > 0.5)
+                            {
+                                off.Add($"{where}: its editor ends at {row.Editor.Bounds.Right:0}, where the editors' edge is {edge:0}");
+                            }
+                        }
+                        foreach (NumericUpDown number in row.Editor.GetSelfAndLogicalDescendants().OfType<NumericUpDown>())
+                        {
+                            if (Math.Abs(number.Bounds.Width - Math.Min(OptionRow.NumberWidth, row.Bounds.Width)) > 0.5)
+                            {
+                                off.Add($"{where}: its number box is {number.Bounds.Width:0} wide, where a number's is {OptionRow.NumberWidth:0}");
+                            }
+                        }
+                        if (row.Note is { IsEffectivelyVisible: true } note)
+                        {
+                            notes++;
+                            // The width the note's lines wrap at: what the row gave it, held by any most of its own.
+                            double wraps = Math.Min(LayoutInformation.GetPreviousMeasureConstraint(note)!.Value.Width, note.MaxWidth);
+                            if (Math.Abs(note.Bounds.X + wraps - edge) > 0.5)
+                            {
+                                off.Add($"{where}: its note wraps at {note.Bounds.X + wraps:0}, where the editors' edge is {edge:0}");
+                            }
+                        }
+                    }
+                }
+            }
+            Assert.True(fields >= 10 && notes >= 50, $"Only {fields} rows of a text box or list and {notes} notes were found: the search no longer reads them");
+            Assert.True(off.Count == 0, $"These rows' editors and notes stand at widths of their own rather than reaching the edge every editor reaches, "
+                + $"so the page's right edges are ragged where there is room and may run past a narrow page:\n{string.Join("\n", off.Take(60))}");
+        }
+        finally
+        {
+            dialog.Close();
+            window.Close();
+        }
     }
 
     internal static SettingsDialog TerminalDialog(MainWindow window)

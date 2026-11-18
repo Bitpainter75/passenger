@@ -72,14 +72,19 @@ public sealed class MergeView : DockPanel
         Texts = texts;
 
         // The IDE's keymap sends each its keys from the merge's window (IdeKeys).
-        Left = new CodeEditor { IsReadOnly = true, ChangeBackgrounds = true };
+        Left = new CodeEditor { IsReadOnly = true, ReadOnlyWhy = Refusals.MergeSideReadOnly, ChangeBackgrounds = true };
         Left.Show(new TextDocument(texts.Left), SelectionSet.Single(0), default);
         result = new TextDocument(texts.Base);
         started = result.Snapshot;
         Result = new CodeEditor { ChangeBackgrounds = true };
         Result.Show(result, SelectionSet.Single(0), default);
-        Right = new CodeEditor { IsReadOnly = true, ChangeBackgrounds = true };
+        Right = new CodeEditor { IsReadOnly = true, ReadOnlyWhy = Refusals.MergeSideReadOnly, ChangeBackgrounds = true };
         Right.Show(new TextDocument(texts.Right), SelectionSet.Single(0), default);
+        string language = Languages.Language.ForPath(name).Id;
+        foreach (CodeEditor pane in (CodeEditor[])[Left, Result, Right])
+        {
+            ThemeLanguages.Follow(pane, language);
+        }
         state = [.. chunks.Select(c => new Resolution(c.BaseStart, c.BaseEnd, !c.LeftChanged, !c.RightChanged, false))];
         states[started] = state;
         leftStrip = Strip(MergeSide.Left);

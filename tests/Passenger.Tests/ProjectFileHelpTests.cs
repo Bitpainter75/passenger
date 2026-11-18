@@ -1,4 +1,5 @@
 using System.Text;
+using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Passenger.App;
@@ -16,12 +17,15 @@ namespace Passenger.Tests;
 /// their elements, properties and values, package ids and versions from the folder's feed (a stand-in on loopback, never
 /// nuget.org), paths and the names MSBuild's evaluation knows; the card over a name says its evaluated value and where it
 /// was set; Go to Declaration goes where a property, target or import is defined, the SDK's own targets read-only, and an
-/// item's card counts the files its wildcards take in as they come and go on disk; the evaluation's errors and a
-/// vulnerable package are marked on their lines and listed in Problems; and a project file saved has the Solution view
+/// item's card counts the files its wildcards take in as they come and go on disk; the evaluation's errors, a
+/// vulnerable package and a deprecated one are marked on their lines and listed in Problems; and a project file saved has the Solution view
 /// show what it says now.</summary>
 public sealed class ProjectFileHelpTests : IClassFixture<ProjectFileHelpTests.Shop>
 {
     private const string Advisory = "https://github.com/advisories/GHSA-pass-0000-test";
+
+    /// <summary>What the owner of Passenger.Other 2.5.0, which they deprecated, says of it.</summary>
+    private const string Retired = "Kept no more: Passenger.Sample does all it did.";
 
     /// <summary>A project with a property of its own over the SDK's, a condition on a property Directory.Build.props sets,
     /// a package at a vulnerable version, an import of its own and one of a file not there, and a target after Build.</summary>
@@ -154,6 +158,148 @@ public sealed class ProjectFileHelpTests : IClassFixture<ProjectFileHelpTests.Sh
         Assert.EndsWith("<PackageReference Include=\"Passenger.Sample|\" Version=\"2.0.0\" />", CaretLine(editor), StringComparison.Ordinal);
         Assert.False(window.DockHost[ToolWindowIds.NuGet].IsBuilt, "The project file's package completion built the hidden NuGet window's view");
         window.Close();
+    }
+
+    /// <summary>A reference to a version its owner deprecated, as the folder's feed's registration says, is marked as a
+    /// vulnerable one is, saying why and the package to use instead, and listed in Problems; the card over it says so with
+    /// the owner's own words. A version not deprecated is not marked so.</summary>
+    [AvaloniaFact]
+    public void A_package_reference_to_a_deprecated_version_is_marked_with_why_and_what_to_use_instead()
+    {
+        Write("App/App.csproj", Project.Replace("<ProjectReference Include=\"../\" />",
+            "<PackageReference Include=\"Passenger.Other\" Version=\"2.5.0\" />\n    <ProjectReference Include=\"../\" />", StringComparison.Ordinal));
+        MainWindow window = Open("App/App.csproj");
+        CodeEditor editor = window.EditorArea.CodeEditor;
+        OpenDocument document = window.EditorArea.Active!;
+        const string Said = "Package 'Passenger.Other' 2.5.0 is deprecated: legacy, no longer maintained; use Passenger.Sample 2.0.0 or later instead";
+        Ui.WaitFor(() => document.Markers.Any(m => m.Message == Said), () => $"the deprecated version's warning among [{string.Join(" | ", document.Markers.Select(m => m.Message))}]");
+        Assert.Equal(MarkerKind.Warning, MarkerOn(editor, document, "2.5.0").Kind);
+        Assert.DoesNotContain(document.Markers, m => m.Message.Contains("is deprecated", StringComparison.Ordinal) && m.Message != Said);
+        Ui.WaitFor(() => window.BottomPanel.Problems.FileProblems.Any(p => p.Severity == ProblemSeverity.Warning && p.Message.Contains(Said, StringComparison.Ordinal)),
+            "Problems listing the deprecated version");
+
+        Ui.PlaceAfter(editor, "<PackageReference Include=\"Passenger.Oth");
+        Ui.Run(window, AppActions.QuickDocumentation);
+        Ui.WaitFor(() => window.Assist.HoverText is not null, "the card over the deprecated reference");
+        Assert.Contains($"\n{Said}\n{Retired}\n", window.Assist.HoverText, StringComparison.Ordinal);
+        window.Close();
+    }
+
+    /// <summary>Completing a package reference's version marks each version its owner deprecated, as the folder's feed's
+    /// registration says, read as the list is asked for (the file's marks asked only of the reference's own 3.0.0), one
+    /// also vulnerable marked as both.</summary>
+    [AvaloniaFact]
+    public void Completing_a_package_version_marks_those_its_owner_deprecated()
+    {
+        Write("App/App.csproj", Project.Replace("<ProjectReference Include=\"../\" />",
+            "<PackageReference Include=\"Passenger.Other\" Version=\"3.0.0\" />\n    <ProjectReference Include=\"../\" />", StringComparison.Ordinal));
+        MainWindow window = Open("App/App.csproj");
+        CodeEditor editor = window.EditorArea.CodeEditor;
+        Ui.PlaceAfter(editor, "Include=\"Passenger.Other\" Version=\"");
+        Ui.Run(window, AppActions.Complete);
+        Ui.WaitFor(() => window.Assist.CompletionLabels.Count == 3, "Passenger.Other's three versions");
+        Assert.Equal([("3.0.0", ""), ("2.5.0", "Deprecated"), ("2.0.0", "High vulnerability, deprecated")], window.Assist.CompletionDetails);
+        Ui.Press(window, "ESCAPE");
+        window.Close();
+    }
+
+    /// <summary>In a window at its smallest, completing a version on a reference's line reaching the editor's right edge
+    /// shows a vulnerable and deprecated version's card whole on the list's side with more room, narrowed to it, saying the
+    /// advisory, why it was deprecated and its owner's words in full; with the Explorer open beside it, the editor too
+    /// narrow for a card beside the list, the card goes over the list and its line, whole, hiding neither.</summary>
+    [AvaloniaFact]
+    public void A_version_s_card_near_the_editor_s_edge_shows_whole_on_the_wider_side_saying_its_advisory_and_deprecation_in_full()
+    {
+        Write("App/App.csproj", Project.Replace("<ProjectReference Include=\"../\" />",
+            "<PackageReference Include=\"Passenger.Other\" Version=\"3.0.0\" />\n    <ProjectReference Include=\"../\" />", StringComparison.Ordinal));
+        MainWindow window = Open("App/App.csproj", width: MainWindow.SmallestWidth, height: MainWindow.SmallestHeight);
+        CodeEditor editor = window.EditorArea.CodeEditor;
+        Ui.Run(window, AppActions.HideAllToolWindows);
+
+        (Rect list, Rect card, Rect layer) = VersionCard(window, editor);
+
+        Assert.True(card.X >= layer.X && card.Y >= layer.Y && card.Right <= layer.Right && card.Bottom <= layer.Bottom,
+            $"The card runs past the editor's edge, its words cut: it lies at {card} beside the list at {list} in the editor at {layer}");
+        bool rightWider = layer.Right - list.Right >= list.X - layer.X;
+        Assert.True(rightWider ? card.X >= list.Right : card.Right <= list.X,
+            $"The card was to go to the list's {(rightWider ? "right" : "left")}, the side with more room in the editor at {layer}; it lies at {card} beside the list at {list}");
+        Ui.Press(window, "ESCAPE");
+
+        Ui.Run(window, AppActions.HideAllToolWindows);
+        Ui.Settle();
+        (list, card, layer) = VersionCard(window, editor);
+
+        // The list opens under the version's line, which it was placed at.
+        Rect line = new(layer.X, list.Y - editor.LineHeight - 2, layer.Width, editor.LineHeight);
+        Assert.True(card.X >= layer.X && card.Y >= layer.Y && card.Right <= layer.Right && card.Bottom <= layer.Bottom && !card.Intersects(list) && !card.Intersects(line),
+            $"With the Explorer open the card was to lie whole in the editor at {layer}, over or under the list at {list} and its line, hiding neither; it lies at {card}");
+        Ui.Press(window, "ESCAPE");
+        window.Close();
+    }
+
+    /// <summary>In a window at its smallest with the default layout, the Explorer open leaving the editor narrower than the
+    /// completion list's least width, a project file's list of properties opens whole in the editor, narrowed to it: every
+    /// row's name and detail inside the list, a name shown whole before its detail, a longer one ending in an ellipsis,
+    /// never cut at the editor's edge.</summary>
+    [AvaloniaFact]
+    public void A_completion_list_in_an_editor_narrower_than_its_least_width_shows_whole_each_name_before_its_detail()
+    {
+        MainWindow window = Open("App/App.csproj", width: MainWindow.SmallestWidth, height: MainWindow.SmallestHeight);
+        CodeEditor editor = window.EditorArea.CodeEditor;
+        Ui.PlaceAfter(editor, "<OutputType>Exe</OutputType>");
+        Ui.Press(window, "ENTER");
+        window.KeyTextInput("<");
+        Ui.WaitFor(() => window.Assist.CompletionLabels.Contains("TargetFramework"), "the properties a PropertyGroup takes after a tag's '<'");
+
+        Avalonia.Controls.Canvas assist = window.EditorArea.AssistLayer;
+        Rect layer = new(assist.TranslatePoint(default, window) ?? default, assist.Bounds.Size);
+        Rect list = window.Assist.CompletionPlace ?? throw new InvalidOperationException("The completion list shows, yet has no place");
+        Assert.True(layer.Width < 280, $"The default layout at the window's smallest width was to leave the editor narrower than the list's least width, 280; it is {layer.Width} wide");
+        Assert.True(list.X >= layer.X && list.Y >= layer.Y && list.Right <= layer.Right && list.Bottom <= layer.Bottom,
+            $"The completion list runs past the editor's edge, cut there: it lies at {list} in the editor at {layer}");
+        Avalonia.Controls.TextBlock? name = null;
+        Avalonia.Controls.TextBlock? detail = null;
+        foreach (Avalonia.Controls.Panel row in window.Assist.CompletionRowControls.OfType<Avalonia.Controls.Panel>())
+        {
+            Avalonia.Controls.TextBlock[] words = [.. row.Children.OfType<Avalonia.Controls.TextBlock>()];
+            foreach (Avalonia.Controls.TextBlock said in words)
+            {
+                Rect at = new(said.TranslatePoint(default, window) ?? default, said.Bounds.Size);
+                Assert.True(said.Bounds.Width == 0 || (at.X >= list.X && at.Right <= list.Right),
+                    $"'{said.Text}' runs past the list at {list}: it lies at {at}");
+            }
+            if (words is [{ Text: "TargetFramework" } label, var beside])
+            {
+                (name, detail) = (label, beside);
+            }
+        }
+        Assert.True(name is not null && detail is not null, "TargetFramework's row, its name and its detail, is not among those the list shows");
+        Avalonia.Controls.TextBlock whole = new() { Text = name.Text, FontFamily = name.FontFamily, FontSize = name.FontSize, FontFeatures = name.FontFeatures };
+        whole.Measure(Size.Infinity);
+        Assert.True(name.Bounds.Width >= whole.DesiredSize.Width - 0.5 && detail.Bounds.X >= name.Bounds.Right,
+            $"TargetFramework's name was to show whole ({whole.DesiredSize.Width} wide) before its detail '{detail.Text}'; it has {name.Bounds.Width}, the detail at {detail.Bounds.X}");
+        Ui.Press(window, "ESCAPE");
+        window.Close();
+    }
+
+    /// <summary>Completes Passenger.Other's version, chooses 2.0.0 and waits for its card, checking it says the advisory and
+    /// the deprecation in full: where the list, the card and the editor's layer lie in the window.</summary>
+    private static (Rect List, Rect Card, Rect Layer) VersionCard(MainWindow window, CodeEditor editor)
+    {
+        Ui.PlaceAfter(editor, "Include=\"Passenger.Other\" Version=\"");
+        Ui.Run(window, AppActions.Complete);
+        Ui.WaitFor(() => window.Assist.CompletionLabels.Count == 3, "Passenger.Other's three versions");
+        Ui.Press(window, "DOWN");
+        Ui.Press(window, "DOWN");
+        Ui.WaitFor(() => window.Assist.ItemDocumentation?.Contains("2.0.0", StringComparison.Ordinal) == true, () => $"2.0.0's card; it says {window.Assist.ItemDocumentation ?? "nothing"}");
+        string said = window.Assist.ItemDocumentation!;
+        Assert.True(said.StartsWith("Package 'Passenger.Other' 2.0.0 has a known high severity vulnerability, https://github.com/advisories/GHSA-pass-0001-test\n", StringComparison.Ordinal)
+            && said.Contains("\nPackage 'Passenger.Other' 2.0.0 is deprecated: ", StringComparison.Ordinal) && said.EndsWith("\nBroken past repair.", StringComparison.Ordinal),
+            $"The card was to say the advisory, the deprecation and its owner's words in full; it says:\n{said}");
+        (Rect list, Rect card) = window.Assist.ItemCardPlace ?? throw new InvalidOperationException("The card shows, yet has no place beside the list");
+        Avalonia.Controls.Canvas assist = window.EditorArea.AssistLayer;
+        Rect layer = new(assist.TranslatePoint(default, window) ?? default, assist.Bounds.Size);
+        return (list, card, layer);
     }
 
     [Gate]
@@ -497,9 +643,9 @@ public sealed class ProjectFileHelpTests : IClassFixture<ProjectFileHelpTests.Sh
         return least;
     }
 
-    private MainWindow Open(string file, bool autosaves = false, bool languageServer = false)
+    private MainWindow Open(string file, bool autosaves = false, bool languageServer = false, double width = 1200, double height = 800)
     {
-        MainWindow window = new() { Width = 1200, Height = 800, Autosaves = autosaves, WarmServer = shop.Server, StartsLanguageServer = languageServer };
+        MainWindow window = new() { Width = width, Height = height, Autosaves = autosaves, WarmServer = shop.Server, StartsLanguageServer = languageServer };
         window.Show();
         window.OpenFolder(Path.Combine(folder, "Shop.slnx"));
         window.OpenFile(Path.Combine(folder, file));
@@ -557,8 +703,13 @@ public sealed class ProjectFileHelpTests : IClassFixture<ProjectFileHelpTests.Sh
             feed.Add("Passenger.Vulnerable", "1.0.1");
             feed.Add("Passenger.Vulnerable", "1.1.0");
             feed.Add("Passenger.Sample", "2.0.0");
+            feed.Add("Passenger.Other", "2.0.0");
+            feed.Add("Passenger.Other", "2.5.0");
             feed.Add("Passenger.Other", "3.0.0");
             feed.Advise("Passenger.Vulnerable", 1, Advisory, "[1.0.0, 1.0.1)");
+            feed.Deprecate("Passenger.Other", "2.5.0", ["Legacy"], Retired, "Passenger.Sample", "[2.0.0, )");
+            feed.Advise("Passenger.Other", 2, "https://github.com/advisories/GHSA-pass-0001-test", "[2.0.0, 2.5.0)");
+            feed.Deprecate("Passenger.Other", "2.0.0", ["CriticalBugs"], "Broken past repair.");
             // Only the stand-in, for packages and for the audit, and restores kept out of the person's package cache.
             Put("nuget.config", $"""
                 <?xml version="1.0" encoding="utf-8"?>

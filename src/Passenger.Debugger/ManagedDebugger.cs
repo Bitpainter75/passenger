@@ -48,6 +48,7 @@ public partial class ManagedDebugger
     internal int ModuleSet_Version { get; private set; }
     private bool _isAttached;
     private int? _pendingAttachProcessId;
+    private (string Relay, string? Modules, string? Token)? _pendingRelay;
 
     /// <summary>The process attached to, by its id where the adapter runs, while held; 0 for none.</summary>
     private int _attachedId;
@@ -90,6 +91,10 @@ public partial class ManagedDebugger
     private int _exitReported;
     private int _terminatedReported;
     private TaskCompletionSource _exitTold = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Why the debugging ended other than by the program's end or the client's asking: the runtime's own debugging
+    /// of the program failed (<see cref="HandleDebuggerError"/>), after which it answers nothing; null until then.</summary>
+    public string? Failure { get; private set; }
 
     /// <summary>Tells the client its debugging has ended, once, after the program's end was told: for a launched program as
     /// its process ends, whatever became of the runtime's word of it, which mscordbi may lose tearing down.</summary>
@@ -446,7 +451,19 @@ public partial class ManagedDebugger
             {
                 return;
             }
-            _logger?.Invoke($"Event: {e.GetType().Name}{(DispatchThread(e) is int thread ? $" on thread {thread}" : "")}");
+            if (FailAtModule is { } failing && e is LoadModuleCorDebugManagedCallbackEventArgs load && _process is { } held
+                && string.Equals(Path.GetFileName(load.Module.Name), failing, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger?.Invoke($"Held: the load of {failing} taken as the runtime's failure");
+                e = new DebuggerErrorCorDebugManagedCallbackEventArgs(held, HeldFailure, 0);
+            }
+            _logger?.Invoke($"Event: {e.GetType().Name}{(DispatchThread(e) is int thread ? $" on thread {thread}" : "")}"
+                + (e is DebuggerErrorCorDebugManagedCallbackEventArgs error ? $": 0x{error.ErrorHR:X8}, code {error.ErrorCode}" : ""));
+            if (Failure is not null && e is not (ExitProcessCorDebugManagedCallbackEventArgs or DebuggerErrorCorDebugManagedCallbackEventArgs))
+            {
+                // Its process answers nothing since its debugging failed: no continue, which would throw, is asked of it.
+                return;
+            }
             switch (e)
             {
                 case LogMessageCorDebugManagedCallbackEventArgs a: HandleLogMessage(sender, a); break;
@@ -466,6 +483,7 @@ public partial class ManagedDebugger
                 case DataBreakpointCorDebugManagedCallbackEventArgs a: await HandleDataBreakpoint(a).ConfigureAwait(false); break;
                 case FunctionRemapOpportunityCorDebugManagedCallbackEventArgs a: HandleFunctionRemapOpportunity(a); break;
                 case FunctionRemapCompleteCorDebugManagedCallbackEventArgs a: HandleFunctionRemapComplete(a); break;
+                case DebuggerErrorCorDebugManagedCallbackEventArgs a: await HandleDebuggerError(a).ConfigureAwait(false); break;
                 case EvalCompleteCorDebugManagedCallbackEventArgs or EvalExceptionCorDebugManagedCallbackEventArgs when IsAbandonedEvaluationsEnd(e): LetGoAbandonedEvaluation(e); break;
                 case EvalCompleteCorDebugManagedCallbackEventArgs or EvalExceptionCorDebugManagedCallbackEventArgs: break; // don't continue on these, as they are being used for expression evaluation
                 default:
@@ -561,6 +579,38 @@ public partial class ManagedDebugger
         }
     }
 
+    /// <summary>Takes hold of an app through Passenger's relay in it: the relay's ICorDebug, the app's own runtime's, is
+    /// driven as a local one is, and the app's start goes on once the attach is made.</summary>
+    private void PerformRelayAttach(string relay, string? modules, string? token)
+    {
+        _logger?.Invoke($"Attaching through the relay at {relay}");
+        Relay.RelayConnection connection = Relay.RelayConnection.Connect(relay, token, TimeSpan.FromSeconds(60), _logger);
+        _exited.Reset();
+        ICorDebug corDebug = Relay.RemoteObjects.Start(connection, new Relay.DeviceModules(modules), _logger);
+        corDebug.Initialize();
+        corDebug.SetManagedHandler(_callbacks);
+        int processId = (int)connection.ProcessId;
+        ICorDebugProcess process = corDebug.DebugActiveProcess(processId, false);
+        _process = process;
+        _corDebug = corDebug;
+        // The app's process is on its device: its end is its runtime's word, else its relay's stream ending with it.
+        connection.WhenGone(() =>
+        {
+            if (!_exited.IsSet)
+            {
+                _logger?.Invoke("The relay's stream ended before the runtime said the process exited: its end is the process's");
+                QueueEvent(this, new ExitProcessCorDebugManagedCallbackEventArgs(process));
+            }
+        });
+        connection.Go();
+        _isAttached = true;
+        _attachedId = processId;
+        ConfigureExceptionCallbacks();
+        _logger?.Invoke($"Attached through the relay to process {processId}");
+        OnAttached?.Invoke(processId);
+        SendAllBreakpointEvents();
+    }
+
     private void SendAllBreakpointEvents()
     {
         // Every breakpoint is unverified until it binds again.
@@ -616,6 +666,7 @@ public partial class ManagedDebugger
         // A step's calls' values are shown at its own stop; one that stops anywhere else stops showing them.
         EndReturnWatch();
         EndSmartStep();
+        _heldYield = null;
         if (reason != StopReasons.Step)
         {
             ForgetReturnedValues();
@@ -679,6 +730,22 @@ public partial class ManagedDebugger
     }
 
     private ICorDebugStepper? _stepper;
+
+    /// <summary>A test's hold: the stepping thread's breakpoint where it leaves an async method at an await is let go
+    /// unhandled, the thread running on, and handed over only as its step's end comes, as the runtime once handed both under
+    /// load.</summary>
+    public static bool LateYield { get; set; }
+
+    /// <summary>A test's hold: the load of the module of this file name is taken as the runtime's word that its debugging
+    /// of the program failed for good (<see cref="HandleDebuggerError"/>), as it once said under load.</summary>
+    public static string? FailAtModule { get; set; }
+
+    /// <summary>The failure <see cref="FailAtModule"/> stands in for the runtime's with: E_FAIL.</summary>
+    private const int HeldFailure = unchecked((int)0x80004005);
+
+    /// <summary>The breakpoint <see cref="LateYield"/> holds back, and the one it is handing over, which is not held again.</summary>
+    private BreakpointCorDebugManagedCallbackEventArgs? _heldYield;
+    private BreakpointCorDebugManagedCallbackEventArgs? _handedYield;
 
     internal void Log(string message) => _logger?.Invoke(message);
 
@@ -1289,8 +1356,9 @@ public partial class ManagedDebugger
         {
             return; // A client may terminate, then disconnect, each of which ends the session here, which needs doing only once.
         }
-        // A process that has exited is the runtime's to tear down: nothing below may call into it.
-        bool exited = _exited.IsSet;
+        // An exited process is the runtime's to tear down, and a failed one answers nothing: nothing below may call into either.
+        bool failed = Failure is not null;
+        bool exited = _exited.IsSet || failed;
         // Only a let-go runs held threads off: an exited program's throw when asked their id, failing the disconnect.
         bool runsOff = letGo && !exited;
         // The threads the runtime holds inside its handling of a breakpoint or a step's end, run off it before the detach.
@@ -1431,8 +1499,9 @@ public partial class ManagedDebugger
                 _process.TryContinue(false);
             }
         }
-        else if (_corDebug is not null)
+        else if (_corDebug is not null && (!failed || _exited.IsSet))
         {
+            // One whose debugging failed is never neutered while its process lives, so it goes with the adapter.
             ShutDown(_corDebug);
         }
 
@@ -1452,9 +1521,9 @@ public partial class ManagedDebugger
     /// releases the runtime's objects) under it.</summary>
     private void ShutDown(ICorDebug corDebug)
     {
-        DateTime until = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        Deadline until = Deadline.In(TimeSpan.FromSeconds(5));
         int result;
-        while ((result = corDebug.TryTerminate()) == Cor.CORDBG_E_ILLEGAL_SHUTDOWN_ORDER && DateTime.UtcNow < until)
+        while ((result = corDebug.TryTerminate()) == Cor.CORDBG_E_ILLEGAL_SHUTDOWN_ORDER && !until.Passed)
         {
             Thread.Sleep(20);
         }

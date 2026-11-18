@@ -87,6 +87,20 @@ public sealed partial class CodeEditor
     private void DrawCarets(DrawingContext context, TextSnapshot text, int start, int end, int first, int last, double left)
     {
         IReadOnlyList<Selection> items = selections.Items;
+        IReadOnlyList<int> cursors = VisualCursors;
+        if (cursors.Count > 0)
+        {
+            // Visual mode's cursors are blocks inside what it selects, as normal mode's caret is.
+            foreach (int cursor in cursors)
+            {
+                (int cursorRow, double cursorX) = CaretPlace(text, cursor);
+                if (cursor >= start && cursor <= end && cursorRow >= first && cursorRow <= last)
+                {
+                    DrawBlockCaret(context, text, cursor, cursorRow, cursorX, (cursorRow * metrics.LineHeight) - scroll.Y, left);
+                }
+            }
+            return;
+        }
         for (int i = FirstCaretFrom(start); i < items.Count && items[i].Caret <= end; i++)
         {
             (int row, double x) = CaretPlace(text, items[i].Caret);
@@ -95,7 +109,12 @@ public sealed partial class CodeEditor
                 continue;
             }
             double y = (row * metrics.LineHeight) - scroll.Y;
-            context.FillRectangle(palette.Caret, new Rect(Math.Round(left + x), y, 2, metrics.LineHeight));
+            if (vim is { Mode: VimMode.Normal } && items[i].IsEmpty)
+            {
+                DrawBlockCaret(context, text, items[i].Caret, row, x, y, left);
+                continue;
+            }
+            context.FillRectangle(palette.Caret, new Rect(Math.Round(left + x), y, CaretWidth, metrics.LineHeight));
         }
     }
 
@@ -495,7 +514,7 @@ public sealed partial class CodeEditor
     /// neighbouring runs of one look on a line are formatted and drawn as one (<see cref="ColouredRuns"/>).</summary>
     private TextRunProperties Run(TokenKind kind)
     {
-        if (!rainbowBraces && kind is TokenKind.Brace1 or TokenKind.Brace2 or TokenKind.Brace3)
+        if (!rainbowBraces && kind is TokenKind.Brace1 or TokenKind.Brace2 or TokenKind.Brace3 or TokenKind.Brace4 or TokenKind.Brace5 or TokenKind.Brace6)
         {
             kind = TokenKind.Text;
         }
@@ -578,6 +597,9 @@ public sealed partial class CodeEditor
         public IBrush Selection { get; private init; } = None;
         public IBrush SelectionInactive { get; private init; } = None;
         public IBrush Caret { get; private init; } = None;
+
+        /// <summary>Normal mode's block caret: the caret's colour, faded so the character under it shows through.</summary>
+        public IBrush BlockCaret { get; private init; } = None;
         public IBrush Preedit { get; private init; } = None;
         public IBrush SearchMatch { get; private init; } = None;
         public IBrush Error { get; private init; } = None;
@@ -615,6 +637,9 @@ public sealed partial class CodeEditor
 
         /// <summary>The look's popup corners (the host's <c>Passenger.PopupRadius</c>), which the fold preview's card takes.</summary>
         public double PopupRadius { get; private init; } = 4;
+
+        /// <summary>The room between the gutter and the text (the host's <c>Passenger.EditorTextPadding</c>).</summary>
+        public double TextPadding { get; private init; } = 6;
         public IBrush SmartStepTarget { get; private init; } = None;
         public IBrush SmartStepChosen { get; private init; } = None;
         public IBrush SmartStepBorder { get; private init; } = None;
@@ -668,12 +693,13 @@ public sealed partial class CodeEditor
                 Selection = F(TokenKeys.Editor_Selection) ?? defaults.Selection,
                 SelectionInactive = F(TokenKeys.Editor_SelectionInactive) ?? defaults.SelectionInactive,
                 Caret = F(TokenKeys.Editor_Caret) ?? defaults.Caret,
+                BlockCaret = Fade(F(TokenKeys.Editor_Caret), 0.35) ?? defaults.BlockCaret,
                 Preedit = F(TokenKeys.Editor_Text) ?? defaults.Preedit,
                 SearchMatch = F(TokenKeys.Editor_SearchMatch) ?? defaults.SearchMatch,
                 Error = F(TokenKeys.Editor_Error) ?? defaults.Error,
                 Warning = F(TokenKeys.Editor_Warning) ?? defaults.Warning,
                 Info = F(TokenKeys.Editor_Info) ?? defaults.Info,
-                Faded = Fade(F(TokenKeys.Editor_Background)) ?? defaults.Faded,
+                Faded = Fade(F(TokenKeys.Editor_Background), 0.5) ?? defaults.Faded,
                 SearchCurrent = F(TokenKeys.Editor_SearchCurrent) ?? defaults.SearchCurrent,
                 Annotation = F(TokenKeys.Editor_InlineValue) ?? defaults.Annotation,
                 Passed = F(TokenKeys.Test_Passed) ?? defaults.Passed,
@@ -704,6 +730,8 @@ public sealed partial class CodeEditor
                 PopupBorder = F(TokenKeys.Editor_PopupBorder) ?? defaults.PopupBorder,
                 PopupRadius = control.TryFindResource(TokenKeys.PopupRadius, control.ActualThemeVariant, out object? radius) && radius is CornerRadius corners
                     ? corners.TopLeft : defaults.PopupRadius,
+                TextPadding = control.TryFindResource(TokenKeys.EditorTextPadding, control.ActualThemeVariant, out object? padding) && padding is double room
+                    ? room : defaults.TextPadding,
                 SmartStepTarget = F(TokenKeys.Editor_SmartStepTarget) ?? defaults.SmartStepTarget,
                 SmartStepChosen = F(TokenKeys.Editor_SmartStepChosen) ?? defaults.SmartStepChosen,
                 SmartStepBorder = F(TokenKeys.Editor_SmartStepBorder) ?? defaults.SmartStepBorder,
@@ -725,6 +753,7 @@ public sealed partial class CodeEditor
                         | (named.Contains("Italic", StringComparison.Ordinal) ? SyntaxStyle.Italic : 0);
                 }
             }
+            found.Add(padding);
             palette.found = found;
             return palette;
         }
@@ -732,8 +761,8 @@ public sealed partial class CodeEditor
         /// <summary>Whether another palette was read from the very resources this one was, so nothing need be drawn again.</summary>
         public bool SameAs(Palette other) => found.SequenceEqual(other.found, ReferenceEqualityComparer.Instance);
 
-        private static IBrush? Fade(IBrush? background) =>
-            background is ISolidColorBrush solid ? new SolidColorBrush(solid.Color, 0.5).ToImmutable() : null;
+        private static IBrush? Fade(IBrush? brush, double opacity) =>
+            brush is ISolidColorBrush solid ? new SolidColorBrush(solid.Color, opacity).ToImmutable() : null;
 
         private static Geometry? Icon(Control control, string key) =>
             control.TryFindResource(key, control.ActualThemeVariant, out object? value) ? value as Geometry : null;

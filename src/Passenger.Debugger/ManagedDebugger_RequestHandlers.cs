@@ -13,8 +13,11 @@ using ZLinq;
 
 namespace Passenger.Debugger;
 
-public record BreakpointRequest(int Line, string? Condition = null, string? HitCondition = null, int? Column = null, string? LogMessage = null, bool? Suspend = null);
-public record FunctionBreakpointRequest(string Name, string? Condition = null, string? HitCondition = null, string? LogMessage = null, bool? Suspend = null);
+/// <summary>A line breakpoint as asked for; <paramref name="RunTo"/> holds it for Run to Cursor, its next hit stopping whatever
+/// its condition, hit count and <paramref name="Suspend"/> say.</summary>
+public record BreakpointRequest(int Line, string? Condition = null, string? HitCondition = null, int? Column = null, string? LogMessage = null, bool? Suspend = null,
+    bool RunTo = false) : IAskedBreakpoint;
+public record FunctionBreakpointRequest(string Name, string? Condition = null, string? HitCondition = null, string? LogMessage = null, bool? Suspend = null) : IAskedBreakpoint;
 public record ExceptionBreakpointRequest(ExceptionBreakpointFilter Filter, string? Condition = null);
 public enum ExceptionBreakpointFilter { All, UserUnhandled }
 
@@ -23,6 +26,7 @@ public enum ExceptionBreakpointFilter { All, UserUnhandled }
 /// message as a line breakpoint has. A type given without a namespace is any type of that name.</summary>
 public sealed record ExceptionRuleRequest(
     IReadOnlyList<string> Types, bool Excluded, Passenger.Dap.ExceptionScenarios Scenarios, string? Condition = null, string? HitCondition = null, string? LogMessage = null, bool Suspend = true)
+    : IAskedBreakpoint
 {
     public bool Equals(ExceptionRuleRequest? other) => other is not null && Types.SequenceEqual(other.Types) && Excluded == other.Excluded && Scenarios == other.Scenarios
         && Condition == other.Condition && HitCondition == other.HitCondition && LogMessage == other.LogMessage && Suspend == other.Suspend;
@@ -232,10 +236,11 @@ public partial class ManagedDebugger
     /// <summary>What a breakpoint asked for before the program is there says: it binds once the program loads its code.</summary>
     private const string NotProcessed = "Breakpoint has not been processed by the debugger.";
 
-    /// <summary>Whether a new breakpoint is refused for a condition or hit count that does not read, its message saying why.</summary>
+    /// <summary>Whether a new breakpoint is refused for a condition, hit count or log message that does not read, its message
+    /// saying why.</summary>
     private static bool RefusedUnread(BreakpointManager.BreakpointInfo bp)
     {
-        if (Unreadable(bp.Condition, bp.HitCondition) is not { } unreadable)
+        if (Unreadable(bp.Condition, bp.HitCondition, bp.LogMessage) is not { } unreadable)
         {
             return false;
         }
@@ -256,6 +261,21 @@ public partial class ManagedDebugger
         _hotReload = hotReload;
         _pendingAttachProcessId = processId;
         Volatile.Write(ref _heldTarget, processId);
+        _launched = false;
+    }
+
+    /// <summary>An app on a device or simulator to attach to through Passenger's relay inside it, at
+    /// <paramref name="relay"/> (host:port, adb's forward on Android), its modules read from the host's copies in
+    /// <paramref name="modules"/>, the relay taking it by <paramref name="token"/>; taken hold of by configurationDone once the
+    /// client's breakpoints are set.</summary>
+    public void AttachThroughRelay(string relay, string? modules, string? token, bool justMyCode, bool hotReload)
+    {
+        EnsureNoProcessBeingDebugged();
+        _logger?.Invoke($"Storing relay attach target: {relay}");
+        _justMyCode = justMyCode;
+        _stopAtEntry = false;
+        _hotReload = hotReload;
+        _pendingRelay = (relay, modules, token);
         _launched = false;
     }
 
@@ -308,6 +328,11 @@ public partial class ManagedDebugger
         {
             _pendingAttachProcessId = null;
             await PerformAttach(processId, DiagnosticClientHelper.LetGoIfHeld);
+        }
+        else if (_pendingRelay is { } relayed)
+        {
+            _pendingRelay = null;
+            PerformRelayAttach(relayed.Relay, relayed.Modules, relayed.Token);
         }
     }
 
@@ -519,13 +544,13 @@ public partial class ManagedDebugger
     /// <summary>Sets a file's breakpoints to those asked for. One asked for again just as it was (its line, column,
     /// condition, hit count, message and whether it stops) is kept whole: its id, its binding and its hit count, so a hit
     /// of it already on its way still stops, and a change elsewhere in the file starts no count again; one asked for at the
-    /// same line and column with other settings counts on from the hits of the one it replaces. Those no longer asked for
-    /// are let go, and the new ones bound.</summary>
+    /// same line and column with the same condition and hit count counts on from the hits of the one it replaces
+    /// (<see cref="BreakpointHits.Reconcile"/>). Those no longer asked for are let go, and the new ones bound.</summary>
     public List<BreakpointManager.BreakpointInfo> SetBreakpoints(string filePath, BreakpointRequest[] breakpoints)
     {
         _logger?.Invoke($"SetBreakpoints: {filePath}, breakpoints: {string.Join(",", breakpoints.Select(b => $"L{b.Line} {(b.Column is not null ? $"C{b.Column}" : null)} {(b.Condition is not null ? $"[{b.Condition}]" : null)}{(b.HitCondition is not null ? $" hits {b.HitCondition}" : null)}"))}");
 
-        (BreakpointManager.BreakpointInfo? Kept, int Hits)[] matched = Reconcile(breakpoints, _breakpointManager.GetBreakpointsForFile(filePath), b => b.Request,
+        (BreakpointManager.BreakpointInfo? Kept, int Hits)[] matched = BreakpointHits.Reconcile(breakpoints, _breakpointManager.GetBreakpointsForFile(filePath), b => b.Request,
             static (was, now) => was.Line == now.Line && was.Column == now.Column, out List<BreakpointManager.BreakpointInfo> gone);
         Remove(gone);
 
@@ -564,11 +589,11 @@ public partial class ManagedDebugger
     }
 
     /// <summary>Sets the function breakpoints to those asked for, which replace those set before, kept and counted on as
-    /// <see cref="SetBreakpoints"/> does a file's, one of the same name with other settings counting on from the hits of the
-    /// one it replaces: a change beside one (a property breakpoint added) starts no count again.</summary>
+    /// <see cref="SetBreakpoints"/> does a file's, one of the same name, condition and hit count counting on from the hits of
+    /// the one it replaces: a change beside one (a property breakpoint added) starts no count again.</summary>
     public List<BreakpointManager.BreakpointInfo> SetFunctionBreakpoints(FunctionBreakpointRequest[] breakpoints)
     {
-        (BreakpointManager.BreakpointInfo? Kept, int Hits)[] matched = Reconcile(breakpoints, _breakpointManager.GetFunctionBreakpoints(), b => b.FunctionRequest,
+        (BreakpointManager.BreakpointInfo? Kept, int Hits)[] matched = BreakpointHits.Reconcile(breakpoints, _breakpointManager.GetFunctionBreakpoints(), b => b.FunctionRequest,
             static (was, now) => was.Name == now.Name, out List<BreakpointManager.BreakpointInfo> gone);
         Remove(gone);
 
@@ -1055,7 +1080,7 @@ public partial class ManagedDebugger
             if (letThreadsRun && frameId is int id && _frameReferenceManager.GetFrameInfoById(id) is var (threadId, _) && EvalStatus.Abandoned.ContainsKey(threadId.Value)
                 && _threads.GetValueOrDefault(threadId.Value)?.Thread is { } thread && !await LetAbandonedReturnAsync(thread))
             {
-                return FailedRow(expression.Trim(), $"The evaluation held unfinished on this thread has not returned {Extensions.EvaluationTimeout.TotalSeconds:0.#} s after every thread was let go, so no other can run on it until it does");
+                return FailedRow(expression.Trim(), $"The evaluation held unfinished on this thread has not returned {Durations.Said(Extensions.EvaluationTimeout)} after every thread was let go, so no other can run on it until it does");
             }
             VariableInfo value = await Evaluate(expression, frameId, expression.Trim(), implicitly);
             if (EvalStatus.PassedOver.Count > 0)
@@ -1194,7 +1219,8 @@ public partial class ManagedDebugger
             await LetGoAsync(null).ConfigureAwait(false);
             return;
         }
-        if (_process is not null && !_exited.IsSet)
+        // One whose debugging failed answers nothing: a launched one was ended then, one attached to is left.
+        if (_process is not null && !_exited.IsSet && Failure is null)
         {
             // A running process cannot be terminated (CORDBG_E_PROCESS_NOT_SYNCHRONIZED): it is stopped first.
             if (_process.TryIsRunning(out bool isRunning) is Cor.S_OK && isRunning)
@@ -1492,7 +1518,7 @@ public partial class ManagedDebugger
 
     /// <summary>The client's exception filters, and its CLR exception breakpoints when it gives them (null when it gives none,
     /// so every unhandled exception stops), kept and counted on as a file's line breakpoints are, one for the same exception
-    /// types counting on from the hits of the one it replaces.</summary>
+    /// types, condition and hit count counting on from the hits of the one it replaces.</summary>
     public IReadOnlyList<ExceptionRule> SetExceptionBreakpoints(IReadOnlyList<ExceptionBreakpointRequest> filters, IReadOnlyList<ExceptionRuleRequest>? rules = null)
     {
         _exceptionBreakpoints = filters.ToArray();
@@ -1501,7 +1527,7 @@ public partial class ManagedDebugger
             _exceptionRules = null;
             return [];
         }
-        (ExceptionRule? Kept, int Hits)[] matched = Reconcile(rules, _exceptionRules ?? [], rule => rule.Request,
+        (ExceptionRule? Kept, int Hits)[] matched = BreakpointHits.Reconcile(rules, _exceptionRules ?? [], rule => rule.Request,
             static (was, now) => was.Excluded == now.Excluded && was.Types.SequenceEqual(now.Types), out _);
         List<ExceptionRule> now = [];
         for (int i = 0; i < rules.Count; i++)
@@ -1510,7 +1536,7 @@ public partial class ManagedDebugger
             now.Add(matched[i].Kept ?? new ExceptionRule(_breakpointManager.NextId(), request)
             {
                 HitCount = matched[i].Hits,
-                Refused = Unreadable(request.Condition, request.HitCondition),
+                Refused = Unreadable(request.Condition, request.HitCondition, request.LogMessage),
             });
         }
         _exceptionRules = now;

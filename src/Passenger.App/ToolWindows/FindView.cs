@@ -76,7 +76,7 @@ public sealed class FindView : DockPanel
     private readonly List<Search> searches = [];
     private readonly TreeRows<FindRow> rows = [];
     private readonly StackPanel tabs = new() { Orientation = Orientation.Horizontal, Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-    private readonly ListBox list;
+    private readonly TreeList list;
     private readonly CodeEditor preview;
     private readonly TextBlock placeholder;
 
@@ -119,14 +119,13 @@ public sealed class FindView : DockPanel
         });
         tabBar.IsVisible = false;
         Children.Add(tabBar);
-        list = new ListBox
+        list = new TreeList
         {
             Classes = { StyleClasses.Tree },
             ItemsSource = rows,
         };
         ReusedRows.Use(list, Row);
         list.SelectionChanged += (_, _) => ShowPreview();
-        list.DoubleTapped += (_, _) => Go();
         TreeKeys.Attach<FindRow>(list, Toggle, row =>
         {
             if (row.Usage is not { } usage)
@@ -142,7 +141,7 @@ public sealed class FindView : DockPanel
             ListMenus.Item("Copy Line", null, () => IdeErrors.Observe(ListMenus.CopyAsync(this, chosen.LineText.Trim()))),
             ListMenus.Item("Copy Path", null, () => IdeErrors.Observe(ListMenus.CopyAsync(this, chosen.Path))),
         ]);
-        preview = new CodeEditor { IsReadOnly = true, ShowErrorStripe = false, LineCommentPrefix = null, FontSize = 12.5, Document = new TextDocument() };
+        preview = new CodeEditor { IsReadOnly = true, ReadOnlyWhy = Refusals.PreviewReadOnly, ShowErrorStripe = false, LineCommentPrefix = null, FontSize = 12.5, Document = new TextDocument() };
         noneShown = new TextBlock { Classes = { StyleClasses.EmptyText }, Text = "No usages in your code", IsVisible = false };
         PaneSplit body = new(new Panel { Children = { list, noneShown } }, preview, "*,1,*");
         placeholder = new TextBlock { Classes = { StyleClasses.EmptyText } };
@@ -191,6 +190,14 @@ public sealed class FindView : DockPanel
     /// <summary>The search shown, by its title.</summary>
     public string? Shown => current?.Title;
 
+    /// <summary>The usages or matches of the search shown, the side shown alone where one is, in the order its rows list
+    /// them: Vim mode's quickfix list.</summary>
+    public IReadOnlyList<Usage> Places => current is not { } search ? []
+        : [.. (alone switch { UsageSide.Yours => search.Yours, UsageSide.Generated => search.Generated is { } made ? [made] : [], _ => search.Roots })
+            .SelectMany(Leaves)];
+
+    private static IEnumerable<Usage> Leaves(FindRow row) => row.Usage is { } usage ? [usage] : row.Children.SelectMany(Leaves);
+
     /// <summary>What the search shown went without, as it says above its usages; null when it went without nothing.</summary>
     public string? Without => current?.Without;
 
@@ -232,6 +239,17 @@ public sealed class FindView : DockPanel
         ShowSearch(search);
     }
 
+    /// <summary>A text search's matches in a tab of their own, grouped by project, then file, the first chosen.</summary>
+    public void ShowMatches(string title, IReadOnlyList<Usage> matches)
+    {
+        searches.Add(new Search(title, Projects(matches, 0, "match", "matches"), matches.Count, null, 0, null));
+        if (searches.Count > TabLimit)
+        {
+            searches.RemoveAt(0);
+        }
+        ShowSearch(searches[^1]);
+    }
+
     /// <summary>Usages grouped by what they do, then project, then file, the groups of what they do at a depth.</summary>
     private static List<FindRow> Kinds(IReadOnlyList<Usage> usages, int depth)
     {
@@ -243,14 +261,17 @@ public sealed class FindView : DockPanel
             {
                 continue;
             }
-            List<FindRow> projects = [.. ofKind.GroupBy(u => u.Project).OrderBy(g => g.Key, StringComparer.Ordinal).Select(project =>
-                new FindRow(project.Key, Core.Plural.Of(project.Count(), "usage"), depth + 1, null, [.. project.GroupBy(u => u.Path).OrderBy(g => g.Key, StringComparer.Ordinal).Select(file =>
-                    new FindRow(Path.GetFileName(file.Key), Core.Plural.Of(file.Count(), "usage"), depth + 2, null, [.. file.OrderBy(u => u.Line).ThenBy(u => u.Column).Select(u =>
-                        new FindRow(u.LineText.Trim(), (u.Line + 1).ToString(), depth + 3, u, []))]))]))];
-            roots.Add(new FindRow(name, Core.Plural.Of(ofKind.Count, "usage"), depth, null, projects));
+            roots.Add(new FindRow(name, Core.Plural.Of(ofKind.Count, "usage"), depth, null, Projects(ofKind, depth + 1, "usage", null)));
         }
         return roots;
     }
+
+    /// <summary>Usages or matches grouped by project, then file, at a depth, each group counting them by its noun.</summary>
+    private static List<FindRow> Projects(IReadOnlyList<Usage> usages, int depth, string noun, string? nouns) =>
+        [.. usages.GroupBy(u => u.Project).OrderBy(g => g.Key, StringComparer.Ordinal).Select(project =>
+            new FindRow(project.Key, Core.Plural.Of(project.Count(), noun, nouns), depth, null, [.. project.GroupBy(u => u.Path).OrderBy(g => g.Key, StringComparer.Ordinal).Select(file =>
+                new FindRow(Path.GetFileName(file.Key), Core.Plural.Of(file.Count(), noun, nouns), depth + 1, null, [.. file.OrderBy(u => u.Line).ThenBy(u => u.Column).Select(u =>
+                    new FindRow(u.LineText.Trim(), (u.Line + 1).ToString(), depth + 2, u, []))]))]))];
 
     /// <summary>Shows a kept search again, as a click on its tab does.</summary>
     public void ShowSearch(string title)
@@ -423,18 +444,6 @@ public sealed class FindView : DockPanel
         int start = snapshot.GetOffset(new TextPosition(Math.Min(usage.Line, snapshot.LineCount - 1), usage.Column));
         preview.SetHighlights([new TextRange(start, Math.Min(usage.Length, snapshot.Length - start))], 0);
         preview.GoTo(snapshot.GetPosition(start));
-    }
-
-    private void Go()
-    {
-        if (Selected is { Usage: { } usage })
-        {
-            GoToRequested?.Invoke(this, usage);
-        }
-        else if (Selected is { } group)
-        {
-            Toggle(group);
-        }
     }
 
     /// <summary>A group opened or closed is the one chosen.</summary>

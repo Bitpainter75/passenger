@@ -78,8 +78,8 @@ public sealed class VsTestRunner : ITestRunner
         {
             throw new InvalidOperationException($"VSTest cannot start: the folder's .NET SDK could not be named ({unnamed.Message})", unnamed);
         }
-        string host = Dotnet.Host();
-        string console = System.IO.Path.Combine(Dotnet.Root(), "sdk", sdk, "vstest.console.dll");
+        string host = Dotnet.Host(folder);
+        string console = System.IO.Path.Combine(Dotnet.Root(folder), "sdk", sdk, "vstest.console.dll");
         if (!File.Exists(console))
         {
             throw new FileNotFoundException($"The SDK {sdk} has no vstest.console", console);
@@ -331,11 +331,11 @@ public sealed class VsTestRunner : ITestRunner
     {
         if (!await EndsWithin(run, CancelLimit))
         {
-            IdeLog.Write(IdeLog.Tests, $"A run told to stop ran on {Waits.Of(CancelLimit).TotalSeconds:0} s: aborted");
+            IdeLog.Write(IdeLog.Tests, $"A run told to stop ran on {Durations.Said(Waits.Of(CancelLimit))}: aborted");
             IdeErrors.Observe(BackgroundWork.Unheld(session.AbortTestRun));
             if (!await EndsWithin(run, AbortLimit))
             {
-                IdeLog.Write(IdeLog.Tests, $"A run aborted ran on {Waits.Of(AbortLimit).TotalSeconds:0} s: vstest.console is ended, its test hosts with it");
+                IdeLog.Write(IdeLog.Tests, $"A run aborted ran on {Durations.Said(Waits.Of(AbortLimit))}: vstest.console is ended, its test hosts with it");
                 IdeErrors.Observe(LetGoAsync(run));
                 await BackgroundWork.Unheld(() => End(session));
                 try
@@ -551,7 +551,7 @@ public sealed class VsTestRunner : ITestRunner
     {
         DisplayName = result.DisplayName ?? result.TestCase.DisplayName,
         Message = result.ErrorMessage,
-        StackTrace = result.ErrorStackTrace,
+        StackTrace = FailureStacks.Once(result.ErrorStackTrace, result.ErrorMessage),
         Output = string.Concat(result.Messages.Select(m => m.Text)) is { Length: > 0 } output ? output : null,
         // An adapter writes each attachment to a file and names it by a URI, the test's name for it as its description.
         Attachments = [.. result.Attachments.SelectMany(set => set.Attachments).Select(a =>
@@ -691,7 +691,7 @@ public sealed class VsTestRunner : ITestRunner
                 ended ??= closed ? null : summary;
             }
             string how = testRunCompleteArgs.IsCanceled ? "stopped" : testRunCompleteArgs.IsAborted ? "aborted" : "complete";
-            IdeLog.Write(IdeLog.Tests, $"Run {how}: {Plural.Of(summary.Outcomes.Count, "result")} in {testRunCompleteArgs.ElapsedTimeInRunningTests.TotalSeconds:0.00} s"
+            IdeLog.Write(IdeLog.Tests, $"Run {how}: {Plural.Of(summary.Outcomes.Count, "result")} in {Durations.Said(testRunCompleteArgs.ElapsedTimeInRunningTests)}"
                 + (summary.Error is { } failed ? $": {failed}" : string.Empty));
             Done.TrySetResult(summary);
         }

@@ -179,7 +179,7 @@ public sealed class FolderWatchTests : IDisposable
         window.AskConflict = document =>
         {
             asked.Add(document.Name);
-            return Task.FromResult(loadDisk);
+            return Task.FromResult<bool?>(loadDisk);
         };
         Type(window, "public ");
 
@@ -211,22 +211,57 @@ public sealed class FolderWatchTests : IDisposable
         Type(window, "public ");
 
         File.WriteAllText(path, "class One { int disk; }\n");
-        Ui.WaitFor(() => window.OwnedWindows.OfType<ConfirmDialog>().Any(), "the File Cache Conflict dialog");
+        ChoiceDialog dialog = ConflictAsked(window);
         // The dialog has the focus and the idle wait goes by: neither writes over the disk's version, nor does Save.
         Ui.Hold(TimeSpan.FromSeconds(1.5), "the idle save's second to go by");
         window.Perform(AppActions.Save);
         Ui.Settle();
         Assert.Equal("class One { int disk; }\n", File.ReadAllText(path));
-        Assert.Single(window.OwnedWindows.OfType<ConfirmDialog>());
+        Assert.Single(window.OwnedWindows.OfType<ChoiceDialog>());
 
-        ConfirmDialog dialog = window.OwnedWindows.OfType<ConfirmDialog>().Single();
-        Avalonia.Controls.Button load = Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(dialog)
-            .OfType<Avalonia.Controls.Button>().First(b => (string?)b.Content == "Load File System Changes");
-        Ui.Click(load, settle: false);
+        Ui.Click(Answer(dialog, "Load File System Changes"), settle: false);
         Ui.WaitFor(() => Text(window) == "class One { int disk; }\n", "the disk's text in the editor");
         Assert.False(window.EditorArea.Active!.IsModified);
         window.Close();
     }
+
+    /// <summary>The File Cache Conflict comes on its own as another program writes the file, while the person may be
+    /// typing, so a key meant for the editor answers it neither way: Escape and Enter close it with the edits kept unsaved
+    /// and the disk's version as it was, and the next save asks again, where Keep Memory Changes writes the edits over it.</summary>
+    [AvaloniaFact]
+    public void A_key_meant_for_the_editor_answers_the_conflict_question_neither_way_and_the_next_save_asks_again()
+    {
+        string path = Path.Combine(folder, "One.cs");
+        File.WriteAllText(path, "class One { }\n");
+        MainWindow window = Open(languageServer: false);
+        window.OpenFile("One.cs");
+        Ui.Settle();
+        Type(window, "public ");
+
+        File.WriteAllText(path, "class One { int disk; }\n");
+        foreach (string key in (string[])["ESCAPE", "ENTER"])
+        {
+            Ui.Press(ConflictAsked(window), key);
+            Ui.WaitFor(() => !window.OwnedWindows.OfType<ChoiceDialog>().Any(), $"{key} to close the File Cache Conflict question");
+            Assert.True(File.ReadAllText(path) == "class One { int disk; }\n" && Text(window) == "public class One { }\n" && window.EditorArea.Active!.IsModified,
+                $"{key} on the File Cache Conflict question was to keep both versions as they were; the disk holds '{File.ReadAllText(path)}' and the editor '{Text(window)}'");
+            window.Perform(AppActions.Save);
+        }
+
+        Ui.Click(Answer(ConflictAsked(window), "Keep Memory Changes"), settle: false);
+        Ui.WaitFor(() => File.ReadAllText(path) == "public class One { }\n", "Keep Memory Changes to write the edits over the disk's version");
+        Assert.False(window.EditorArea.Active!.IsModified);
+        window.Close();
+    }
+
+    private static ChoiceDialog ConflictAsked(MainWindow window)
+    {
+        Ui.WaitFor(() => window.OwnedWindows.OfType<ChoiceDialog>().Any(d => d.Title == "File Cache Conflict"), "the File Cache Conflict question");
+        return DialogButtonsTests.Check(window.OwnedWindows.OfType<ChoiceDialog>().Single());
+    }
+
+    private static Avalonia.Controls.Button Answer(ChoiceDialog dialog, string words) =>
+        Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(dialog).OfType<Avalonia.Controls.Button>().First(b => (string?)b.Content == words);
 
     [AvaloniaFact]
     public void A_file_with_unsaved_edits_deleted_on_disk_stays_open_and_saving_writes_it_back()
@@ -391,7 +426,7 @@ public sealed class FolderWatchTests : IDisposable
         window.AskConflict = document =>
         {
             asked.Add(document.Name);
-            return Task.FromResult(false);
+            return Task.FromResult<bool?>(false);
         };
         Type(window, "public ");
 
@@ -590,6 +625,149 @@ public sealed class FolderWatchTests : IDisposable
         window.Close();
     }
 
+    /// <summary>A file made in a new folder and one deleted while the watchers heard nothing, as changes the system dropped
+    /// without a word, are found once the watcher is asked to look again: the folders whose stamp moved are listed against
+    /// its record, and what came or went there is handed over, the whole folder never read again. Its watchers stop while
+    /// the files change, so the changes are lost as a dropped event loses them.</summary>
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Files_made_and_deleted_unheard_are_found_once_the_watcher_looks_again(bool eachFolder)
+    {
+        Write("One.cs", "class One { }\n");
+        Write("Old/Gone.cs", "class Gone { }\n");
+        MainWindow window = Open(eachFolder ? FolderWatching.Inotify : FolderWatching.WholeTree, languageServer: false);
+        Ui.WaitFor(() => window.FileIndex.Files.Contains(Path.Combine("Old", "Gone.cs")), "the folder's files in Go to File");
+        bool lost = false;
+        window.FolderWatcher!.Changed += (_, changes) => lost |= changes.Lost;
+        List<FileSystemWatcher> watchers = [.. window.FolderWatcher.Watches.Values];
+        watchers.ForEach(w => w.EnableRaisingEvents = false);
+        try
+        {
+            File.Delete(Path.Combine(folder, "Old", "Gone.cs"));
+            Write("Fresh/Fresh.cs", "class Fresh { }\n");
+
+            window.FolderWatcher.LookAgain();
+            Ui.WaitFor(() => window.FileIndex.Files.Contains(Path.Combine("Fresh", "Fresh.cs")) && !window.FileIndex.Files.Contains(Path.Combine("Old", "Gone.cs")),
+                () => $"Go to File to gain the file made and lose the one deleted unheard once the watcher looked again (it lists {string.Join(", ", window.FileIndex.Files)})");
+            Ui.WaitFor(() => window.ExplorerView.Tree.Rows.Any(r => r.Name == "Fresh"),
+                () => $"the folder made unheard in the Explorer (it shows {string.Join(", ", window.ExplorerView.Tree.Rows.Select(r => r.Name))})");
+            Assert.False(lost, "The folder's watcher read the whole folder again as it looked again, rather than the folders whose stamp moved");
+        }
+        finally
+        {
+            watchers.ForEach(w => w.EnableRaisingEvents = true);
+        }
+        window.Close();
+    }
+
+    /// <summary>A file made in a new folder and one deleted while the folder's watcher heard nothing, as changes the system
+    /// dropped without a word, are found once the window comes in front, as when a person comes back to it from a terminal:
+    /// Go to File and the Explorer gain the one and lose the other, and Git's status lists both. The watchers stop while the
+    /// files change, so the changes are lost as a dropped event loses them.</summary>
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Files_made_and_deleted_while_the_watcher_heard_nothing_are_found_once_the_window_comes_in_front(bool eachFolder)
+    {
+        Write("One.cs", "class One { }\n");
+        Write("Old/Gone.cs", "class Gone { }\n");
+        TestGit.Init(folder);
+        string made = Path.Combine("Fresh", "Fresh.cs");
+        string deleted = Path.Combine("Old", "Gone.cs");
+        MainWindow window = Open(eachFolder ? FolderWatching.Inotify : FolderWatching.WholeTree, languageServer: false);
+        Ui.WaitFor(() => window.FileIndex.Files.Contains(deleted) && window.Vcs.Branch == "main", "the folder's files in Go to File and its branch read");
+        List<FileSystemWatcher> watchers = [.. window.FolderWatcher!.Watches.Values];
+        watchers.ForEach(w => w.EnableRaisingEvents = false);
+        try
+        {
+            File.Delete(Path.Combine(folder, deleted));
+            Write(made, "class Fresh { }\n");
+            Ui.Settle();
+            Assert.False(window.FileIndex.Files.Contains(made), "Go to File listed a file made while the folder's watcher was deaf before the window came in front");
+
+            window.Activate();
+            Ui.WaitFor(() => window.FileIndex.Files.Contains(made) && !window.FileIndex.Files.Contains(deleted) && window.ExplorerView.Tree.Rows.Any(r => r.Name == "Fresh")
+                    && Listed(Passenger.Vcs.ChangeKind.Unversioned, made) && Listed(Passenger.Vcs.ChangeKind.Deleted, deleted),
+                () => $"the file made and the one deleted unheard to be found once the window came in front, where Go to File lists {string.Join(", ", window.FileIndex.Files)}, "
+                    + $"the Explorer shows {string.Join(", ", window.ExplorerView.Tree.Rows.Select(r => r.Name))} "
+                    + $"and Git's status lists {string.Join(", ", window.Vcs.Changes.Select(c => $"{Path.GetRelativePath(folder, c.Path)} ({c.Kind})"))}");
+        }
+        finally
+        {
+            watchers.ForEach(w => w.EnableRaisingEvents = true);
+        }
+        window.Close();
+
+        bool Listed(Passenger.Vcs.ChangeKind kind, string relative) => window.Vcs.Changes.Any(c => c.Kind == kind && PathNames.Same(c.Path, Path.Combine(folder, relative)));
+    }
+
+    /// <summary>A branch switched from outside while the watcher of Git's folder heard nothing is read once that watcher's
+    /// watch fails, which says at once that anything there may have moved, rather than at the next change it hears: in a
+    /// folder opened below the repository's top, whose Git folder is outside it and watched apart.</summary>
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_branch_switched_while_gits_watcher_heard_nothing_is_read_once_its_watch_fails(bool eachFolder)
+    {
+        Write("src/Shop.cs", "class Shop { }\n");
+        TestGit.Init(folder);
+        MainWindow window = Open(eachFolder ? FolderWatching.Inotify : FolderWatching.WholeTree, languageServer: false, opened: Path.Combine(folder, "src"));
+        Ui.WaitFor(() => window.Vcs.Branch == "main", () => $"the branch read (it is {window.Vcs.Branch})");
+        Passenger.App.Vcs.GitWatcher git = Assert.Single(window.Vcs.GitWatchers);
+        List<FileSystemWatcher> watchers = [.. git.Watches.Values];
+        watchers.ForEach(w => w.EnableRaisingEvents = false);
+        try
+        {
+            Git("switch", "-q", "-c", "switched");
+            Ui.Settle();
+            Assert.True(window.Vcs.Branch == "main", $"The branch switched while Git's watcher was deaf was read before its watch failed (it is {window.Vcs.Branch})");
+
+            RaiseError(git.Watches[git.Top], new IOException("The watch failed."));
+            Ui.WaitFor(() => window.Vcs.Branch == "switched", () => $"the branch switched unheard to be read once the watch of Git's folder failed (it is {window.Vcs.Branch})");
+        }
+        finally
+        {
+            watchers.ForEach(w => w.EnableRaisingEvents = true);
+        }
+        window.Close();
+    }
+
+    /// <summary>A folder of branches made while the watcher of Git's folder heard nothing, each folder watched on its own as
+    /// on Linux, is watched once the window comes in front: a branch made in it from outside after that joins the Git
+    /// window's branches. In a folder opened below the repository's top, whose Git folder is outside it and watched apart.</summary>
+    [AvaloniaFact]
+    public void A_folder_of_branches_made_while_gits_watcher_heard_nothing_is_watched_once_the_window_comes_in_front()
+    {
+        Write("src/Shop.cs", "class Shop { }\n");
+        TestGit.Init(folder);
+        MainWindow window = Open(FolderWatching.Inotify, languageServer: false, opened: Path.Combine(folder, "src"));
+        Ui.WaitFor(() => window.Vcs.Branch == "main", () => $"the branch read (it is {window.Vcs.Branch})");
+        Passenger.App.Vcs.GitWatcher git = Assert.Single(window.Vcs.GitWatchers);
+        window.Perform(AppActions.ShowGit);
+        Passenger.App.ToolWindows.BranchesPanel panel = window.GitBranches;
+        Ui.WaitFor(() => panel.Branches.Any(b => b.Ref.Name == "main"), () => $"the Git window's branches (they are {Branches()})");
+        List<FileSystemWatcher> watchers = [.. git.Watches.Values];
+        watchers.ForEach(w => w.EnableRaisingEvents = false);
+        try
+        {
+            Git("branch", "team/one");
+        }
+        finally
+        {
+            watchers.ForEach(w => w.EnableRaisingEvents = true);
+        }
+        window.Activate();
+        Ui.WaitFor(() => panel.Branches.Any(b => b.Ref.Name == "team/one"), () => $"the branch made unheard among the branches once the window came in front (they are {Branches()})");
+
+        Git("branch", "team/two");
+        Ui.WaitFor(() => panel.Branches.Any(b => b.Ref.Name == "team/two"), () => $"a branch made from outside in the folder of branches made unheard to join the branches, "
+            + $"where they are {Branches()} and Git's watcher watches {string.Join(", ", git.Watches.Keys.Select(k => Path.GetRelativePath(git.Top, k)))}");
+        window.Close();
+
+        string Branches() => string.Join(", ", panel.Branches.Select(b => b.Ref.Name));
+    }
+
     /// <summary>A file made, which Go to File lists, then deleted unheard, as a burst on a busy machine drops the deletion's
     /// event: the folder's watcher took the file into its record as it handed it over, so the listing after the burst
     /// finds it gone, and Go to File lets it go. A batch's hand-over, looking at what came or went in it on disk, needs
@@ -694,84 +872,6 @@ public sealed class FolderWatchTests : IDisposable
         window.Close();
     }
 
-    /// <summary>A file made in the folder joins Go to File, and one deleted leaves it, without a walk of the folder: over
-    /// 20,000 files each batch allocates (on every thread, the least of three) under 8 bytes for each file more than over
-    /// 2,000, where walking the folder again cost hundreds; and Go to File then lists what a walk lists, in its order.</summary>
-    [AvaloniaFact]
-    public void A_file_made_or_deleted_among_twenty_thousand_costs_go_to_file_what_it_does_among_two_thousand()
-    {
-        string few = PathNames.Canonical(TestFolders.Create("watch-few-"));
-        string many = PathNames.Canonical(TestFolders.Create("watch-many-"));
-        try
-        {
-            Areas(few, 10);
-            Areas(many, 100);
-            (long Made, long Deleted, TimeSpan Took) small = Batches(few, 2000);
-            (long Made, long Deleted, TimeSpan Took) large = Batches(many, 20_000);
-            TestContext.Current.TestOutputHelper?.WriteLine($"A file made: {small.Made / 1024:N0} KB over 2,000 files, {large.Made / 1024:N0} KB over 20,000; "
-                + $"deleted: {small.Deleted / 1024:N0} KB and {large.Deleted / 1024:N0} KB; the quickest batch {small.Took.TotalMilliseconds:N0} ms and {large.Took.TotalMilliseconds:N0} ms");
-            Assert.True(large.Made - small.Made < 8 * 18_000,
-                $"A file made among 20,000 allocated {large.Made / 1024:N0} KB on its way into Go to File, against {small.Made / 1024:N0} KB among 2,000: 8 bytes or more for each file more, as if the folder were walked again");
-            Assert.True(large.Deleted - small.Deleted < 8 * 18_000,
-                $"A file deleted among 20,000 allocated {large.Deleted / 1024:N0} KB on its way out of Go to File, against {small.Deleted / 1024:N0} KB among 2,000: 8 bytes or more for each file more");
-        }
-        finally
-        {
-            TestFolders.Delete(few);
-            TestFolders.Delete(many);
-        }
-
-        // Areas of 200 empty files each.
-        static void Areas(string root, int areas) => TestFolders.WriteAll(root, Enumerable.Range(0, areas * 200)
-            .Select(file => (Path.Combine($"Area{file / 200}", "Features", $"Feature{file / 200}x{file % 200}.cs"), string.Empty)));
-    }
-
-    /// <summary>What a file made and a file deleted in a folder allocate from the change to the IDE quiet again, the least of
-    /// three of each, and the quickest of them; each checked in Go to File, which then lists what a window opened on the
-    /// folder afresh lists.</summary>
-    private static (long Made, long Deleted, TimeSpan Took) Batches(string root, int files)
-    {
-        MainWindow window = new() { Width = 1200, Height = 800, StartsLanguageServer = false };
-        window.Show();
-        window.OpenFolder(root);
-        Ui.WaitFor(() => window.FileIndex.Count >= files && !window.FileIndex.IsWalking, $"the folder's {files} files indexed");
-        bool heard = false;
-        window.FolderWatcher!.Changed += (_, changes) => heard |= changes.Structure;
-        long made = long.MaxValue;
-        long deleted = long.MaxValue;
-        TimeSpan took = TimeSpan.MaxValue;
-        for (int time = 0; time < 3; time++)
-        {
-            string relative = Path.Combine("Area0", "Features", $"Made{time}.cs");
-            string file = Path.Combine(root, relative);
-            made = Math.Min(made, Batch(() => File.WriteAllText(file, "class Made { }\n")));
-            Assert.True(window.FileIndex.Files.Contains(relative), $"{relative} made is not in Go to File");
-            if (time < 2)
-            {
-                deleted = Math.Min(deleted, Batch(() => File.Delete(file)));
-                Assert.False(window.FileIndex.Files.Contains(relative), $"{relative} deleted is still in Go to File");
-            }
-        }
-        deleted = Math.Min(deleted, Batch(() => File.Delete(Path.Combine(root, "Area1", "Features", "Feature1x0.cs"))));
-        Assert.Equal(files, window.FileIndex.Count);
-        Assert.Equal(Walked(root), window.FileIndex.Files);
-        window.Close();
-        return (made, deleted, took);
-
-        long Batch(Action change)
-        {
-            Ui.Settle();
-            heard = false;
-            long before = GC.GetTotalAllocatedBytes(precise: true);
-            long began = Stopwatch.GetTimestamp();
-            change();
-            Ui.WaitFor(() => heard, "the folder watcher to hear of the change");
-            Ui.Settle();
-            took = TimeSpan.FromTicks(Math.Min(took.Ticks, Stopwatch.GetElapsedTime(began).Ticks));
-            return GC.GetTotalAllocatedBytes(precise: true) - before;
-        }
-    }
-
     /// <summary>Go to File follows what another program makes, moves, renames and deletes, files and folders, a link, a
     /// letter's case and a save's temporary file among them, to list after each what a window opened on the folder afresh
     /// lists, in the same order (which Find in Files searches in).</summary>
@@ -855,7 +955,7 @@ public sealed class FolderWatchTests : IDisposable
     }
 
     /// <summary>The files a window opened on a folder afresh lists for Go to File, in their order.</summary>
-    private static string[] Walked(string root)
+    internal static string[] Walked(string root)
     {
         MainWindow fresh = new() { Width = 800, Height = 600, StartsLanguageServer = false };
         fresh.Show();
@@ -1049,16 +1149,101 @@ public sealed class FolderWatchTests : IDisposable
 
     private void Write(string relative, string text) => TestFolders.Write(folder, relative, text);
 
-    /// <summary>A window on the folder, watching it the platform's way unless told another; with the C# language server
-    /// only where a test asks C# of it, so a project's folder starts and restores none for nothing.</summary>
-    private MainWindow Open(FolderWatching? watching = null, bool languageServer = true)
+    /// <summary>A window on the folder, or one <paramref name="opened"/> under it, watching it the platform's way unless told
+    /// another; with the C# language server only where a test asks C# of it, so a project's folder starts and restores none
+    /// for nothing.</summary>
+    private MainWindow Open(FolderWatching? watching = null, bool languageServer = true, string? opened = null)
     {
         MainWindow window = new() { Width = 1200, Height = 800, Watching = watching ?? FolderWatching.Platform, StartsLanguageServer = languageServer };
         window.Show();
-        window.OpenFolder(folder);
+        window.OpenFolder(opened ?? folder);
         Ui.Settle();
         return window;
     }
 
     private static string Text(MainWindow window) => window.EditorArea.CodeEditor.Document.Snapshot.ToString();
+}
+
+/// <summary>What a file made or deleted in the folder costs on its way into or out of Go to File, counted on every thread: the
+/// class runs alone, as whatever a class beside the window tests allocates meanwhile would count as the watcher's.</summary>
+[Collection(Alone.Name)]
+public sealed class FolderWatchBytesTests
+{
+    /// <summary>A file made in the folder joins Go to File, and one deleted leaves it, without a walk of the folder: over
+    /// 20,000 files each batch allocates (on every thread, the least of three) under 8 bytes for each file more than over
+    /// 2,000, where walking the folder again cost hundreds; and Go to File then lists what a walk lists, in its order.</summary>
+    [AvaloniaFact]
+    public void A_file_made_or_deleted_among_twenty_thousand_costs_go_to_file_what_it_does_among_two_thousand()
+    {
+        string few = PathNames.Canonical(TestFolders.Create("watch-few-"));
+        string many = PathNames.Canonical(TestFolders.Create("watch-many-"));
+        try
+        {
+            Areas(few, 10);
+            Areas(many, 100);
+            (long Made, long Deleted, TimeSpan Took) small = Batches(few, 2000);
+            (long Made, long Deleted, TimeSpan Took) large = Batches(many, 20_000);
+            TestContext.Current.TestOutputHelper?.WriteLine($"A file made: {small.Made / 1024:N0} KB over 2,000 files, {large.Made / 1024:N0} KB over 20,000; "
+                + $"deleted: {small.Deleted / 1024:N0} KB and {large.Deleted / 1024:N0} KB; the quickest batch {small.Took.TotalMilliseconds:N0} ms and {large.Took.TotalMilliseconds:N0} ms");
+            Assert.True(large.Made - small.Made < 8 * 18_000,
+                $"A file made among 20,000 allocated {large.Made / 1024:N0} KB on its way into Go to File, against {small.Made / 1024:N0} KB among 2,000: 8 bytes or more for each file more, as if the folder were walked again");
+            Assert.True(large.Deleted - small.Deleted < 8 * 18_000,
+                $"A file deleted among 20,000 allocated {large.Deleted / 1024:N0} KB on its way out of Go to File, against {small.Deleted / 1024:N0} KB among 2,000: 8 bytes or more for each file more");
+        }
+        finally
+        {
+            TestFolders.Delete(few);
+            TestFolders.Delete(many);
+        }
+
+        // Areas of 200 empty files each.
+        static void Areas(string root, int areas) => TestFolders.WriteAll(root, Enumerable.Range(0, areas * 200)
+            .Select(file => (Path.Combine($"Area{file / 200}", "Features", $"Feature{file / 200}x{file % 200}.cs"), string.Empty)));
+    }
+
+    /// <summary>What a file made and a file deleted in a folder allocate from the change to the IDE quiet again, the least of
+    /// three of each, and the quickest of them; each checked in Go to File, which then lists what a window opened on the
+    /// folder afresh lists.</summary>
+    private static (long Made, long Deleted, TimeSpan Took) Batches(string root, int files)
+    {
+        MainWindow window = new() { Width = 1200, Height = 800, StartsLanguageServer = false };
+        window.Show();
+        window.OpenFolder(root);
+        Ui.WaitFor(() => window.FileIndex.Count >= files && !window.FileIndex.IsWalking, $"the folder's {files} files indexed");
+        bool heard = false;
+        window.FolderWatcher!.Changed += (_, changes) => heard |= changes.Structure;
+        long made = long.MaxValue;
+        long deleted = long.MaxValue;
+        TimeSpan took = TimeSpan.MaxValue;
+        for (int time = 0; time < 3; time++)
+        {
+            string relative = Path.Combine("Area0", "Features", $"Made{time}.cs");
+            string file = Path.Combine(root, relative);
+            made = Math.Min(made, Batch(() => File.WriteAllText(file, "class Made { }\n")));
+            Assert.True(window.FileIndex.Files.Contains(relative), $"{relative} made is not in Go to File");
+            if (time < 2)
+            {
+                deleted = Math.Min(deleted, Batch(() => File.Delete(file)));
+                Assert.False(window.FileIndex.Files.Contains(relative), $"{relative} deleted is still in Go to File");
+            }
+        }
+        deleted = Math.Min(deleted, Batch(() => File.Delete(Path.Combine(root, "Area1", "Features", "Feature1x0.cs"))));
+        Assert.Equal(files, window.FileIndex.Count);
+        Assert.Equal(FolderWatchTests.Walked(root), window.FileIndex.Files);
+        window.Close();
+        return (made, deleted, took);
+
+        long Batch(Action change)
+        {
+            Ui.Settle();
+            heard = false;
+            long before = GC.GetTotalAllocatedBytes(precise: true);
+            long began = Stopwatch.GetTimestamp();
+            change();
+            Ui.WaitFor(() => heard, "the folder watcher to hear of the change");
+            Ui.Settle();
+            took = TimeSpan.FromTicks(Math.Min(took.Ticks, Stopwatch.GetElapsedTime(began).Ticks));
+            return GC.GetTotalAllocatedBytes(precise: true) - before;
+        }
+    }
 }

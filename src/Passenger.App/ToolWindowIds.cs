@@ -30,4 +30,9 @@ public static class ToolWindowIds
     public const string Migrations = "migrations";
     public const string Agent = "agent";
     public const string SqlServer = "sqlServer";
+    public const string StepLibrary = "stepLibrary";
+
+    /// <summary>Every id above, which a theme's layout names windows by.</summary>
+    public static IReadOnlySet<string> All { get; } = typeof(ToolWindowIds).GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+        .Where(f => f.IsLiteral).Select(f => (string)f.GetRawConstantValue()!).ToHashSet(StringComparer.Ordinal);
 }

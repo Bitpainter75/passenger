@@ -6,12 +6,14 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
+using Avalonia.Input.TextInput;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using Passenger.App;
 using Passenger.App.Docking;
 using Passenger.App.Run;
 using Passenger.App.Settings;
+using Passenger.App.ToolWindows;
 using Passenger.Core;
 using Passenger.Editor;
 using Passenger.Terminal;
@@ -43,8 +45,7 @@ public sealed class TerminalTests
             window.MouseDown(at, MouseButton.Left);
             window.MouseUp(at, MouseButton.Left, RawInputModifiers.Shift);
             Ui.Press(window, "ENTER");
-            WaitForLine(shell, text => text.Contains("^[[<0;1;1M", StringComparison.Ordinal), "the reported mouse press");
-            Assert.Contains(Lines(shell.Screen), text => text.Contains("^[[<0;1;1M^[[<0;1;1m", StringComparison.Ordinal));
+            WaitForLine(shell, text => text.Contains("^[[<0;1;1M^[[<0;1;1m", StringComparison.Ordinal), "the reported mouse press and its release, Shift held");
             Ui.Press(window, "control C");
             window.Close();
         }
@@ -310,7 +311,7 @@ public sealed class TerminalTests
         }
         WaitForLine(shell, "^[[A^[[1;5C^[[3~^[[Z", "the keys as the program read them");
         Ui.Press(window, "control C");
-        WaitForScreen(window, shell, s => s.CursorColumn > 0, "the prompt after the program");
+        WaitForPromptBelow(window, shell, "^[[A^[[1;5C^[[3~^[[Z");
 
         RunCase(window, "keys", "application");
         WaitForScreen(window, shell, s => s.ApplicationCursorKeys && s.Lines.Count(l => l.Text() == "keys?") == 2, "the program to wait in the application cursor mode");
@@ -347,7 +348,7 @@ public sealed class TerminalTests
             Press(window, keys);
             string legacy = $"^M^M{alt}^M^M{alt}^M^J^M";
             WaitForScreen(window, shell, s => Lines(s).Contains(legacy), $"the keys as xterm sends them, {legacy}, read by a program that never asked for more");
-            WaitForScreen(window, shell, s => s.CursorColumn > 0, "the prompt after the program");
+            WaitForPromptBelow(window, shell, legacy);
 
             RunCase(window, "keyboard", "5");
             WaitForLine(shell, "flags 1", "the program told disambiguation alone is in force");
@@ -357,6 +358,7 @@ public sealed class TerminalTests
             string kitty = "^[[13;2u^[[13;5u^[[13;3u^[[13;6u^[[13;4u^[[106;5u^M";
             WaitForScreen(window, shell, s => Lines(s).Contains(kitty), $"the keys as the kitty keyboard protocol sends them, {kitty}");
             WaitForScreen(window, shell, s => s.KeyboardFlags == 0, "the program's flags to go as it pops them");
+            WaitForPromptBelow(window, shell, kitty);
             Run(window, "echo after");
             WaitForLine(shell, "after", "a command Enter runs once the program has ended");
         }
@@ -377,6 +379,49 @@ public sealed class TerminalTests
         }
     }
 
+    /// <summary>The keypad's 5 reaches a program as X11 reports it, naming no key for its Begin: with Num Lock off as
+    /// NumPad5 with no symbol and no text, sent as xterm sends Begin until the program asks for the kitty keyboard
+    /// protocol, then as that protocol does; with Num Lock on as NumPad5 with its symbol 5, the 5 it types either way.</summary>
+    [AvaloniaFact]
+    public void The_keypads_5_as_X11_reports_it_reaches_a_program_as_Begin_with_Num_Lock_off_and_5_with_it_on()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows names the keypad's 5 with Num Lock off Clear, never NumPad5 with no symbol");
+        (MainWindow window, TerminalSession shell) = Open(TestFolders.Create("terminal-"));
+        try
+        {
+            const string read = "^[[E5";
+            RunCase(window, "keyboard");
+            WaitForLine(shell, "keyboard?", "the program to wait for its keys");
+            Press(window);
+            WaitForScreen(window, shell, s => Lines(s).Contains(read),
+                $"the keypad's Begin as xterm sends it, then its 5, {read}, read by a program that never asked for more: without it the program never hears Begin");
+            WaitForPromptBelow(window, shell, read);
+
+            RunCase(window, "keyboard", "1");
+            WaitForLine(shell, "flags 1", "the program told disambiguation is in force");
+            WaitForScreen(window, shell, s => s.KeyboardFlags == TerminalKeys.Disambiguate && Lines(s).Count(l => l == "keyboard?") == 2,
+                "the program to wait for its keys under the kitty keyboard protocol");
+            Press(window);
+            WaitForScreen(window, shell, s => Lines(s).Count(l => l == read) == 2,
+                $"the keypad's Begin, then its 5, {read}, under the kitty keyboard protocol: without it the program never hears Begin");
+        }
+        finally
+        {
+            window.Close();
+        }
+
+        static void Press(MainWindow window)
+        {
+            window.KeyPress(Key.NumPad5, RawInputModifiers.None, PhysicalKey.NumPad5, null);
+            window.KeyRelease(Key.NumPad5, RawInputModifiers.None, PhysicalKey.NumPad5, null);
+            window.KeyPress(Key.NumPad5, RawInputModifiers.None, PhysicalKey.NumPad5, "5");
+            window.KeyTextInput("5");
+            window.KeyRelease(Key.NumPad5, RawInputModifiers.None, PhysicalKey.NumPad5, "5");
+            window.KeyTextInput("q");
+            Ui.Settle();
+        }
+    }
+
     /// <summary>A program that asks for the mouse's moves reads each move into another cell as xterm reports it: under 1002
     /// (drags) a drag's press, its moves with the button held and its release, and nothing of a move with no button; under
     /// 1003 (every move) a move with no button too.</summary>
@@ -394,6 +439,7 @@ public sealed class TerminalTests
         Assert.Equal(["^[[<0;3;2M", "^[[<32;4;2M", "^[[<32;5;2M", "^[[<32;6;2M", "^[[<32;7;2M", "^[[<0;7;2m"], Reports(shell.Screen, 1));
         Ui.Press(window, "control C");
         WaitForScreen(window, shell, s => s.MouseTracking == MouseTracking.None && !s.SgrMouse, "the program to give the mouse back as it ends");
+        WaitForPromptBelow(window, shell, "^[[<0;7;2m");
 
         RunCase(window, "mouse", "1003");
         WaitForScreen(window, shell, s => s.MouseTracking == MouseTracking.Any && Lines(s).Count(l => l == "mouse?") == 2, "the program to ask for every move");
@@ -411,6 +457,8 @@ public sealed class TerminalTests
         TerminalScreen screen = shell.Screen;
         RunCase(window, "long", (screen.Columns + 4).ToString(CultureInfo.InvariantCulture));
         WaitForLine(shell, "200", "the program's lines");
+        // Cleared before the shell's prompt came, the screen would be left empty, the prompt coming after it.
+        WaitForPromptBelow(window, shell, "200");
         Assert.True(screen.Scrollback.Count > 0 && screen.LineAt(screen.FirstLine).Text() != "1",
             $"the program's first lines left nothing in the scrollback: it holds {screen.Scrollback.Count}");
         Assert.Contains(new string('0', screen.Columns + 4) + "7", Lines(screen));
@@ -422,6 +470,33 @@ public sealed class TerminalTests
         Run(window, "echo after");
         WaitForLine(shell, "after", "a command run after the clear");
         window.Close();
+    }
+
+    [AvaloniaFact]
+    public void A_terminal_shown_as_the_window_is_made_starts_its_shell_in_the_folder_the_window_starts_on()
+    {
+        string folder = TestFolders.Create("terminal-");
+        try
+        {
+            MainWindow window = new() { Width = 1200, Height = 800 };
+            // Shown before any folder is open, as a theme's layout or the person's kept one shows it.
+            window.ShowToolWindow(ToolWindowIds.Terminal);
+            window.TerminalPanel.Shell = OperatingSystem.IsWindows() ? ("cmd.exe", []) : ("/bin/sh", []);
+            Assert.True(Screenshot.Prepare(window, LaunchOptions.Parse([folder]), []), "The window never settled");
+            Ui.WaitFor(() => window.TerminalPanel.Active is { IsRunning: true }, "the shell to start");
+            TerminalSession shell = window.TerminalPanel.Active!;
+
+            Run(window, OperatingSystem.IsWindows() ? "echo %CD%" : "pwd");
+            string where = PathNames.Canonical(folder);
+            Ui.WaitFor(() => Screen(shell).Contains(where, StringComparison.Ordinal),
+                () => $"the shell shown as the window was made started outside the folder it opened on:\n{Screen(shell)}");
+            Assert.True(window.TerminalPanel.Tabs.Count == 1, $"{window.TerminalPanel.Tabs.Count} shells were started for the one window shown");
+            window.Close();
+        }
+        finally
+        {
+            TestFolders.Delete(folder);
+        }
     }
 
     [AvaloniaFact]
@@ -604,6 +679,8 @@ public sealed class TerminalTests
             {
                 OwnEnvironment.Set(variable, null);
             }
+            // Read again with neither given, so later tests in this process run as a start no agent made.
+            Passenger.App.Mcp.McpProxy.CheckVariable();
             TestFolders.Delete(folder);
         }
     }
@@ -789,6 +866,85 @@ public sealed class TerminalTests
         }
     }
 
+    /// <summary>Text an input method composes (kana here, as Chinese comes by Pinyin) is drawn at the cursor, underlined, two
+    /// columns a character, the input method's window opening at its cursor in it; none of it reaches the program, nor a
+    /// key the input method takes (Enter, a candidate's number on the keypad), until it is committed, and the program then
+    /// reads the committed text alone, under the kitty keyboard protocol as an agent's prompt asks, in the columns the
+    /// composition took; a composition left as the keys go elsewhere is dropped.</summary>
+    [AvaloniaFact]
+    public void Text_an_input_method_composes_shows_at_the_cursor_and_reaches_the_program_only_as_it_is_committed()
+    {
+        string folder = TestFolders.Create("terminal-");
+        try
+        {
+            (MainWindow window, TerminalSession shell) = Open(folder);
+            TerminalView view = window.TerminalPanel.View;
+            TextInputMethodClientRequestedEventArgs asked = new() { RoutedEvent = InputElement.TextInputMethodClientRequestedEvent };
+            view.RaiseEvent(asked);
+            TextInputMethodClient client = asked.Client ?? throw new InvalidOperationException("The terminal gave the input method no client, so it composes nothing there");
+            Assert.True(client.SupportsPreedit && client.TextViewVisual == view, "The terminal does not draw what the input method composes");
+
+            RunCase(window, "typed", "1");
+            WaitForScreen(window, shell, s => s.KeyboardFlags == TerminalKeys.Disambiguate && Lines(s).Contains("typed?"),
+                "the program to wait for what is typed under the kitty keyboard protocol");
+            TerminalScreen screen = shell.Screen;
+            long line = screen.ScreenTop + screen.CursorRow;
+            int column = screen.CursorColumn;
+            Point CellAt(int at)
+            {
+                Point centre = view.PointOf(line, at);
+                return new Point(centre.X - ((view.PointOf(line, at + 1).X - centre.X) / 2), centre.Y - ((view.PointOf(line + 1, at).Y - centre.Y) / 2));
+            }
+            void InputMethodAt(int at, string when)
+            {
+                Point expected = CellAt(at);
+                Point told = client.CursorRectangle.TopLeft;
+                Assert.True(Math.Abs(told.X - expected.X) < 0.01 && Math.Abs(told.Y - expected.Y) < 0.01,
+                    $"{when}, the input method's window would open at {told}, not at column {at} of the cursor's row, {expected}");
+            }
+            InputMethodAt(column, "Before a composition");
+
+            client.SetPreeditText("にほん");
+            Ui.Settle();
+            Color foreground = ((ISolidColorBrush)view.FindResource(window.ActualThemeVariant, TokenKeys.Terminal_Foreground)!).Color;
+            double underline = view.PointOf(line + 1, 0).Y - view.PointOf(line, 0).Y;
+            Color[] under = Ui.Pixels(window, [.. Enumerable.Range(column, 7).Select(at => view.TranslatePoint(view.PointOf(line, at) + new Point(0, (underline / 2) - 1.5), window)!.Value)]);
+            Assert.True(under[..6].All(c => c == foreground) && under[6] != foreground,
+                $"The composition is not drawn underlined over the six columns its three kana take from the cursor: [{string.Join(", ", under)}], the text {foreground}");
+            InputMethodAt(column + 6, "Past three kana");
+
+            foreach (PhysicalKey key in (PhysicalKey[])[PhysicalKey.Enter, PhysicalKey.NumPad1])
+            {
+                window.KeyPress(Key.ImeProcessed, RawInputModifiers.None, key, null);
+                window.KeyRelease(Key.ImeProcessed, RawInputModifiers.None, key, null);
+            }
+            client.SetPreeditText("日本", 1);
+            Ui.Settle();
+            InputMethodAt(column + 2, "At the second of two Han characters");
+            client.SetPreeditText(null);
+            window.KeyTextInput("日本");
+            Ui.Settle();
+            InputMethodAt(column, "Once the composition was committed, before the program moved the cursor");
+            client.SetPreeditText("ご");
+            Ui.Settle();
+            Ui.Click(window.GetVisualDescendants().OfType<TextBox>().First(t => t.IsEffectivelyVisible));
+            Ui.Click(view, view.PointOf(line, column + 10));
+            Assert.True(view.IsFocused && Ui.Pixel(window, view.TranslatePoint(view.PointOf(line, column) + new Point(0, (underline / 2) - 1.5), window)!.Value) != foreground,
+                "A composition left as the keys went elsewhere is still drawn once they came back");
+            window.KeyTextInput("q");
+            WaitForLine(shell, "U+65E5 U+672C", "the committed text alone as the program read it");
+            TerminalLine read = screen.LineAt(WaitForLine(shell, "日本|", "the committed text as the program wrote it back"));
+            Assert.True(read.Cells[0].Width == 2 && read.Cells[2].Rune == '本' && read.Cells[4].Rune == '|',
+                $"日本| took other columns than the composition did: [{string.Join("|", Enumerable.Range(0, 6).Select(read.TextOf))}]");
+            WaitForScreen(window, shell, s => s.KeyboardFlags == 0, "the program's flags to go as it pops them");
+            window.Close();
+        }
+        finally
+        {
+            TestFolders.Delete(folder);
+        }
+    }
+
     [AvaloniaFact]
     public void A_long_line_reads_whole_after_the_terminal_narrows_and_widens_again_and_the_prompt_keeps_its_cursor()
     {
@@ -847,6 +1003,7 @@ public sealed class TerminalTests
             TerminalView view = window.TerminalPanel.View;
             RunCase(window, "lines", "1", "300");
             WaitForLine(shell, "300", "the program's lines");
+            WaitForPromptBelow(window, shell, "300");
             // Output that comes once the person is reading back: the program waits for a file the test makes.
             RunCase(window, "wait", "go", "1001", "1100");
             Ui.WaitFor(() => shell.Screen.Lines[shell.Screen.CursorRow].Text().Length == 0, "the loop to start waiting");
@@ -886,6 +1043,7 @@ public sealed class TerminalTests
             RunCase(window, "lines", "1", text);
             WaitForLine(shell, text, "the program's lines");
             Assert.True(screen.Scrollback.Count == TerminalScreen.ScrollbackLimit, $"the scrollback holds {screen.Scrollback.Count} lines, short of its limit");
+            WaitForPromptBelow(window, shell, text);
             RunCase(window, "wait", "go", "20001", "20100");
             Ui.WaitFor(() => screen.Lines[screen.CursorRow].Text().Length == 0, "the loop to start waiting");
 
@@ -1139,6 +1297,76 @@ public sealed class TerminalTests
         window.Close();
     }
 
+    /// <summary>A program needing a terminal that is run in the Run window has the Run window say so, read from the exception
+    /// .NET writes there (Console.ReadKey refusing the window's pipe, on Windows Console.Clear before it), with Run in the
+    /// Terminal, which has its configuration use the terminal, kept with the folder, and runs it again in a tab of the
+    /// Terminal window, where it reads a key typed there.</summary>
+    [AvaloniaFact]
+    public void A_program_needing_a_terminal_in_the_Run_window_is_offered_one_and_reads_a_key_there()
+    {
+        string folder = TestFolders.Create("terminal-need-");
+        string settings = TestFolders.Create("settings-");
+        try
+        {
+            string project = PathNames.Canonical(Debugging.Helpers.Debuggees.CopyTo("TerminalConsoleApp", folder));
+            Restore.Run(folder);
+            MainWindow window = Keeping(folder, settings);
+            try
+            {
+                window.SetConfigurations([new RunConfiguration { Name = "Keys", Project = project }], "Keys");
+                Ui.Launched(window, window.RunAsync(), "the run to start", TimeSpan.FromMinutes(3));
+                Assert.Null(window.RunInTerminal);
+                OutputView console = window.BottomPanel.Run;
+                Ui.WaitFor(() => window.RunEnd.IsCompleted, () => $"the program to end in the Run window; it shows:\n{console.Document.Snapshot}");
+                string call = OperatingSystem.IsWindows() ? "Console.Clear" : "Console.ReadKey";
+                Assert.True(console.Offered == $"Keys needs a terminal for {call}: the Run window gives it pipes",
+                    $"The Run window does not offer a terminal, saying {console.Offered ?? "nothing"}, where it shows:\n{console.Document.Snapshot}");
+
+                Ui.ClickButton(console, "Run in the Terminal");
+                Ui.WaitFor(() => window.RunInTerminal is { IsRunning: true }, () => $"the program to run in the terminal: {Ui.Said(window)}", TimeSpan.FromMinutes(2));
+                TerminalSession program = window.RunInTerminal!.Session;
+                Assert.Equal("Keys", window.TerminalPanel.ActiveTab?.Name);
+                WaitForScreen(window, program, s => s.Lines.Any(l => l.Text() == "key?"), "the program to ask for a key in the terminal");
+                Ui.WaitFor(() => window.TerminalPanel.View.IsFocused, "the keys to go to the program");
+                window.KeyTextInput("q");
+                WaitForLine(program, line => line is "key? key q" or "key? qkey q", "the key as the program read it");
+                Assert.Equal(ConsoleKind.Terminal, window.Configuration?.Console);
+                Ui.Run(window, AppActions.Stop);
+                Ui.WaitFor(() => window.RunInTerminal is { IsRunning: false }, "the program to end once stopped");
+            }
+            finally
+            {
+                window.Close();
+            }
+            MainWindow again = Keeping(folder, settings);
+            try
+            {
+                Assert.True(again.Configuration is { Name: "Keys", Console: ConsoleKind.Terminal }, "Run in the Terminal was not kept with the configuration once the folder opened again");
+            }
+            finally
+            {
+                again.Close();
+            }
+        }
+        finally
+        {
+            TestFolders.Delete(folder);
+            TestFolders.Delete(settings);
+        }
+    }
+
+    /// <summary>A window keeping its state in <paramref name="settings"/> open on a folder, without the C# language server,
+    /// which a run asks nothing of.</summary>
+    private static MainWindow Keeping(string folder, string settings)
+    {
+        MainWindow window = new() { Width = 1200, Height = 800, StateFolder = settings, StartsLanguageServer = false };
+        window.Show();
+        window.KeepLayout();
+        window.OpenFolder(folder);
+        Ui.Settle();
+        return window;
+    }
+
     /// <summary>Stop ends a program running in the terminal and the program it started, and its tab says it was ended.</summary>
     [AvaloniaFact]
     public void Stop_ends_a_program_running_in_the_terminal_and_what_it_started()
@@ -1170,7 +1398,7 @@ public sealed class TerminalTests
     {
         string folder = TestFolders.Create("terminal-unset-");
         // GIT_PREFIX: of a git hook's variables, the one git itself never reads, should anything else started meanwhile get it.
-        string[] takenAway = ["GIT_PREFIX", "PASSENGER_RUN_TAKEN_AWAY"];
+        string[] takenAway = [GitVariables.Prefix, "PASSENGER_RUN_TAKEN_AWAY"];
         try
         {
             foreach (string variable in takenAway)
@@ -1211,6 +1439,53 @@ public sealed class TerminalTests
             {
                 OwnEnvironment.Set(variable, null);
             }
+            TestFolders.Delete(folder);
+        }
+    }
+
+    /// <summary>A program run in the terminal that writes a line and ends at once, as echo does within a millisecond of its
+    /// start, has that line on its tab above how it ended, every time: 300 runs, each in a tab of its own.</summary>
+    [AvaloniaFact]
+    public void A_program_that_writes_a_line_and_ends_at_once_has_it_on_its_tab_every_run()
+    {
+        const int Runs = 300;
+        const string Said = "said-at-once";
+        string folder = TestFolders.Create("terminal-at-once-");
+        try
+        {
+            string project = TestFolders.Write(folder, "Says/Says.csproj", TestProjects.Console());
+            TestFolders.Write(folder, "Says/Program.cs", "return 0;\n");
+            MainWindow window = Ui.OpenFolder(folder, languageServer: false);
+            window.SetConfigurations([new RunConfiguration
+            {
+                Name = "Echo",
+                Project = PathNames.Canonical(project),
+                Program = OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/echo",
+                Arguments = OperatingSystem.IsWindows() ? $"/c echo {Said}" : Said,
+                WorkingDirectory = folder,
+                BuildBeforeLaunch = false,
+                Console = ConsoleKind.Terminal,
+            }], "Echo");
+            List<int> lost = [];
+            string? firstLost = null;
+            for (int run = 0; run < Runs; run++)
+            {
+                Ui.Launched(window, window.RunAsync(), "the run to start", TimeSpan.FromMinutes(1));
+                Assert.True(window.RunInTerminal is not null, $"Run {run} did not run in the terminal: {Ui.Said(window)}");
+                TerminalRun started = window.RunInTerminal;
+                Assert.Equal(0, Ui.Await(started.Ended, "the program's end"));
+                if (!Lines(started.Session.Screen).Contains(Said))
+                {
+                    lost.Add(run);
+                    firstLost ??= Screen(started.Session);
+                }
+            }
+            Assert.True(lost.Count == 0, $"{lost.Count} of {Runs} runs lost the line the program wrote (runs {string.Join(", ", lost)}); "
+                + $"the first's tab shows only:\n{firstLost}");
+            window.Close();
+        }
+        finally
+        {
             TestFolders.Delete(folder);
         }
     }
@@ -1284,6 +1559,8 @@ public sealed class TerminalTests
         RawInputModifiers command = OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control;
         Run(window, "echo see https://example.com/terminal/docs. now");
         long line = WaitForLine(shell, "see https://example.com/terminal/docs. now", "the address");
+        // A full screen scrolls as the shell's prompt comes: the pointer goes to a line once the prompt is below it.
+        WaitForPromptBelow(window, shell, "see https://example.com/terminal/docs. now");
         Point at = view.TranslatePoint(view.PointOf(line, 10), window)!.Value;
         window.MouseMove(at);
         Ui.Settle();
@@ -1306,6 +1583,7 @@ public sealed class TerminalTests
         string longer = "https://example.com/" + new string('w', shell.Screen.Columns);
         Run(window, $"echo {longer}");
         long first = WaitForLine(shell, longer[..shell.Screen.Columns], "the long address's first row");
+        WaitForPromptBelow(window, shell, longer[..shell.Screen.Columns]);
         Point wrapped = view.TranslatePoint(view.PointOf(first + 1, 3), window)!.Value;
         window.MouseMove(wrapped, command);
         Ui.Settle();
@@ -1317,6 +1595,7 @@ public sealed class TerminalTests
 
         Run(window, "echo written to notes.txt:2 just now");
         long named = WaitForLine(shell, "written to notes.txt:2 just now", "the file's name");
+        WaitForPromptBelow(window, shell, "written to notes.txt:2 just now");
         Point file = view.TranslatePoint(view.PointOf(named, 13), window)!.Value;
         window.MouseMove(file);
         Ui.Settle();
@@ -1337,8 +1616,219 @@ public sealed class TerminalTests
         Ui.Settle();
         Run(window, "echo https://example.com/double-click");
         long doubleClick = WaitForLine(shell, "https://example.com/double-click", "the address to double-click");
+        WaitForPromptBelow(window, shell, "https://example.com/double-click");
         Ui.DoubleClick(view, view.PointOf(doubleClick, 13));
         Assert.Equal(copyOnSelection ? "example.com" : "clipboard kept", Ui.Clipboard(window));
+        window.Close();
+    }
+
+    /// <summary>Words a program links (OSC 8, as Spectre.Console's link markup writes them) are a link a click opens: each
+    /// run of words linked to a web address, its link ended by ST or by BEL, an id among its parameters passed over; words
+    /// linked to an address a click opens nothing for, and the words between, stay text.</summary>
+    [AvaloniaFact]
+    public void Words_a_program_links_to_a_web_address_are_a_link_a_click_opens()
+    {
+        (MainWindow window, TerminalSession shell) = Open(TestFolders.Create("terminal-"));
+        TerminalView view = window.TerminalPanel.View;
+        const string Written = "see the docs or this not mail end";
+        RunCase(window, "links");
+        long line = WaitForLine(shell, Written, "the program's linked words");
+        WaitForPromptBelow(window, shell, Written);
+        TerminalLink? Over(int column)
+        {
+            window.MouseMove(view.TranslatePoint(view.PointOf(line, column), window)!.Value);
+            Ui.Settle();
+            return view.HoveredLink;
+        }
+        void Click(int column)
+        {
+            Point at = view.TranslatePoint(view.PointOf(line, column), window)!.Value;
+            window.MouseMove(at);
+            window.MouseDown(at, MouseButton.Left);
+            window.MouseUp(at, MouseButton.Left);
+            Ui.Settle();
+        }
+
+        Assert.Equal((line, 4, line, 11, false), Over(6) is { } docs ? (docs.FromLine, docs.FromColumn, docs.ToLine, docs.ToColumn, docs.Hidden) : default);
+        Click(6);
+        Assert.Equal(["https://example.com/spectre"], window.Browsed.Select(u => u.AbsoluteUri));
+        Assert.Equal((line, 16, line, 19), Over(17) is { } other ? (other.FromLine, other.FromColumn, other.ToLine, other.ToColumn) : default);
+        Click(17);
+        Assert.Equal("https://example.com/other", window.Browsed[^1].AbsoluteUri);
+        Assert.True(Over(26) is null, "Words linked to a mail address are a link, which a click would hand the system to open");
+        Assert.True(Over(13) is null, "The words between two links are a link");
+        Click(13);
+        Assert.Equal(2, window.Browsed.Count);
+        window.Close();
+    }
+
+    /// <summary>Words a program links to a file address are a link only for a path on this machine, which a click opens
+    /// as the disk has it then: another host's file, a share's path by four slashes or by escaped backslashes are text, so
+    /// drawing them reaches no other machine; a file here opens in the editor, and one that is not there is said in the
+    /// status bar, nothing opened.</summary>
+    [AvaloniaFact]
+    public void Words_a_program_links_to_a_file_are_a_link_only_on_this_machine_and_a_click_asks_the_disk()
+    {
+        string folder = TestFolders.Create("terminal-");
+        string notes = Path.Combine(folder, "notes.txt");
+        File.WriteAllText(notes, "first\nsecond\n");
+        string missing = Path.Combine(folder, "lost.txt");
+        (MainWindow window, TerminalSession shell) = Open(folder);
+        TerminalView view = window.TerminalPanel.View;
+        const string Written = "far host unc shape esc path here notes gone lost";
+        RunCase(window, "file-links", notes, missing);
+        long line = WaitForLine(shell, Written, "the program's linked words");
+        WaitForPromptBelow(window, shell, Written);
+        TerminalLink? Over(int column)
+        {
+            window.MouseMove(view.TranslatePoint(view.PointOf(line, column), window)!.Value);
+            Ui.Settle();
+            return view.HoveredLink;
+        }
+        void Click(int column)
+        {
+            Point at = view.TranslatePoint(view.PointOf(line, column), window)!.Value;
+            window.MouseMove(at);
+            window.MouseDown(at, MouseButton.Left);
+            window.MouseUp(at, MouseButton.Left);
+            Ui.Settle();
+        }
+
+        Assert.True(Over(5) is null, "Words linked to another host's file are a link, so drawing them asks that host for it");
+        Assert.True(Over(14) is null, "Words linked to a share's path by four slashes are a link, so drawing them asks the share for it");
+        Assert.True(Over(24) is null, "Words linked to a share's path by escaped backslashes are a link, so drawing them asks the share for it");
+        Assert.Equal((line, 33, line, 37), Over(34) is { } here ? (here.FromLine, here.FromColumn, here.ToLine, here.ToColumn) : default);
+        Assert.Equal((line, 44, line, 47), Over(45) is { } gone ? (gone.FromLine, gone.FromColumn, gone.ToLine, gone.ToColumn) : default);
+        Click(45);
+        Assert.Equal($"The program's link names {missing}, which is not there", window.Status);
+        Assert.Null(window.EditorArea.Active);
+        Click(34);
+        Assert.Equal(PathNames.Canonical(notes), window.EditorArea.Active?.Path);
+        window.Close();
+    }
+
+    /// <summary>What a program's link opens is told from its address alone, the disk asked nothing, so a link to a file
+    /// that is not there is one as much as a link to one that is; an address of another host, of a share or a device, or
+    /// of a scheme a click opens nothing for is none.</summary>
+    [Fact]
+    public void What_a_programs_link_opens_is_told_from_its_address_alone()
+    {
+        string missing = Path.Combine(TestRun.Root, "no-such-folder", "no-such-file.txt");
+        Assert.Equal(new ProgramFileLink(missing), MainWindow.ProgramLink(new Uri(missing).AbsoluteUri));
+        Assert.Equal(new WebLink(new Uri("https://example.com/a")), MainWindow.ProgramLink("https://example.com/a"));
+        string here = OperatingSystem.IsWindows() ? @"C:\work\x.txt" : "/work/x.txt";
+        Assert.Equal(new ProgramFileLink(here), MainWindow.ProgramLink(OperatingSystem.IsWindows() ? "file://localhost/C:/work/x.txt" : "file://localhost/work/x.txt"));
+        foreach (string none in (string[])["file://otherhost/share/x", "file:////otherhost/share/y", "file:///%5C%5Cotherhost%5Cshare%5Cz", "file:///%2F%2Fotherhost/z",
+            "file://127.0.0.2/x", "file:///%5C%5C%3F%5CC:%5Cx", "file:///%5C%5C.%5Cpipe%5Cx", "file:///net/otherhost/x", "mailto:someone@example.com", "x-apple.systempreferences:", "not an address"])
+        {
+            Assert.True(MainWindow.ProgramLink(none) is null, $"{none} is a link, which drawing it or a click on it would take to another host, a share or a device");
+        }
+    }
+
+    /// <summary>What TerminalCases' found-paths case writes: paths naming another machine as program output writes them,
+    /// then a frame in a file of the folder's.</summary>
+    private static readonly string[] FoundPathLines =
+    [
+        @"   at Shop.Main() in \\otherhost\share\Program.cs:line 5",
+        "   at Shop.Main() in /_///otherhost/share/Program.cs:line 6",
+        "//otherhost/share/Program.cs(3,1): error CS1002: ; expected",
+        "/net/otherhost/share/Program.cs(4,1): error CS1002: ; expected",
+        @"/net/otherhost/share/Program.cs:12 and \\?\C:\share\Device.cs:4",
+        "   at: void Main._Process(double) (res:////otherhost/share/Main.cs:19)",
+        "see file://otherhost/share/x.cs or file:////otherhost/share/y.cs",
+        "   at Shop.Main() in src/Program.cs:line 2",
+    ];
+
+    /// <summary>A path naming another machine in a program's output (a share's by either slash, a device's, one under an
+    /// automount root), as a stack frame, a compiler's message, a Godot error's place or a file address writes it, is no
+    /// link and never asked of the disk as the terminal or the Run window shows it, so showing a line reaches no other
+    /// machine and mounts nothing; a frame in a file of the folder's still links it once the disk, asked off the window's
+    /// thread, has answered, and a click opens it at its line.</summary>
+    [AvaloniaFact]
+    public void A_path_naming_another_machine_in_the_terminal_or_a_console_is_never_asked_of_the_disk()
+    {
+        string folder = TestFolders.Create("terminal-");
+        Directory.CreateDirectory(Path.Combine(folder, "src"));
+        string program = Path.Combine(folder, "src", "Program.cs");
+        File.WriteAllText(program, "first\nsecond\n");
+        (MainWindow window, TerminalSession shell) = Open(folder);
+        TerminalView view = window.TerminalPanel.View;
+        RunCase(window, "found-paths");
+        long line = WaitForLine(shell, FoundPathLines[^1], "the frame in the folder's file");
+        WaitForPromptBelow(window, shell, FoundPathLines[^1]);
+        Ui.Settle();
+        Held(window.TerminalLinks!, "the terminal");
+
+        Point at = view.TranslatePoint(view.PointOf(line, FoundPathLines[^1].IndexOf("src/", StringComparison.Ordinal) + 2), window)!.Value;
+        window.MouseMove(at);
+        Ui.Settle();
+        Assert.True(view.HoveredLink is { Hidden: false }, "The pointer rests on the frame in the folder's file, but it is no link");
+        window.MouseDown(at, MouseButton.Left);
+        window.MouseUp(at, MouseButton.Left);
+        Ui.Settle();
+        Assert.Equal(PathNames.Canonical(program), window.EditorArea.Active?.Path);
+        Assert.Equal(1, window.EditorArea.CodeEditor.CaretPosition.Line);
+
+        Ui.Run(window, AppActions.ShowRun);
+        OutputView run = window.BottomPanel.Run;
+        run.Append(string.Concat(FoundPathLines.Select(said => said + "\n")));
+        Ui.Settle();
+        Held(run.Links, "the Run window");
+        Assert.True(window.Perform(AppActions.CloseAllTabs));
+        Ui.Settle();
+        Assert.Null(window.EditorArea.Active);
+        Ui.ClickLink(run, FoundPathLines[^1]);
+        Assert.Equal(PathNames.Canonical(program), window.EditorArea.Active?.Path);
+
+        string other = Path.Combine(folder, "src", "Other.cs");
+        File.WriteAllText(other, "first\n");
+        const string Later = "   at Shop.Later() in src/Other.cs:line 1";
+        int resolved = PathNames.ResolvedOnThisThread;
+        Assert.Empty(run.Links.In(Later));
+        Assert.True(resolved == PathNames.ResolvedOnThisThread, "Reading a line's links asked the disk on the window's thread, which a slow disk would hold");
+        Assert.Contains(Ui.LinksIn(run.Links, Later), l => l.Target is FileLink { Path: var linked } && PathNames.Same(linked, PathNames.Canonical(other)));
+        window.Close();
+
+        void Held(ConsoleLinks links, string where)
+        {
+            foreach (string said in FoundPathLines[..^1])
+            {
+                Assert.True(Ui.LinksIn(links, said) is not { Length: > 0 } found || found.All(l => l.Target is WebLink),
+                    $"{where} links {said}, which names another machine");
+            }
+            Assert.Contains(Ui.LinksIn(links, FoundPathLines[^1]), l => l.Target is FileLink { Path: var linked, Position.Line: 1 } && PathNames.Same(linked, PathNames.Canonical(program)));
+            string[] reached = [.. links.Asked.Where(p => p.StartsWith(@"\\", StringComparison.Ordinal) || p.StartsWith("//", StringComparison.Ordinal)
+                || p.StartsWith("/net/", StringComparison.OrdinalIgnoreCase))];
+            Assert.True(reached.Length == 0, $"Showing {where}'s lines asked the disk about {string.Join(", ", reached)}, which reaches another machine or mounts it");
+            Assert.Contains(links.Asked, p => PathNames.Same(PathNames.Canonical(p), PathNames.Canonical(program)));
+        }
+    }
+
+    /// <summary>Block elements fill the share of their cells they stand for, edge to edge: a bar of full blocks is one
+    /// colour from its first cell's top to its last cell's foot, never seamed between cells or short of the row's height as
+    /// the font's glyphs leave it, an upper half fills only its cell's top and a right half only its right.</summary>
+    [AvaloniaFact]
+    public void A_bar_of_block_elements_fills_its_cells_edge_to_edge_and_a_half_block_its_half()
+    {
+        (MainWindow window, TerminalSession shell) = Open(TestFolders.Create("terminal-"));
+        TerminalView view = window.TerminalPanel.View;
+        RunCase(window, "blocks");
+        long line = WaitForLine(shell, "██████ ▀▀▐", "the program's blocks");
+        WaitForPromptBelow(window, shell, "██████ ▀▀▐");
+        double width = view.PointOf(line, 1).X - view.PointOf(line, 0).X;
+        double height = view.PointOf(line + 1, 0).Y - view.PointOf(line, 0).Y;
+        Color background = ((ISolidColorBrush)view.FindResource(window.ActualThemeVariant, TokenKeys.Terminal_Background)!).Color;
+        Color At(int column, double across, double down) =>
+            Ui.Pixel(window, view.TranslatePoint(view.PointOf(line, column) + new Point(across * width, down * height), window)!.Value);
+        Color bar = At(2, 0, 0);
+        Assert.NotEqual(background, bar);
+        for (int column = 1; column < 6; column++)
+        {
+            Assert.True(At(column, -0.5, 0) == bar, $"The bar is seamed between its cells {column - 1} and {column}: {At(column, -0.5, 0)} there, {bar} in them");
+        }
+        Assert.True((At(3, 0, -0.45), At(3, 0, 0.45)) == (bar, bar), $"A full block falls short of its row's top or foot: {At(3, 0, -0.45)} and {At(3, 0, 0.45)}, {bar} between");
+        Assert.True((At(7, 0, -0.3), At(7, 0, 0.3)) == (bar, background), $"An upper half block does not fill its cell's top alone: {At(7, 0, -0.3)} above, {At(7, 0, 0.3)} below");
+        Assert.True((At(9, -0.3, 0), At(9, 0.3, 0)) == (background, bar), $"A right half block does not fill its cell's right alone: {At(9, -0.3, 0)} left, {At(9, 0.3, 0)} right");
         window.Close();
     }
 
@@ -1366,6 +1856,31 @@ public sealed class TerminalTests
             TerminalScreen screen = shell.Screen;
             throw new TimeoutException($"{waited.Message}. The terminal, {screen.Columns} by {screen.Rows} with its cursor at row {screen.CursorRow} "
                 + $"column {screen.CursorColumn}, {window.FocusManager?.GetFocusedElement()?.GetType().Name ?? "nothing"} having the keys, shows:\n{Screen(shell)}", waited);
+        }
+    }
+
+    /// <summary>Waits for the shell's prompt on a row below a program's last line, so the program has ended and its terminal
+    /// modes are the shell's again: a line typed sooner comes while the program still puts them back, unechoed and its
+    /// Enter a bare carriage return, or echoed ahead of the prompt, which comes with the line again a row lower once the
+    /// program has gone.</summary>
+    private static void WaitForPromptBelow(MainWindow window, TerminalSession shell, string last)
+    {
+        WaitForScreen(window, shell, PromptBelow, $"the shell's prompt below the program's last line, {last}");
+
+        bool PromptBelow(TerminalScreen screen)
+        {
+            if (screen.CursorColumn == 0)
+            {
+                return false;
+            }
+            for (long line = screen.ScreenTop + screen.CursorRow - 1; line >= screen.FirstLine; line--)
+            {
+                if (screen.LineAt(line).Text() == last)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
     }
 

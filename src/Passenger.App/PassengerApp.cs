@@ -75,11 +75,13 @@ public static class PassengerApp
     internal static void RunsForAgent() => ForAgent = true;
 
     /// <summary>The process runs on the headless platform, as <c>--mcp</c>, <c>--headless</c> and a screenshot choose it
-    /// before their window is made, and nothing it starts has a display to reach (<see cref="NoDisplay"/>).</summary>
+    /// before their window is made, and nothing it starts has a display to reach (<see cref="NoDisplay"/>). Nobody is here
+    /// to ask whether a folder is trusted: whoever started it chose the folder, so every one is (<see cref="WorkspaceTrust"/>).</summary>
     internal static void RunsHeadless()
     {
         headless = true;
         NoDisplay.Take();
+        WorkspaceTrust.TrustEverything();
     }
 
     /// <summary>A window came in front, or one closed: Discord follows the front one.</summary>
@@ -129,9 +131,8 @@ public static class PassengerApp
     }
 
     /// <summary>A window made as another is: its state folder, its layout and settings kept or not, its agents, its
-    /// Discord, its updates' feed and release notes, whether it starts the language server and whether anyone sees it,
-    /// beside it at its size;
-    /// shown with nothing open.</summary>
+    /// Discord, its updates' feed, clock and release notes, whether it starts the language server and whether anyone
+    /// sees it, beside it at its size; shown with nothing open.</summary>
     public static MainWindow NewWindow(MainWindow like)
     {
         UiThread.Check();
@@ -145,6 +146,8 @@ public static class PassengerApp
             StartsLanguageServer = like.StartsLanguageServer,
             Unseen = like.Unseen,
             Releases = like.Releases,
+            UpdateClock = like.UpdateClock,
+            UpdateLook = like.UpdateLook,
             Notes = like.Notes,
             DiscordIpc = like.DiscordIpc,
             DiscordIdleAfter = like.DiscordIdleAfter,
@@ -159,6 +162,7 @@ public static class PassengerApp
         if (like.KeepsLayout)
         {
             window.KeepLayout();
+            window.KeepPlacement();
         }
         if (like.KeepsSettings)
         {
@@ -270,7 +274,8 @@ public static class PassengerApp
     /// <summary>A person's launch another Passenger process handed over (<see cref="LaunchHandOff"/>): its files and caret
     /// go, once its folder is open, to the innermost window whose folder holds what it names, else its folder or workspace
     /// opens as File, Open opens one in a window of its own (the one in front when that has nothing open), a launch naming
-    /// nothing going to the window in front; that window comes forward, the person's own act. The answer the launch is told.</summary>
+    /// nothing going to the window in front, one asking for a new window making one with nothing open; that window comes
+    /// forward, the person's own act. The answer the launch is told.</summary>
     internal static string TakeLaunch(HandedLaunch launch)
     {
         UiThread.Check();
@@ -283,7 +288,11 @@ public static class PassengerApp
             .Where(w => w.TakesLaunches && w.FolderHeld is { } held && PathNames.Within(place, held))
             .MaxBy(w => w.FolderHeld!.Length);
         MainWindow into;
-        if (holding is not null && (launch.Workspace is null || holding.WorkspaceModel?.OpenedAs is { } opened && PathNames.Same(opened, launch.Workspace)))
+        if (launch.NewWindow)
+        {
+            into = NewWindow(from);
+        }
+        else if (holding is not null && (launch.Workspace is null || holding.WorkspaceModel?.OpenedAs is { } opened && PathNames.Same(opened, launch.Workspace)))
         {
             into = holding;
         }
@@ -295,7 +304,7 @@ public static class PassengerApp
         {
             into = from;
         }
-        IdeErrors.Write($"Launch: handed over for {launch.Workspace ?? launch.Folder ?? "no folder"}"
+        IdeErrors.Write($"Launch: handed over for {launch.Workspace ?? launch.Folder ?? (launch.NewWindow ? "a new window" : "no folder")}"
             + $"{(launch.Files.Count > 0 ? $", {Plural.Listed(launch.Files)}" : string.Empty)}, taken by the window on {into.FolderHeld ?? "no folder"}");
         into.OnceOpen(() => into.TakeLaunch(launch.Files, launch.Caret));
         BringForward(into);
@@ -324,8 +333,12 @@ public static class PassengerApp
     /// <summary>The window watching for updates, which hands it on as it closes.</summary>
     internal static void WatchUpdatesIn(MainWindow window) => updates = window;
 
+    /// <summary>The window watching for updates, or null before one does.</summary>
+    internal static MainWindow? UpdatesWatcher => updates;
+
     /// <summary>Once every window has closed: waits, for at most each one's limit, for what they started to end
-    /// (<see cref="MainWindow.Ended"/>), then installs an update made ready, last of all. It needs no UI thread.</summary>
+    /// (<see cref="MainWindow.Ended"/>), then installs an update made ready, and last writes the state's changes still
+    /// waiting, of the store's documents and any other (<see cref="State.StateStore.LandWaiting"/>). It needs no UI thread.</summary>
     public static void End()
     {
         updates?.HoldRelaysForUpdate();
@@ -337,6 +350,7 @@ public static class PassengerApp
         // Main's last act before the process ends, with no loop left to await on; a save still landing is never cut short.
         Synchronously.Run(() => Task.WhenAll([.. ending, FileText.AllLanded()]));
         updates?.InstallUpdate();
+        State.StateStore.LandWaiting();
     }
 
     /// <summary>Discord's presence for the windows looking for it at one place.</summary>

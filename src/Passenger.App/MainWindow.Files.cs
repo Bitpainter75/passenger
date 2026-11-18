@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Avalonia.Input.Platform;
 using Passenger.App.CSharp;
 using Passenger.App.Editors;
@@ -98,7 +97,8 @@ public partial class MainWindow
         return Navigation.SymbolPopup.KindBadge(kind == "Record" ? "R" : letter, brush);
     }
 
-    /// <summary>Makes a file in a folder (folders in its name made too) and opens it; null when it worked, else why not.</summary>
+    /// <summary>Makes a file in a folder (folders in its name made too) and opens it; null when it worked, else why not. One
+    /// made in a shared project's folder goes into its items file too, the two one command Undo takes back whole.</summary>
     public string? CreateFile(string into, string name, string text)
     {
         if (Invalid(name) is { } problem)
@@ -110,13 +110,25 @@ public partial class MainWindow
         {
             return $"{name} is already there";
         }
+        using CommandHistory.Recording? recording = InShared([path]) ? Editors.Commands.Record($"New File {Path.GetFileName(path)}") : null;
+        recording?.Made(path);
+        string? unshared = null;
         try
         {
-            Following([path], () => FileText.SaveNew(path, text));
+            Following([path], () =>
+            {
+                FileText.SaveNew(path, text);
+                unshared = recording is null ? null : IntoShared([PathNames.Canonical(path)], recording);
+            });
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
+            recording?.Unwritten(path);
             return NotMade(name, error);
+        }
+        if (unshared is not null)
+        {
+            status.Text = unshared;
         }
         OpenFile(path);
         Explorer.Reveal(PathNames.Canonical(path));
@@ -165,7 +177,8 @@ public partial class MainWindow
         bool basic = InVisualBasic(into);
         string extension = basic ? ".vb" : ".cs";
         string type = last.EndsWith(extension, StringComparison.OrdinalIgnoreCase) ? last[..^3] : last;
-        if (type.Length == 0 || !char.IsLetter(type[0]) && type[0] != '_' || !type.All(c => char.IsLetterOrDigit(c) || c == '_'))
+        if (basic ? type.Length == 0 || !char.IsLetter(type[0]) && type[0] != '_' || !type.All(c => char.IsLetterOrDigit(c) || c == '_')
+            : !Microsoft.CodeAnalysis.CSharp.SyntaxFacts.IsValidIdentifier(type))
         {
             return $"{type} is not a {(basic ? "Visual Basic" : "C#")} name";
         }
@@ -178,22 +191,26 @@ public partial class MainWindow
     }
 
     /// <summary>The namespace a folder's code takes: its project's evaluated RootNamespace (until it is evaluated, its
-    /// name, "Shop.App"), then the folders below, each name a C# identifier or dotted ones.</summary>
+    /// name, "Shop.App"), a shared project's as its items file names it, then the folders below, each name a C#
+    /// identifier or dotted ones.</summary>
     private string NamespaceFor(string into)
     {
         string full = PathNames.Canonical(into);
         ProjectModel? project = ProjectOf(full);
-        string root = project is null ? Path.GetFileName(Folder ?? full)
+        string? shared = project is null ? SharedItemsOf(Path.Combine(full, "_")) : null;
+        string root = shared is not null ? SharedProjects.RootNamespaceOf(shared) ?? Path.GetFileNameWithoutExtension(shared)
+            : project is null ? Path.GetFileName(Folder ?? full)
             : project.Property(Passenger.Host.CarriedProperties.RootNamespace) is { Length: > 0 } named ? named
             : Path.GetFileNameWithoutExtension(project.Path);
-        string below = project is null ? string.Empty : Path.GetRelativePath(project.Folder, full);
+        string below = shared is not null ? Path.GetRelativePath(Path.GetDirectoryName(shared)!, full)
+            : project is null ? string.Empty : Path.GetRelativePath(project.Folder, full);
         IEnumerable<string> parts = [root, .. below == "." ? [] : below.Split(Path.DirectorySeparatorChar)];
         return string.Join('.', parts.SelectMany(p => p.Split('.', StringSplitOptions.RemoveEmptyEntries)).Select(Identifier));
 
         static string Identifier(string part)
         {
-            string name = new([.. part.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_')]);
-            return char.IsDigit(name[0]) ? "_" + name : name;
+            string name = new([.. part.Select(c => AssistContext.IsIdentifierChar(c) ? c : '_')]);
+            return AssistContext.IsIdentifierStart(name[0]) ? name : "_" + name;
         }
     }
 
@@ -316,7 +333,7 @@ public partial class MainWindow
                 markup = named is null ? new([], null) : await TypeRename.MarkupAsync(session.Xaml, named, renamed, renameFiles: true);
                 return await WorkspaceEdits.StaleAsync(Editors, paths => server.HeldTextsAsync(paths), given, asked.Since, patience,
                         elsewhere: after => server.WrittenSinceAsync(after)) is { } stale
-                    ? ($"{type.Name} was not renamed: {stale}", given) : (null, given);
+                    ? (Refusals.NotRenamed(type.Name, stale), given) : (null, given);
             }, answer => answer.Item1 is not null);
             if (refused is not null || asked is null)
             {
@@ -343,13 +360,16 @@ public partial class MainWindow
                 () => applied = TypeRename.Apply(Editors, made, moves, asked, dropped, recording,
                     (moving, moved) => FollowMoved([.. moved.Select(m => (m.From, PathNames.Canonical(m.To)))], moving)));
             int files = applied?.Files ?? 0;
+            List<string> left = [];
+            string? ungodot = applied is { Moved.Count: > 0 } done ? await FollowGodotAsync([.. done.Moved.Select(m => (m.From, PathNames.Canonical(m.To)))], recording, left) : null;
             Explorer.Reveal(PathNames.Canonical(applied?.Moved.Any(m => PathNames.Same(m.From, path)) == true ? target : path));
             await WorkspaceEdits.LandedAsync(recording, waiting => status.Text = waiting);
             string unchanged = dropped.Count > 0 ? $", but not in {string.Join(", ", dropped)}: it was edited meanwhile" : string.Empty;
+            string unfollowed = ungodot is not null || left.Count > 0 ? $"; {ungodot ?? string.Join("; ", left)}" : string.Empty;
             // The code renamed with a file left unmoved is said as made: the box closes, and Undo takes it back whole.
             status.Text = applied?.Unmoved is { } unmoved
-                ? $"Renamed {type.Name} to {renamed} in {Plural.Of(files, "file")}{unchanged}{(unchanged.Length > 0 ? "; and" : ", but")} {unmoved}"
-                : $"Renamed {Path.GetFileName(path)} to {name}, and {type.Name} to {renamed} in {Plural.Of(files, "file")}{unchanged}";
+                ? $"Renamed {type.Name} to {renamed} in {Plural.Of(files, "file")}{unchanged}{(unchanged.Length > 0 ? "; and" : ", but")} {unmoved}{unfollowed}"
+                : $"Renamed {Path.GetFileName(path)} to {name}, and {type.Name} to {renamed} in {Plural.Of(files, "file")}{unchanged}{unfollowed}";
             return null;
         }
         catch (Lsp.LanguageServerFailed failed)
@@ -433,9 +453,14 @@ public partial class MainWindow
         {
             return failed;
         }
-        if (await FollowGodotAsync([.. moves.Select(m => (m.From, PathNames.Canonical(m.To)))], recording) is { } ungodot)
+        List<string> left = [];
+        if (await FollowGodotAsync([.. moves.Select(m => (m.From, PathNames.Canonical(m.To)))], recording, left) is { } ungodot)
         {
             status.Text = ungodot;
+        }
+        else if (left.Count > 0)
+        {
+            status.Text = string.Join("; ", left);
         }
         Explorer.Reveal(PathNames.Canonical(target));
         if (await recording.LandedAsync(waiting => status.Text = waiting) is [(string unfollowed, Exception refused), ..])
@@ -469,9 +494,9 @@ public partial class MainWindow
     /// changed once it is done.</summary>
     private List<string>? movesFollowed;
 
-    /// <summary>Delete on a project: it leaves the solution, and the solution filter open, as one command Undo takes back
-    /// whole, and its files stay. Moving its folder to the Trash is a second question, never asked of the open folder, a
-    /// folder above it, or one holding the solution or another of its projects.</summary>
+    /// <summary>Delete on a project: it leaves the solution, and the solution filter open, and its files stay. Moving its
+    /// folder to the Trash is a second question, never asked of the open folder, a folder above it, or one holding the
+    /// solution or another of its projects. Both are one command Undo takes back whole.</summary>
     public async Task<bool> RemoveProjectAsync(string project)
     {
         string name = Path.GetFileNameWithoutExtension(project);
@@ -484,16 +509,19 @@ public partial class MainWindow
         {
             return false;
         }
-        if (await EditSolutionAsync(file => SolutionEdits.RemoveProject(file, project), $"Removed {name} from {solution.Name}", [project], $"Remove Project {name}") is { } problem)
+        // Its second question waits between its writes, so of the open files it takes only what it writes.
+        using CommandHistory.Recording removing = Editors.Commands.RecordWrites($"Remove Project {name}");
+        if (await EditSolutionAsync(file => SolutionEdits.RemoveProject(file, project), $"Removed {name} from {solution.Name}", [project], $"Remove Project {name}", removing) is { } problem)
         {
-            status.Text = $"{name} could not be removed: {problem}";
+            status.Text = $"{name} could not be removed: {await removing.TakenBackAsync(problem)}";
             return false;
         }
         string own = PathNames.Canonical(Path.GetDirectoryName(project)!);
-        bool apart = !PathNames.Within(Folder, own) && !PathNames.Within(solution.Path, own) && !Projects.Any(p => PathNames.Within(p.Path, own));
+        bool apart = !PathNames.Within(Folder, own) && !PathNames.Within(solution.Path, own)
+            && !Projects.Any(p => !PathNames.Same(p.Path, project) && PathNames.Within(p.Path, own));
         if (apart && await Confirm("Delete Project Files", $"Also move the folder {Path.GetFileName(own)} and everything in it to the Trash?", "Move to Trash"))
         {
-            await DeleteAsync(own, asked: true);
+            await DeleteAsync(own, asked: true, within: removing);
         }
         return true;
     }
@@ -502,24 +530,26 @@ public partial class MainWindow
     /// to end.</summary>
     private static readonly TimeSpan BuildsGoing = TimeSpan.FromSeconds(60);
 
-    /// <summary>Deletes a file or folder to the Trash, as <see cref="DeleteAsync(IReadOnlyList{string}, bool)"/> deletes
-    /// several.</summary>
-    public Task<bool> DeleteAsync(string path, bool asked = false) => DeleteAsync([path], asked);
+    /// <summary>Deletes a file or folder to the Trash, as <see cref="DeleteAsync(IReadOnlyList{string}, bool, CommandHistory.Recording?)"/>
+    /// deletes several.</summary>
+    public Task<bool> DeleteAsync(string path, bool asked = false, CommandHistory.Recording? within = null) => DeleteAsync([path], asked, within);
 
     /// <summary>Deletes files and folders to the Trash, none inside another, once asked in one question (unless it was
-    /// already); their open files are saved first, and again just before they go with what was typed while it waited, so
-    /// the Trash and Local History have what the editor showed, and close once gone, or keep their tabs where one could not
-    /// go. The design-time builds of the projects in them are held off, those running waited out. True once all went.</summary>
-    public async Task<bool> DeleteAsync(IReadOnlyList<string> paths, bool asked = false)
+    /// already), as <see cref="TrashAsync"/> moves them, within the command given: true once all went.</summary>
+    public async Task<bool> DeleteAsync(IReadOnlyList<string> paths, bool asked = false, CommandHistory.Recording? within = null) =>
+        (asked || await Confirm("Delete", DeleteQuestion(paths), "Delete")) && await TrashAsync(paths, within) is [];
+
+    /// <summary>Moves files and folders to the Trash, none inside another, said in the status bar; their open files are
+    /// saved first, and again just before they go with what was typed while it waited, so the Trash and Local History have
+    /// what the editor showed, and close once gone. The design-time builds of the projects in them are held off, those
+    /// running waited out. Each goes in the command given, else, in a shared project's folder, in one of its own leaving
+    /// its items file, whose Undo takes it out of the Trash. Each that stayed, with why; null where an open file could not be saved.</summary>
+    private async Task<IReadOnlyList<(string Path, string Why)>?> TrashAsync(IReadOnlyList<string> paths, CommandHistory.Recording? within)
     {
         List<string> names = [.. paths.Select(Path.GetFileName).OfType<string>()];
-        if (!asked && !await Confirm("Delete", DeleteQuestion(paths), "Delete"))
-        {
-            return false;
-        }
         if (SavedFirst() is null)
         {
-            return false;
+            return null;
         }
         History.LocalHistory? keeping = session.LocalHistory;
         History.HistoryDeletion?[] taken = keeping is null ? new History.HistoryDeletion?[paths.Count] : await Task.WhenAll(paths.Select(keeping.CaptureAsync));
@@ -528,10 +558,14 @@ public partial class MainWindow
         // Nothing is awaited from here to the moves, so what was typed while it waited goes with them.
         if (SavedFirst() is not { } typed)
         {
-            return false;
+            return null;
         }
         List<string> gone = [];
         List<(string Path, string Why)> refused = [];
+        // What goes from a shared project's folder leaves its items file too, in a command whose Undo takes all it deleted
+        // back out of the Trash and writes the items file back.
+        using CommandHistory.Recording? sharing = within is null && InShared(paths) ? Editors.Commands.Record($"Delete {Plural.Listed(names)}") : null;
+        CommandHistory.Recording? recording = within ?? sharing;
         for (int i = 0; i < paths.Count; i++)
         {
             string path = paths[i];
@@ -541,8 +575,9 @@ public partial class MainWindow
             }
             try
             {
-                Trash.Move(path);
+                Trashed? went = Trash.Move(path);
                 gone.Add(path);
+                recording?.Deleted(path, went);
                 if (taken[i] is { } kept)
                 {
                     keeping!.Deleted(kept);
@@ -562,15 +597,19 @@ public partial class MainWindow
             CameOrWent(gone);
         }
         List<string> said = gone.Count == 0 ? [] : [$"Moved {Plural.Listed([.. gone.Select(Path.GetFileName).OfType<string>()])} to the Trash"];
+        if (recording is not null && gone.Count > 0 && OutOfShared(gone, recording) is { } unshared)
+        {
+            said.Add(unshared);
+        }
         // Those refused for one reason are named together, as the Trash refusing every one would be.
-        List<(string Name, string Why)> why = [];
+        List<(string Path, string Why)> why = [];
         foreach ((string path, string message) in refused)
         {
-            why.Add((Path.GetFileName(path), message + await HeldByAsync(path)));
+            why.Add((path, message + await HeldByAsync(path)));
         }
-        said.AddRange(why.GroupBy(r => r.Why).Select(g => $"{Plural.Listed([.. g.Select(r => r.Name)])} could not be deleted: {g.Key}"));
+        said.AddRange(why.GroupBy(r => r.Why).Select(g => $"{Plural.Listed([.. g.Select(r => Path.GetFileName(r.Path))])} could not be deleted: {g.Key}"));
         status.Text = string.Join("; ", said);
-        return refused.Count == 0;
+        return why;
 
         // The open files under the paths with edits not saved, each saved; null, said, when one could not be.
         List<string>? SavedFirst()
@@ -627,7 +666,7 @@ public partial class MainWindow
             catch (TimeoutException)
             {
                 // Gone or moved anyway: what the build writes after makes only build output there again.
-                IdeErrors.Write($"Waited {BuildsGoing.TotalSeconds:0} s for the design-time builds in {string.Join(", ", paths)} to end, and went on without them");
+                IdeErrors.Write($"Waited {Durations.Said(BuildsGoing)} for the design-time builds in {string.Join(", ", paths)} to end, and went on without them");
             }
         }
         return new LetGo(held, unwatched);
@@ -853,138 +892,4 @@ public partial class MainWindow
         name.Trim().Length == 0 ? "A name is needed"
         : name.IndexOfAny(Path.GetInvalidFileNameChars().Where(c => c is not '/' and not '\\').ToArray()) >= 0 || name.Contains("..", StringComparison.Ordinal) ? $"{name} is not a file name"
         : null;
-}
-
-/// <summary>The platform's Trash (the Recycle Bin on Windows), where a deleted file can still be found.</summary>
-public static class Trash
-{
-    /// <summary>A folder to use as the Trash instead of the platform's. The process's, as the system's Trash is every
-    /// window's.</summary>
-    public static string? Folder { get; set; }
-
-    public static void Move(string path)
-    {
-        if (OperatingSystem.IsWindows() && Folder is null)
-        {
-            if (Directory.Exists(path))
-            {
-                Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
-            }
-            else
-            {
-                Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(path, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
-            }
-            return;
-        }
-        if (OperatingSystem.IsLinux() && Folder is null)
-        {
-            MoveToFreedesktopTrash(path);
-            return;
-        }
-        if (OperatingSystem.IsMacOS() && Folder is null)
-        {
-            MoveToMacTrash(path);
-            return;
-        }
-        string bin = Folder ?? throw new PlatformNotSupportedException("Passenger knows no Trash on this system");
-        Directory.CreateDirectory(bin);
-        string name = Path.GetFileName(path);
-        string target = Path.Combine(bin, name);
-        // The Trash keeps what it already holds: a second one of a name takes the time beside it.
-        if (File.Exists(target) || Directory.Exists(target))
-        {
-            target = Path.Combine(bin, $"{Path.GetFileNameWithoutExtension(name)} {DateTime.Now:HH-mm-ss-fff}{Path.GetExtension(name)}");
-        }
-        MoveTo(path, target);
-    }
-
-    /// <summary>Foundation, where NSFileManager is: the runtime's own native library loads it today, which nothing promises.</summary>
-    private static readonly Lazy<nint> Foundation = new(() => NativeLibrary.Load("/System/Library/Frameworks/Foundation.framework/Foundation"));
-
-    /// <summary>The Trash as Finder fills it, through NSFileManager: it records where the item was, so Finder's Put Back
-    /// returns it, and an item on another volume goes to that volume's own Trash rather than across. What the system
-    /// refuses is an IOException in its own words.</summary>
-    [System.Runtime.Versioning.SupportedOSPlatform("macos")]
-    private static void MoveToMacTrash(string path)
-    {
-        _ = Foundation.Value;
-        // Its own pool, so what the calls autorelease goes now on any thread, with or without AppKit's run loop.
-        nint pool = MacObjC.Send(MacObjC.Class("NSAutoreleasePool"), MacObjC.Selector("new"));
-        try
-        {
-            nint named = MacObjC.Send(MacObjC.Class("NSString"), MacObjC.Selector("stringWithUTF8String:"), path);
-            nint url = MacObjC.Send(MacObjC.Class("NSURL"), MacObjC.Selector("fileURLWithPath:"), named);
-            nint manager = MacObjC.Send(MacObjC.Class("NSFileManager"), MacObjC.Selector("defaultManager"));
-            nint error = 0;
-            if (!MacObjC.Send(manager, MacObjC.Selector("trashItemAtURL:resultingItemURL:error:"), url, 0, ref error))
-            {
-                string? said = error == 0 ? null
-                    : Marshal.PtrToStringUTF8(MacObjC.Send(MacObjC.Send(error, MacObjC.Selector("localizedDescription")), MacObjC.Selector("UTF8String")));
-                throw new IOException(said ?? $"The Trash refused {Path.GetFileName(path)}");
-            }
-        }
-        finally
-        {
-            MacObjC.Send(pool, MacObjC.Selector("drain"));
-        }
-    }
-
-    /// <summary>The freedesktop.org Trash in the person's data folder (~/.local/share/Trash), as Linux's file managers
-    /// keep it: the item in files/ under a name of its own, beside a record in info/ of where it was and when it went,
-    /// from which they put it back. A folder on another file system is refused, as a move across them cannot be made.</summary>
-    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
-    private static void MoveToFreedesktopTrash(string path)
-    {
-        const UnixFileMode Private = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
-        string trash = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Trash");
-        Directory.CreateDirectory(trash, Private);
-        string files = Directory.CreateDirectory(Path.Combine(trash, "files"), Private).FullName;
-        string info = Directory.CreateDirectory(Path.Combine(trash, "info"), Private).FullName;
-        string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
-        string name = Path.GetFileName(full);
-        string where = string.Join('/', full.Split('/').Select(Uri.EscapeDataString));
-        for (int copy = 1; ; copy++)
-        {
-            string kept = copy == 1 ? name : $"{name}.{copy}";
-            string target = Path.Combine(files, kept);
-            string record = Path.Combine(info, kept + ".trashinfo");
-            if (Path.Exists(target))
-            {
-                continue;
-            }
-            // Made only when no record has the name, so two programs trashing at once never share one.
-            try
-            {
-                using FileStream claimed = new(record, FileMode.CreateNew, FileAccess.Write);
-                using StreamWriter writer = new(claimed);
-                writer.Write($"[Trash Info]\nPath={where}\nDeletionDate={DateTime.Now:yyyy-MM-ddTHH:mm:ss}\n");
-            }
-            catch (IOException) when (File.Exists(record))
-            {
-                continue;
-            }
-            try
-            {
-                MoveTo(full, target);
-            }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            {
-                File.Delete(record);
-                throw;
-            }
-            return;
-        }
-    }
-
-    private static void MoveTo(string path, string target)
-    {
-        if (Directory.Exists(path))
-        {
-            Directory.Move(path, target);
-        }
-        else
-        {
-            File.Move(path, target);
-        }
-    }
 }

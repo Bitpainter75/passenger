@@ -99,6 +99,214 @@ public sealed class SolutionViewTests : IDisposable
         window.Close();
     }
 
+    /// <summary>A file cut and pasted over one of its name, Replace agreed to, moves the one there to the Trash in the move's
+    /// command: one Undo moves the file back and brings the one it replaced back out of the Trash, each holding its own
+    /// text, and Redo replaces it again.</summary>
+    [AvaloniaFact]
+    public void A_file_pasted_over_one_of_its_name_replaces_it_in_the_moves_command_so_one_undo_puts_both_back()
+    {
+        const string Kept = "namespace Shop.Core.Catalog;\n\npublic class Order\n{\n}\n";
+        string order = Path.Combine(folder, "Shop.App", "Models", "Order.cs");
+        string catalog = Path.Combine(folder, "Shop.Core", "Catalog");
+        string there = Path.Combine(catalog, "Order.cs");
+        Write("Shop.Core/Catalog/Order.cs", Kept);
+        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
+        List<string> asked = [];
+        window.Confirm = (title, text, _) =>
+        {
+            asked.Add($"{title}: {text}");
+            return Task.FromResult(true);
+        };
+
+        Ui.ClickRow(window, Show(window, order));
+        Ui.Run(window, EditorActions.Cut);
+        Ui.ClickRow(window, Show(window, catalog));
+        Ui.Run(window, EditorActions.Paste);
+        Ui.WaitFor(() => window.Status?.StartsWith("Moved", StringComparison.Ordinal) == true, () => $"the paste over Order.cs: {window.Status}");
+        Assert.True(asked.Count == 1 && asked[0].StartsWith("Files Already Exist", StringComparison.Ordinal), $"The paste asked: {string.Join(" | ", asked)}");
+        Assert.True(!File.Exists(order) && File.ReadAllText(there) == Order, $"The paste did not put Shop.App's Order.cs in place of Catalog's: {window.Status}");
+        Assert.True(File.ReadAllText(Path.Combine(trash, "Order.cs")) == Kept, "The Order.cs replaced is not in the Trash");
+
+        asked.Clear();
+        Ui.ClickRow(window, Show(window, catalog));
+        Ui.Run(window, EditorActions.Undo);
+        Ui.WaitFor(() => window.Status?.StartsWith("Undone", StringComparison.Ordinal) == true || window.Status?.StartsWith("Cannot", StringComparison.Ordinal) == true,
+            () => $"Undo of the paste: {window.Status}");
+        Assert.True(asked.Count == 1 && asked[0].Contains("brings back Order.cs", StringComparison.Ordinal), $"Undo of the paste asked: {string.Join(" | ", asked)}");
+        Assert.True(File.Exists(order) && File.ReadAllText(order) == Order, $"Undo did not move Order.cs back to Models: {window.Status}");
+        Assert.True(File.Exists(there) && File.ReadAllText(there) == Kept, $"Undo did not bring back the Order.cs the paste replaced: {window.Status}");
+        Assert.Empty(Directory.EnumerateFileSystemEntries(trash));
+
+        Ui.ClickRow(window, Show(window, catalog));
+        Ui.Run(window, EditorActions.Redo);
+        Ui.WaitFor(() => window.Status?.StartsWith("Redone", StringComparison.Ordinal) == true || window.Status?.StartsWith("Cannot", StringComparison.Ordinal) == true,
+            () => $"Redo of the paste: {window.Status}");
+        Assert.True(!File.Exists(order) && File.ReadAllText(there) == Order, $"Redo did not replace Catalog's Order.cs again: {window.Status}");
+        Assert.True(File.ReadAllText(Path.Combine(trash, "Order.cs")) == Kept, "Redo did not move the Order.cs it replaces to the Trash again");
+        window.Close();
+    }
+
+    /// <summary>A file and a folder copied and pasted over a file and a folder of their names, Replace agreed to, are one
+    /// command with what they replaced: one Undo moves the copies to the Trash and brings back the two they replaced, each as
+    /// it was, Redo puts the copies back in their place, and an Undo once a copy has changed since is refused, saying so.</summary>
+    [AvaloniaFact]
+    public void A_file_and_a_folder_copied_over_ones_of_their_names_are_one_command_whose_undo_trashes_the_copies_and_brings_back_what_they_replaced()
+    {
+        const string Kept = "namespace Shop.Core.Catalog;\n\npublic class Order\n{\n}\n";
+        const string Old = "namespace Shop.Core.Catalog.Lines;\n\npublic class Old\n{\n}\n";
+        string models = Path.Combine(folder, "Shop.App", "Models");
+        string catalog = Path.Combine(folder, "Shop.Core", "Catalog");
+        Write("Shop.Core/Catalog/Order.cs", Kept);
+        Write("Shop.Core/Catalog/Lines/Old.cs", Old);
+        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
+        List<string> asked = [];
+        window.Confirm = (title, text, _) =>
+        {
+            asked.Add($"{title}: {text}");
+            return Task.FromResult(true);
+        };
+
+        ExplorerNode lines = Show(window, Path.Combine(models, "Lines"));
+        ExplorerNode order = Show(window, Path.Combine(models, "Order.cs"));
+        Ui.ClickRow(window, lines);
+        Ui.Click(Ui.Row(window.ExplorerView, order), modifiers: RawInputModifiers.Shift);
+        Ui.Run(window, EditorActions.Copy);
+        Ui.ClickRow(window, Show(window, catalog));
+        Ui.Run(window, EditorActions.Paste);
+        Ui.WaitFor(() => window.Status?.StartsWith("Copied", StringComparison.Ordinal) == true, () => $"the paste over Lines and Order.cs: {window.Status}");
+        Assert.True(asked.Count == 2 && asked.All(a => a.StartsWith("Files Already Exist", StringComparison.Ordinal)), $"The paste asked: {string.Join(" | ", asked)}");
+        Copied("The paste");
+        Assert.True(InTrash().SequenceEqual(["Old.cs", Kept]), $"The paste did not move the Order.cs and Lines it replaced to the Trash, which holds [{string.Join(", ", InTrash())}]");
+        Assert.Equal("Copy Lines and Order.cs to Catalog", window.EditorArea.Commands.ToUndo(null)?.Name);
+
+        asked.Clear();
+        Ended("Undo");
+        Assert.Equal(["Undo: Undo Copy Lines and Order.cs to Catalog? It brings back Lines and Order.cs, and deletes the copies Lines and Order.cs."], asked);
+        Assert.True(File.ReadAllText(Path.Combine(catalog, "Order.cs")) == Kept, $"Undo did not bring back the Order.cs the copy replaced: {window.Status}");
+        Assert.True(File.ReadAllText(Path.Combine(catalog, "Lines", "Old.cs")) == Old && !File.Exists(Path.Combine(catalog, "Lines", "Line.cs")),
+            $"Undo did not bring back the Lines the copy replaced, as it was: {window.Status}");
+        Assert.True(InTrash().SequenceEqual(["Line.cs", Order]), $"Undo did not move the copies to the Trash, which holds [{string.Join(", ", InTrash())}]");
+
+        asked.Clear();
+        Ended("Redo");
+        Assert.Equal(["Redo: Redo Copy Lines and Order.cs to Catalog? It brings back the copies Lines and Order.cs, and deletes Lines and Order.cs."], asked);
+        Copied("Redo");
+        Assert.True(InTrash().SequenceEqual(["Old.cs", Kept]), $"Redo did not move the Order.cs and Lines it replaces to the Trash again, which holds [{string.Join(", ", InTrash())}]");
+
+        asked.Clear();
+        File.WriteAllText(Path.Combine(catalog, "Lines", "Line.cs"), "changed\n");
+        Ended("Undo");
+        Assert.True(window.Status == $"Cannot undo Copy Lines and Order.cs to Catalog: {Path.Join("Lines", "Line.cs")} has been changed since",
+            $"Undo of a copy changed since says, whole: {window.Status}");
+        Assert.Empty(asked);
+        Assert.True(File.ReadAllText(Path.Combine(catalog, "Lines", "Line.cs")) == "changed\n" && File.ReadAllText(Path.Combine(catalog, "Order.cs")) == Order,
+            "The Undo refused took a copy changed since away");
+        window.Close();
+
+        // Undo or Redo from the Explorer, once it has ended either way.
+        void Ended(string verb)
+        {
+            Ui.ClickRow(window, Show(window, catalog));
+            Ui.Run(window, verb == "Undo" ? EditorActions.Undo : EditorActions.Redo);
+            Ui.WaitFor(() => window.Status?.StartsWith(verb == "Undo" ? "Undone" : "Redone", StringComparison.Ordinal) == true || window.Status?.StartsWith("Cannot", StringComparison.Ordinal) == true,
+                () => $"{verb} of the paste: {window.Status}");
+        }
+
+        void Copied(string after)
+        {
+            Assert.True(File.ReadAllText(Path.Combine(catalog, "Order.cs")) == Order && File.Exists(Path.Combine(catalog, "Lines", "Line.cs"))
+                && !File.Exists(Path.Combine(catalog, "Lines", "Old.cs")), $"{after} did not leave the copies of Order.cs and Lines in place of Catalog's: {window.Status}");
+            Assert.True(File.ReadAllText(Path.Combine(models, "Order.cs")) == Order && File.Exists(Path.Combine(models, "Lines", "Line.cs")), $"{after} changed what was copied");
+        }
+
+        // What the Trash holds: a file's text, a folder's files by name.
+        IEnumerable<string> InTrash() => Directory.EnumerateFileSystemEntries(trash)
+            .Select(e => Directory.Exists(e) ? string.Join(", ", Directory.EnumerateFiles(e).Select(Path.GetFileName).Order(StringComparer.Ordinal)) : File.ReadAllText(e))
+            .Order(StringComparer.Ordinal);
+    }
+
+    /// <summary>A folder whose copy fails partway (a file in it cannot be read) leaves nothing of the copy behind and no
+    /// command to undo, saying why: pasted where nothing has its name, and pasted over a folder of its name, Replace agreed
+    /// to, which comes back out of the Trash as it was.</summary>
+    [AvaloniaFact]
+    public void A_folder_copy_that_fails_partway_takes_back_what_it_copied_and_puts_back_what_it_replaced()
+    {
+        const string Old = "namespace Shop.Core.Catalog.Lines;\n\npublic class Old\n{\n}\n";
+        string lines = Path.Combine(folder, "Shop.App", "Models", "Lines");
+        string catalog = Path.Combine(folder, "Shop.Core", "Catalog");
+        Write("Shop.App/Models/Lines/Held.cs", "namespace Shop.App.Models.Lines;\n\npublic class Held\n{\n}\n");
+        Write("Shop.App/Models/Lines/Total.cs", "namespace Shop.App.Models.Lines;\n\npublic class Total\n{\n}\n");
+        Write("Shop.Core/Catalog/Lines/Old.cs", Old);
+        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
+        window.Confirm = (_, _, _) => Task.FromResult(true);
+        using IDisposable unreadable = Unreadable(Path.Combine(lines, "Held.cs"));
+
+        Pasted(Row(window, NodeKind.Project, "Shop.Core"));
+        Assert.False(Directory.Exists(Path.Combine(folder, "Shop.Core", "Lines")), $"The copy that failed left what it had copied of Lines: {window.Status}");
+
+        Pasted(Show(window, catalog));
+        Assert.True(File.ReadAllText(Path.Combine(catalog, "Lines", "Old.cs")) == Old && Directory.EnumerateFiles(Path.Combine(catalog, "Lines")).Count() == 1,
+            $"The copy that failed did not put back the Lines it replaced, as it was: {window.Status}");
+        Assert.Empty(Directory.EnumerateFileSystemEntries(trash));
+        Assert.Null(window.EditorArea.Commands.ToUndo(null));
+        window.Close();
+
+        void Pasted(ExplorerNode into)
+        {
+            Ui.ClickRow(window, Show(window, lines));
+            Ui.Run(window, EditorActions.Copy);
+            Ui.ClickRow(window, into);
+            Ui.Run(window, EditorActions.Paste);
+            Ui.WaitFor(() => window.Status?.StartsWith("Lines could not be copied: ", StringComparison.Ordinal) == true, () => $"the paste to say Lines could not be copied: {window.Status}");
+        }
+    }
+
+    /// <summary>Two files of one name from two folders moved or copied into a third are refused before either goes, saying
+    /// which: the second would replace the first, which no Undo could bring back.</summary>
+    [AvaloniaFact]
+    public void Two_files_of_one_name_put_into_one_folder_are_refused_before_either_goes()
+    {
+        const string Kept = "namespace Shop.Core.Catalog;\n\npublic class Order\n{\n}\n";
+        string order = Path.Combine(folder, "Shop.App", "Models", "Order.cs");
+        string other = Path.Combine(folder, "Shop.Core", "Catalog", "Order.cs");
+        string lines = Path.Combine(folder, "Shop.App", "Models", "Lines");
+        Write("Shop.Core/Catalog/Order.cs", Kept);
+        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
+        List<string> asked = [];
+        window.Confirm = (title, _, _) =>
+        {
+            asked.Add(title);
+            return Task.FromResult(true);
+        };
+        foreach (bool copy in (bool[])[false, true])
+        {
+            Assert.Empty(Ui.Await(window.PutAsync([order, other], lines, copy), copy ? "the copy" : "the move"));
+            Assert.Equal($"Nothing was {(copy ? "copied" : "moved")}: Order.cs from Models and Order.cs from Catalog would each be Order.cs in Lines", window.Status);
+        }
+        Assert.Empty(asked);
+        Assert.True(File.ReadAllText(order) == Order && File.ReadAllText(other) == Kept && !File.Exists(Path.Combine(lines, "Order.cs")), "A refused put moved or copied a file");
+        Assert.Null(window.EditorArea.Commands.ToUndo(null));
+        window.Close();
+    }
+
+    /// <summary>A file a copy cannot read until disposed: its mode taken away on macOS and Linux, held open unshared on Windows.</summary>
+    private static IDisposable Unreadable(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+        }
+        UnixFileMode mode = File.GetUnixFileMode(path);
+        File.SetUnixFileMode(path, UnixFileMode.None);
+        return new Restored(() =>
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(path, mode);
+            }
+        });
+    }
+
     /// <summary>Every file of a folder of 400 chosen and cut allocates on the UI thread, for each file, under twice what every
     /// file of a folder of 40 does, each row dimmed and a file's dependent going with it.</summary>
     [Gate]
@@ -405,7 +613,7 @@ public sealed class SolutionViewTests : IDisposable
         window.AskConflict = document =>
         {
             conflicts.Add(document.Name);
-            return Task.FromResult(false);
+            return Task.FromResult<bool?>(false);
         };
 
         window.OpenFile(app);
@@ -584,13 +792,13 @@ public sealed class SolutionViewTests : IDisposable
 
         Ui.ClickRow(window, Show(window, a));
         Ui.Press(window, OperatingSystem.IsMacOS() ? "meta D" : "control D");
-        Ui.Landed(() => window.Frontmost is DiffWindow, "the diff window");
-        DiffView view = ((DiffWindow)window.Frontmost).View;
+        IDiffHost diff = OpenDiffs.Landed(window, "the diff of the file and the one picked");
+        DiffView view = OpenDiffs.ViewOf(diff);
         Assert.Equal("one\ntwo\nthree\n", view.Left.Document.Snapshot.ToString());
         Assert.Equal("one\n2\nthree\nfour\n", view.Right.Document.Snapshot.ToString());
         Assert.Equal([new DiffHunk(1, 1, 1, 1), new DiffHunk(3, 0, 3, 1)], view.Hunks);
-        Assert.Equal("a.txt vs b.txt", window.Frontmost.Title);
-        window.Frontmost.Close();
+        Assert.Equal("a.txt vs b.txt", OpenDiffs.TitleOf(diff));
+        diff.Close();
         Ui.Settle();
 
         ExplorerNode second = Show(window, b);
@@ -600,11 +808,11 @@ public sealed class SolutionViewTests : IDisposable
         window.ExplorerView.Rows().RaiseEvent(new ContextRequestedEventArgs());
         Ui.Settle();
         Ui.Choose(window.ExplorerView.OpenMenu ?? throw new Xunit.Sdk.XunitException("The menu key opened no menu on the two files"), "Tools", "Compare Files");
-        Ui.Landed(() => window.Frontmost is DiffWindow, "the diff window of the two files chosen");
-        view = ((DiffWindow)window.Frontmost).View;
+        diff = OpenDiffs.Landed(window, "the diff of the two files chosen");
+        view = OpenDiffs.ViewOf(diff);
         Assert.Equal("one\ntwo\nthree\n", view.Left.Document.Snapshot.ToString());
         Assert.Equal("one\n2\nthree\nfour\n", view.Right.Document.Snapshot.ToString());
-        window.Frontmost.Close();
+        diff.Close();
         Ui.Settle();
 
         if (!OperatingSystem.IsWindows())
@@ -653,6 +861,31 @@ public sealed class SolutionViewTests : IDisposable
         Assert.Equal("order.cs is already there", Ui.Await(window.RenameWithTypeAsync(order, "order.cs", new TypeRename.FileType("Order", order, type), renameType: true), "the rename with its type"));
         Assert.Equal(Order, File.ReadAllText(order));
         Assert.Equal("// Another file than Order.cs here.\n", File.ReadAllText(sibling));
+        window.Close();
+    }
+
+    /// <summary>An Aspire AppHost's row stands apart from the projects beside it: once MSBuild evaluates it as one, the
+    /// Solution view draws it with the Aspire window's icon, in its project file's tint, and a library keeps its project
+    /// file's icon.</summary>
+    [AvaloniaFact]
+    public void An_Aspire_AppHost_is_drawn_with_the_Aspire_windows_icon_and_a_library_with_its_project_files()
+    {
+        Write("Shop.AppHost/Shop.AppHost.csproj", TestProjects.Console("<IsAspireHost>true</IsAspireHost>"));
+        Write("Shop.AppHost/Program.cs", "System.Console.WriteLine(\"Host\");\n");
+        Write("Shop.Core/Shop.Core.csproj", TestProjects.Library());
+        Write("Shop.slnx", "<Solution>\n  <Project Path=\"Shop.AppHost/Shop.AppHost.csproj\" />\n  <Project Path=\"Shop.Core/Shop.Core.csproj\" />\n</Solution>\n");
+        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
+        Ui.WaitFor(() => window.Projects.Count(p => p.IsEvaluated) == 2, "MSBuild to evaluate Shop.AppHost and Shop.Core");
+        Assert.True(window.Projects.Single(p => p.Name == "Shop.AppHost").IsAspireHost, "Shop.AppHost, setting IsAspireHost, is not evaluated as an AppHost");
+
+        object projectTint = Resource(TokenKeys.FileIcon_Blue);
+        Ui.WaitFor(() => ReferenceEquals(Resource(IconKeys.Aspire), Drawn(window, Row(window, NodeKind.Project, "Shop.AppHost")).Data),
+            "The Solution view to draw Shop.AppHost with the Aspire window's icon");
+        Assert.True(ReferenceEquals(projectTint, Drawn(window, Row(window, NodeKind.Project, "Shop.AppHost")).Foreground),
+            "The Solution view draws Shop.AppHost in another colour than a .csproj's");
+        (Avalonia.Media.Geometry? Data, Avalonia.Media.IBrush? Foreground) library = Drawn(window, Row(window, NodeKind.Project, "Shop.Core"));
+        Assert.True(ReferenceEquals(Resource("FileIcon.Stack"), library.Data), "The Solution view no longer draws Shop.Core, a library, with a project file's icon");
+        Assert.True(ReferenceEquals(projectTint, library.Foreground), "The Solution view draws Shop.Core in another colour than a .csproj's");
         window.Close();
     }
 
@@ -839,6 +1072,32 @@ public sealed class SolutionViewTests : IDisposable
             window.ExplorerView.Tree.Rows.First(r => r.Kind == NodeKind.Dependencies && r.Owner == Row(window, NodeKind.Project, project).Path).IsExpanded ? "open" : "closed";
         Assert.True((Opened("Shop.App"), Opened("Shop.Core")) == ("closed", "open"),
             $"After a file was added, Shop.App's Dependencies are {Opened("Shop.App")} and Shop.Core's {Opened("Shop.Core")}, where only Shop.Core's were open");
+        window.Close();
+    }
+
+    /// <summary>A double click on a folder's chevron is two clicks on it, opening and closing the folder, and never opens the
+    /// file chosen before, which the list's double click would (#1782).</summary>
+    [AvaloniaFact]
+    public void A_double_click_on_a_folders_chevron_opens_and_closes_it_and_never_opens_the_file_chosen()
+    {
+        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
+        ExplorerView explorer = window.ExplorerView;
+        ExplorerNode order = Show(window, Path.Combine(folder, "Shop.App", "Models", "Order.cs"));
+        ExplorerNode catalog = Show(window, Path.Combine(folder, "Shop.Core", "Catalog"));
+        if (catalog.IsExpanded)
+        {
+            explorer.Tree.Toggle(catalog);
+            Ui.Settle();
+        }
+        Ui.ClickRow(window, order);
+        Assert.Empty(window.EditorArea.Documents);
+
+        Ui.DoubleClick(Ui.Row(explorer, catalog).GetVisualDescendants().OfType<RowGlyphs>().Single(), new Point(9, ListRow.Height / 2));
+        Assert.True(window.EditorArea.Documents.Count == 0,
+            $"A double click on Catalog's chevron opened [{string.Join(", ", window.EditorArea.Documents.Select(d => Path.GetFileName(d.Path)))}], the file chosen before");
+        Assert.False(catalog.IsExpanded, "A double click on Catalog's chevron, two clicks on it, left it open");
+        Assert.True(explorer.SelectedNodes is [{ } still] && still == order,
+            $"A double click on Catalog's chevron chose [{string.Join(", ", explorer.SelectedNodes.Select(n => n.Name))}], where Order.cs was chosen");
         window.Close();
     }
 

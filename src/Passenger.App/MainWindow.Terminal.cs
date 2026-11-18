@@ -17,6 +17,7 @@ public partial class MainWindow
     {
         Dock.Add(new Docking.ToolWindow(ToolWindowIds.Terminal, "Terminal", IconKeys.Terminal, MakeTerminal, Docking.ToolAnchor.BottomLeft)
         {
+            Serves = ToolWindowServes.EveryFolder,
             Action = AppActions.ShowTerminal,
             Tools = () => terminal?.HeaderTools,
             Menus = [new MenuPlace("Tools", 0, 2)],
@@ -36,7 +37,7 @@ public partial class MainWindow
     /// <summary>The Terminal window's view, as it is first shown or asked for, with the settings in force then.</summary>
     private ToolWindows.TerminalPanel MakeTerminal()
     {
-        ToolWindows.TerminalPanel panel = terminal = new ToolWindows.TerminalPanel(() => Folder ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        ToolWindows.TerminalPanel panel = terminal = new ToolWindows.TerminalPanel(() => FolderHeld ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         panel.ActionRequested += (_, action) => Request(action);
         panel.Emptied += (_, _) =>
         {
@@ -110,7 +111,7 @@ public partial class MainWindow
             }
             return;
         }
-        ShowToolWindow(ToolWindowIds.Terminal);
+        Dock.Bring(ToolWindowIds.Terminal);
         TerminalPanel.FocusView();
     }
 

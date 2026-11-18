@@ -124,7 +124,7 @@ public sealed class TestingPlatformRunner : ITestRunner
                 break;
             }
         }
-        IdeLog.Write(IdeLog.Tests, $"Run {(summary.Canceled ? "stopped" : summary.Aborted ? "aborted" : "complete")}: {Plural.Of(summary.Outcomes.Count, "result")} in {summary.Elapsed.TotalSeconds:0.00} s"
+        IdeLog.Write(IdeLog.Tests, $"Run {(summary.Canceled ? "stopped" : summary.Aborted ? "aborted" : "complete")}: {Plural.Of(summary.Outcomes.Count, "result")} in {Durations.Said(summary.Elapsed)}"
             + (summary.Error is { } failed ? $": {failed}" : string.Empty));
         return summary;
     }
@@ -263,7 +263,7 @@ public sealed class TestingPlatformRunner : ITestRunner
             {
                 DisplayName = node.DisplayName,
                 Message = node.Message,
-                StackTrace = node.StackTrace,
+                StackTrace = FailureStacks.Once(node.StackTrace, node.Message),
                 Output = node.Output,
                 Attachments = node.Attachments,
             }
@@ -362,7 +362,7 @@ public sealed class TestingPlatformRunner : ITestRunner
             int id;
             if (debugger is null)
             {
-                ProcessStartInfo start = ChildProcesses.Command(Dotnet.Host(), arguments, folder, environment);
+                ProcessStartInfo start = ChildProcesses.Command(Dotnet.Host(folder), arguments, folder, environment);
                 start.RedirectStandardOutput = true;
                 start.RedirectStandardError = true;
                 try
@@ -379,7 +379,7 @@ public sealed class TestingPlatformRunner : ITestRunner
             }
             else
             {
-                id = await debugger.LaunchAsync(new TestHostStart(Dotnet.Host(), arguments, folder, environment ?? new Dictionary<string, string>(), assembly.Framework));
+                id = await debugger.LaunchAsync(new TestHostStart(Dotnet.Host(folder), arguments, folder, environment ?? new Dictionary<string, string>(), assembly.Framework));
             }
             TcpClient client;
             try
@@ -466,7 +466,7 @@ public sealed class TestingPlatformRunner : ITestRunner
             TimeSpan limit = stopped ? StopLimit : ExitLimit;
             if (!await Exited(limit) && (process is not null || stopped))
             {
-                IdeLog.Write(IdeLog.Tests, $"{name} (process {processId}) had not exited {limit.TotalSeconds:0} s after it was told to, and is ended");
+                IdeLog.Write(IdeLog.Tests, $"{name} (process {processId}) had not exited {Durations.Said(limit)} after it was told to, and is ended");
                 End(process, processId);
             }
             peer.Dispose();
@@ -541,7 +541,7 @@ public sealed class TestingPlatformRunner : ITestRunner
                     }
                     if (!accepting.IsCompleted && process is not null && Stopwatch.GetElapsedTime(began) > ConnectLimit)
                     {
-                        throw new TestHostFailed(Written($"{name} had not connected after {ConnectLimit.TotalSeconds:0} s", said));
+                        throw new TestHostFailed(Written($"{name} had not connected after {Durations.Said(ConnectLimit)}", said));
                     }
                 }
                 return await accepting;

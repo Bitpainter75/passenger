@@ -24,20 +24,20 @@ public sealed class XamlService : IDisposable
     /// <summary>How long typing in a C# file pauses before the XAML that names its types reads it again.</summary>
     private static readonly TimeSpan SourceSettle = TimeSpan.FromMilliseconds(500);
 
-    /// <summary>The folder of the <c>dotnet</c> that builds, whose packs hold the framework's reference assemblies; found
-    /// once, off the UI thread, as finding it may wait for the login shell's environment.</summary>
-    private static readonly Lazy<string?> DotnetRoot = new(() =>
+    /// <summary>The folder of the <c>dotnet</c> that builds a project, whose packs hold the framework's reference
+    /// assemblies; found off the UI thread, as finding it may wait for the login shell's environment.</summary>
+    private static string? DotnetRoot(string project)
     {
         try
         {
-            return Dotnet.Root();
+            return Dotnet.Root(Path.GetDirectoryName(project));
         }
         catch (FileNotFoundException)
         {
             // No SDK: the framework's reference assemblies are not read, the packages' still are.
             return null;
         }
-    });
+    }
 
     private readonly Dictionary<string, XamlLoading> projects = new(PathNames.Comparer);
     private readonly Dictionary<OpenDocument, XamlDocument> documents = [];
@@ -89,6 +89,14 @@ public sealed class XamlService : IDisposable
         }
     }
 
+    /// <summary>The C# language server of the session, which checks a MAUI file's expressions and reruns MAUI's source
+    /// generator over it as it is typed; null before one has started.</summary>
+    public Func<Passenger.Lsp.RoslynSession?>? Server { get; set; }
+
+    /// <summary>A XAML file's C# expression as Passenger's extension in the server takes it.</summary>
+    internal static Roslyn.Extension.MauiExpression Asked(XamlExpression expression) =>
+        new(expression.Attribute.RawValue, expression.RootType, expression.DataType, expression.EventOwner, expression.EventName, expression.Types);
+
     /// <summary>The open files' texts as the editor has them now, each a snapshot any thread reads, for the .resx and XLIFF
     /// files a XAML file's localized strings are read from off the UI thread; none open without it.</summary>
     public Func<Func<string, TextSnapshot?>>? Snapshots { get; set; }
@@ -105,6 +113,17 @@ public sealed class XamlService : IDisposable
     {
         UiThread.Check();
         foreach (XamlDocument document in documents.Values.Where(d => d.ReadsLocalized))
+        {
+            document.Recheck();
+        }
+    }
+
+    /// <summary>The C# language server has loaded the projects, first or again: each open file whose check asks it is checked
+    /// again, as one checked while it loaded was answered nothing, and one checked before a restore had no generator to run.</summary>
+    public void ServerLoaded()
+    {
+        UiThread.Check();
+        foreach (XamlDocument document in documents.Values.Where(d => d.AsksServer))
         {
             document.Recheck();
         }
@@ -363,7 +382,7 @@ public sealed class XamlService : IDisposable
     {
         using IDisposable held = BackgroundWork.Scope();
         await Dispatcher.Yield(DispatcherPriority.Background);
-        return disposed ? null : await BackgroundWork.Run(() => XamlProjectBuilder.For(project, DotnetRoot.Value, CSharpParsing.Default, IdeErrors.Report, evaluations));
+        return disposed ? null : await BackgroundWork.Run(() => XamlProjectBuilder.For(project, DotnetRoot(project), CSharpParsing.Default, IdeErrors.Report, evaluations));
     }
 
     private static async Task<XamlProject?> LoadAsync(Task<XamlProjectBuilder?> made, Dictionary<string, TextSnapshot> texts)
@@ -445,8 +464,10 @@ public sealed class XamlService : IDisposable
         IdeErrors.Observe(AnnounceAsync(again));
     }
 
-    private Dictionary<string, TextSnapshot> OpenTexts()
+    /// <summary>Each open XAML or C# file's text as it stands, by its path.</summary>
+    internal Dictionary<string, TextSnapshot> OpenTexts()
     {
+        UiThread.Check();
         Dictionary<string, TextSnapshot> texts = new(StringComparer.Ordinal);
         foreach (OpenDocument document in documents.Keys.Concat(sources.Keys))
         {
@@ -659,6 +680,67 @@ public sealed class XamlService : IDisposable
         return found;
     }
 
+    /// <summary>Where the MAUI XAML of the projects that can use a C# symbol names it in one of its C# expressions, as the
+    /// language server binds each expression the way MAUI's source generator writes it: the files whose expressions write
+    /// one of the symbol's names, asked of the server a file at a time, each open file's in the text <paramref name="texts"/>
+    /// gives (a rename's request's), else as the editor has it now. None with no server loaded.</summary>
+    public async Task<IReadOnlyList<(string Path, TextSnapshot Text, IReadOnlyList<TextRange> Uses)>> ExpressionUsesAsync(IEnumerable<string> projectFiles,
+        CodeSymbol symbol, string id, Func<string, TextSnapshot?>? texts = null)
+    {
+        if (Server?.Invoke() is not { IsLoaded: true } server)
+        {
+            return [];
+        }
+        IReadOnlyList<XamlProject> read = await ReadAsync(projectFiles, symbol);
+        Func<string, TextSnapshot?> open = texts ?? OpenSnapshots();
+        List<(string Path, TextSnapshot Text, IReadOnlyList<XamlExpression> Expressions)> written = await BackgroundWork.Run(() => ExpressionsNaming(read, symbol, open));
+        List<(string, TextSnapshot, IReadOnlyList<TextRange>)> found = [];
+        foreach ((string path, TextSnapshot text, IReadOnlyList<XamlExpression> expressions) in written)
+        {
+            IReadOnlyList<Roslyn.Extension.MauiUse>? uses;
+            try
+            {
+                uses = await server.MauiUsesAsync(path, [.. expressions.Select(Asked)], id);
+            }
+            catch (Passenger.Lsp.LanguageServerFailed)
+            {
+                continue;
+            }
+            if (uses is { Count: > 0 })
+            {
+                found.Add((path, text, [.. uses.Where(u => u.Expression < expressions.Count)
+                    .Select(u => TextRange.FromBounds(expressions[u.Expression].ValueStart + u.Start, expressions[u.Expression].ValueStart + u.End))]));
+            }
+        }
+        return found;
+    }
+
+    /// <summary>Each XAML file of the projects reading expressions whose expressions write one of a symbol's names, with those.</summary>
+    private static List<(string Path, TextSnapshot Text, IReadOnlyList<XamlExpression> Expressions)> ExpressionsNaming(IReadOnlyList<XamlProject> read, CodeSymbol symbol,
+        Func<string, TextSnapshot?> open)
+    {
+        List<(string, TextSnapshot, IReadOnlyList<XamlExpression>)> found = [];
+        HashSet<string> seen = new(PathNames.Comparer);
+        foreach (XamlProject project in read.Where(p => p.Dialect.ReadsExpressions))
+        {
+            IReadOnlyList<string> names = symbol.NamesIn(project.Types);
+            foreach (string path in project.Files.Keys.Order(StringComparer.Ordinal))
+            {
+                if (!seen.Add(path) || (open(path) ?? EditorArea.Read(path)) is not { } text || !names.Any(n => text.ToString().Contains(n, StringComparison.Ordinal)))
+                {
+                    continue;
+                }
+                XamlFile file = XamlDocument.Read(path, text.ToString(), project, null);
+                List<XamlExpression> naming = [.. XamlExpressions.In(file).Where(e => names.Any(n => e.Code.Code.Contains(n, StringComparison.Ordinal)))];
+                if (naming.Count > 0)
+                {
+                    found.Add((path, text, naming));
+                }
+            }
+        }
+        return found;
+    }
+
     /// <summary>The C# typed in that the projects reading it are still to read once typing pauses, read by them now.</summary>
     private Task TypedNowAsync()
     {
@@ -707,14 +789,15 @@ public sealed class XamlService : IDisposable
         }
     }
 
-    /// <summary>A file's project: the nearest folder at or above it with a C# project file.</summary>
+    /// <summary>A file's project: the nearest folder at or above it with a C# project file, in the person's folders
+    /// (<see cref="FoldersUp"/>).</summary>
     private static string? ProjectFile(string path)
     {
-        for (DirectoryInfo? at = new FileInfo(path).Directory; at is not null; at = at.Parent)
+        foreach (string at in Path.GetDirectoryName(Path.GetFullPath(path)) is { } start ? FoldersUp.From(start) : [])
         {
             try
             {
-                string? found = at.EnumerateFiles("*.csproj").Select(f => f.FullName).Order(StringComparer.Ordinal).FirstOrDefault();
+                string? found = Directory.EnumerateFiles(at, "*.csproj").Order(StringComparer.Ordinal).FirstOrDefault(f => FoldersUp.Found(at, Path.GetFileName(f)) is not null);
                 if (found is not null)
                 {
                     return found;

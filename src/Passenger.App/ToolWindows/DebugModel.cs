@@ -96,6 +96,10 @@ public sealed class DebugTab(string name, OutputView console) : Observable, IHot
     /// <summary>What follows its program's output from outside into its console (a container's log), while it does.</summary>
     internal System.Diagnostics.Process? Following { get; set; }
 
+    /// <summary>Whether what it follows (<see cref="Following"/>) started its program, which ends with it (func, which starts a
+    /// Functions app's worker): Stop and the session's end end it, and its program is never let go to run on alone.</summary>
+    internal bool FollowedStarts { get; set; }
+
     /// <summary>Whether it is the tab shown: its frames, values, console and toolbar are the window's.</summary>
     public bool IsChosen
     {
@@ -129,6 +133,7 @@ public sealed class DebugModel
     {
         first = NewConsole();
         shown = first;
+        shown.OfferChanged += OnOffer;
     }
 
     /// <summary>A toolbar button pressed: the app action it runs.</summary>
@@ -201,6 +206,9 @@ public sealed class DebugModel
 
     /// <summary>What Variables says over its rows changed (<see cref="Moved"/>).</summary>
     internal event EventHandler? MovedChanged;
+
+    /// <summary>What the chosen program's console offers over its output changed, which the Debugger tab offers too.</summary>
+    internal event EventHandler? OfferChanged;
 
     /// <summary>What Set Data Breakpoint offers on a row, the debugger asked: the menu's item says so once it answers.</summary>
     public Func<VariableNode, Task<DataWatchOffer>>? DataWatch { get; set; }
@@ -278,10 +286,14 @@ public sealed class DebugModel
     {
         if (shown != console)
         {
+            shown.OfferChanged -= OnOffer;
             shown = console;
+            shown.OfferChanged += OnOffer;
             TabShown?.Invoke(this, EventArgs.Empty);
         }
     }
+
+    private void OnOffer(object? sender, EventArgs e) => OfferChanged?.Invoke(this, EventArgs.Empty);
 
     /// <summary>Lets a session's console go, its tab closed or replaced; the first stays, for the next.</summary>
     public void ForgetConsole(OutputView console)

@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using Avalonia.Input;
+using Passenger.Core;
 
 namespace Passenger.Editor;
 
@@ -66,8 +68,8 @@ public readonly record struct Keystroke(Key Key, KeyModifiers Modifiers)
         _ => null,
     };
 
-    /// <summary>The modifier the platform's commands take: Cmd on macOS, Ctrl elsewhere.</summary>
-    public static KeyModifiers Command => OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
+    /// <summary>The modifier the system's commands take (<see cref="CommandKey"/>): Cmd on macOS, Ctrl elsewhere.</summary>
+    public static KeyModifiers Command => CommandKey.IsCmd ? KeyModifiers.Meta : KeyModifiers.Control;
 
     /// <summary>Whether the key is on the numeric keypad (its operators, decimal point and digits), a key of its own
     /// beside the one that types the same character.</summary>
@@ -513,13 +515,14 @@ public sealed class Keymap
 /// <summary>Turns key presses into actions, holding the first half of a chord until the second, and a modifier tapped
 /// alone until it is tapped again (<see cref="Shortcut.IsDoubleTap"/>) within half a second, a double-click's time.</summary>
 /// <param name="keymap">The keymap the keys run.</param>
-/// <param name="milliseconds">The time the taps are told apart by, the system's tick count unless given.</param>
-public sealed class KeymapDispatcher(Keymap keymap, Func<long>? milliseconds = null)
+/// <param name="timestamps">The clock the taps are told apart by, in timestamps of Stopwatch's, its own unless
+/// given.</param>
+public sealed class KeymapDispatcher(Keymap keymap, Func<long>? timestamps = null)
 {
-    private readonly Func<long> now = milliseconds ?? (static () => Environment.TickCount64);
+    private readonly Func<long> now = timestamps ?? Stopwatch.GetTimestamp;
 
     /// <summary>The most time between a modifier's two taps that makes them a double tap.</summary>
-    public const long DoubleTapMs = 500;
+    public static readonly TimeSpan DoubleTap = TimeSpan.FromMilliseconds(500);
 
     private Keystroke? pending;
 
@@ -618,7 +621,7 @@ public sealed class KeymapDispatcher(Keymap keymap, Func<long>? milliseconds = n
         }
         (Keystroke Stroke, long At)? first = tapped;
         tapped = null;
-        if (first is { } tap && tap.Stroke == stroke && now() - tap.At <= DoubleTapMs
+        if (first is { } tap && tap.Stroke == stroke && Stopwatch.GetElapsedTime(tap.At, now()) <= DoubleTap
             && Keymap.ActionFor(new Shortcut(stroke, stroke)) is { } action)
         {
             held = null;
@@ -654,6 +657,6 @@ public sealed class KeymapDispatcher(Keymap keymap, Func<long>? milliseconds = n
         && (e.KeyModifiers & ~KeyModifiers.Shift) == (KeyModifiers.Control | KeyModifiers.Alt)
         && e.KeySymbol is { Length: > 0 } symbol && !char.IsControl(symbol[0]) && !char.IsWhiteSpace(symbol[0]);
 
-    private static bool IsModifierOnly(Key key) => key is Key.LeftShift or Key.RightShift or Key.LeftCtrl or Key.RightCtrl
+    internal static bool IsModifierOnly(Key key) => key is Key.LeftShift or Key.RightShift or Key.LeftCtrl or Key.RightCtrl
         or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin;
 }

@@ -564,7 +564,7 @@ public sealed class DebuggerTests : IClassFixture<DebuggerTests.Sum>, IClassFixt
             Ui.Run(window, AppActions.Resume);
             WaitDebugging(window, () => session.State == DebugState.Paused && session.Stops > stops && Value(window, "i") == i, $"the stop inside the lambda with i at {i}");
             DapStackFrame top = window.BottomPanel.Debug.Frames[0];
-            Assert.True(top.Name.Contains(">b__", StringComparison.Ordinal) && top.Column == body + 1,
+            Assert.True(top.Name.EndsWith("!Program.<Main>$.lambda(int i)", StringComparison.Ordinal) && top.Column == body + 1,
                 $"The lambda's breakpoint stopped in {top.Name} at column {top.Column}, not inside the lambda at column {body + 1}");
         }
         Ui.Run(window, AppActions.Resume);
@@ -1044,7 +1044,7 @@ public sealed class DebuggerTests : IClassFixture<DebuggerTests.Sum>, IClassFixt
         Assert.Equal(stopped.Id, (threads.SelectedItem as DapThread)?.Id);
         Assert.Equal(Debugging.Helpers.Debuggees.Line(Looping, "stop while the lock is held"), view.SelectedFrame?.Line);
         Assert.Equal("Every thread ran while locked.Value was evaluated, so the values read before it may have moved, and implicit evaluation stays off until the program runs on", view.Moved);
-        Banner said = window.DebugWindow.GetVisualDescendants().OfType<Banner>().Single();
+        Banner said = window.DebugWindow.GetVisualDescendants().OfType<Banner>().Single(b => b.IsEffectivelyVisible);
         Assert.Equal(view.Moved, said.Said);
 
         Ui.Click(said.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, Passenger.App.ToolWindows.DebugView.ReadAgain)));
@@ -2597,6 +2597,50 @@ public sealed class DebuggerTests : IClassFixture<DebuggerTests.Sum>, IClassFixt
         Assert.Contains("Process finished with exit code ", TerminalText(run), StringComparison.Ordinal);
         Assert.False(window.FindControl<Avalonia.Controls.Button>("StopButton")!.IsEnabled, "The toolbar's Stop could still be clicked once the session ended");
         window.Close();
+    }
+
+    /// <summary>A program debugged with the Debug window's console that needs a terminal (Console.ReadKey refusing the
+    /// console's pipe) is offered one at the debugger's stop on the exception, read from the exception the debugger has
+    /// before the runtime writes it: the Debugger tab and the console say so, and Debug in the Terminal debugs it again in a
+    /// tab of the Terminal window, where it reads a key typed there, the configuration using the terminal from then on.</summary>
+    [AvaloniaFact]
+    public void A_program_debugged_needing_a_terminal_is_offered_one_at_its_stop_on_the_exception_and_reads_a_key_there()
+    {
+        Write("Program.cs", "Console.WriteLine(\"key?\");\nConsoleKeyInfo key = Console.ReadKey(intercept: true);\nConsole.WriteLine($\"key {key.KeyChar}\");\n");
+        MainWindow window = Open();
+        try
+        {
+            StartDebugging(window);
+            WaitDebugging(window, () => window.Debugger.Session is { State: DebugState.Paused or DebugState.Ended }, "the program to stop at ReadKey's exception");
+            DebugSession stopped = window.Debugger.Session!;
+            Assert.True(stopped.State == DebugState.Paused, $"The program did not stop at ReadKey's exception: {window.Status}");
+            DebugView debug = window.DebugWindow;
+            Ui.WaitFor(() => debug.Offered is not null, () => $"the Debugger tab to offer a terminal at the stop: {window.Status}");
+            const string said = "Sum needs a terminal for Console.ReadKey: the Debug window gives it pipes";
+            Assert.Equal(said, debug.Offered);
+            OutputView console = window.BottomPanel.Debug.Console;
+            Assert.True(stopped.State == DebugState.Paused && console.Offered == said,
+                $"The offer did not come at the stop, over the console too: {stopped.State}, the console offering {console.Offered ?? "nothing"}");
+            console.Flush();
+            Assert.DoesNotContain("Unhandled exception", console.Document.Snapshot.ToString(), StringComparison.Ordinal);
+
+            Ui.ClickButton(debug, "Debug in the Terminal");
+            WaitDebugging(window, () => window.Debugger.Session is { } next && next != stopped && next.Terminal is { } started && TerminalText(started).Contains("key?", StringComparison.Ordinal),
+                "the program debugged again in the terminal to ask for a key");
+            Passenger.App.Run.TerminalRun program = window.Debugger.Session!.Terminal!;
+            Assert.Equal(Passenger.App.Run.ConsoleKind.Terminal, window.Configuration?.Console);
+            Assert.True(debug.Offered is null && console.Offered is null, $"The offer taken is still made: {debug.Offered ?? console.Offered}");
+            window.ShowToolWindow(ToolWindowIds.Terminal);
+            window.TerminalPanel.FocusView();
+            Ui.WaitFor(() => window.TerminalPanel.View.IsFocused && window.TerminalPanel.ActiveTab?.Run == program, "the keys to go to the program's tab");
+            window.KeyTextInput("q");
+            Ui.WaitFor(() => TerminalText(program).Contains("key q", StringComparison.Ordinal), () => $"the program to read the key typed in the terminal; its tab shows:\n{TerminalText(program)}");
+            Ui.WaitFor(() => !window.Debugger.IsDebugging, "the program to end once it read its key");
+        }
+        finally
+        {
+            window.Close();
+        }
     }
 
     /// <summary>A breakpoint set while the debugger still waits for the program's runtime (here held at its start, a

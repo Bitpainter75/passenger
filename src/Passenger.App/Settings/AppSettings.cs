@@ -10,9 +10,12 @@ namespace Passenger.App.Settings;
 public sealed record AppSettings : IStateDocument<AppSettings>
 {
     /// <summary>The smallest font Settings offers; a size read from the file is brought between it and the largest.</summary>
-    public const double MinFontSize = 6;
+    public const double MinFontSize = ThemeFiles.LeastFontSize;
 
-    public const double MaxFontSize = 48;
+    public const double MaxFontSize = ThemeFiles.MostFontSize;
+
+    /// <summary>Passenger's own size for the code, where neither the person nor the theme gives one.</summary>
+    public const double OwnCodeSize = 13;
 
     /// <summary>The names that soft-wrap at first.</summary>
     public const string DefaultSoftWrapFiles = "*.md; *.txt; *.rst; *.adoc";
@@ -20,12 +23,17 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     /// <summary>Dark or light, or as the system is.</summary>
     public ThemeChoice Theme { get; init; } = ThemeChoice.System;
 
-    /// <summary>The theme, Passenger's own or another of <see cref="Look"/>'s, each in the dark or light <see cref="Theme"/> says.</summary>
-    public Look Look { get; init; } = Look.Passenger;
+    /// <summary>The theme, by its source and name, or null for Passenger's own, each in the dark or light <see cref="Theme"/>
+    /// says.</summary>
+    public SourcedTheme? Look { get; init; }
 
-    /// <summary>The code's colours: the theme's own scheme, or Rider's colours in its Dark or Light as the theme is
-    /// (over the theme's ground, so the areas stay told apart).</summary>
-    public ColourScheme ColourScheme { get; init; } = ColourScheme.Theme;
+    /// <summary>The code's colours, a code colour scheme by its source and name (Dark or Light as the theme is, over the
+    /// theme's ground, so the areas stay told apart), or null for the theme's own.</summary>
+    public SourcedTheme? ColourScheme { get; init; }
+
+    /// <summary>The theme sources the person added, each as <see cref="ThemeSource"/> keeps it, beside Passenger's themes
+    /// repository, which every Passenger lists.</summary>
+    public IReadOnlyList<string> ThemeSources { get; init; } = [];
 
     /// <summary>"Merge main menu with window title", which Linux alone offers: the toolbar is the window's title bar
     /// (its window buttons at its right) rather than a strip under the system's. On at first, since the frame Passenger
@@ -41,19 +49,55 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     /// font, or null for the Inter Passenger carries.</summary>
     public string? WindowFontFamily { get; init; }
 
+    /// <summary>The whole interface's scale, on top of the screen's own DPI scaling.</summary>
+    public double DisplayScale { get; init; } = 1;
+
+    /// <summary>Where each editor group's tabs stand as the person set it, or null where they set none: the theme's, else
+    /// across the top (<see cref="TabsPlace"/>).</summary>
+    public EditorTabsPlace? EditorTabs { get; init; }
+
+    /// <summary>How docked tool windows are named as the person set it, or null where they set none: the theme's, else by
+    /// stripe icons alone (<see cref="ToolWindowsAs"/>).</summary>
+    public ToolWindowLook? ToolWindowLook { get; init; }
+
+    /// <summary>What closing a tool window does to its stripe icon as the person set it, or null where they set none: the
+    /// theme's, else keeps it (<see cref="ClosedWindows"/>).</summary>
+    public ClosedToolWindows? ClosedToolWindows { get; init; }
+
+    /// <summary>Where Find in Files' results stay as the person set it, or null where they set none: the theme's, else in
+    /// its popup alone (<see cref="FindResultsIn"/>).</summary>
+    public FindResults? FindResults { get; init; }
+
     /// <summary>The code font by its family's name, or null for the one Passenger carries.</summary>
     public string? EditorFontFamily { get; init; }
-    public double EditorFontSize { get; init; } = 13;
+
+    /// <summary>The code's size in points as the person set it, or null where they set none: the theme's, else
+    /// <see cref="OwnCodeSize"/> (<see cref="CodeSize"/>).</summary>
+    public double? EditorFontSize { get; init; }
     public double EditorLineSpacing { get; init; } = 1.2;
+
+    /// <summary>How broad the editor's caret is, and the terminal's line and underline cursors, in the window's units.</summary>
+    public double CaretWidth { get; init; } = Passenger.Editor.Carets.DefaultWidth;
     public bool Ligatures { get; init; }
     public bool ShowLineNumbers { get; init; } = true;
 
     /// <summary>Rainbow braces: brackets coloured by how deeply they nest.</summary>
     public bool RainbowBraces { get; init; } = true;
 
+    /// <summary>Vim mode: the code editors take keys by Vim's normal and insert modes before the keymap.</summary>
+    public bool VimMode { get; init; }
+
+    /// <summary>Vim mode's Ctrl keys (<see cref="Passenger.Editor.Vim.CtrlKeys"/>) the keymap takes instead, by Vim's names ("&lt;C-r&gt;"),
+    /// a space between each; Vim mode takes those not named (<see cref="Declared.VimKeysToKeymap"/>).</summary>
+    public string VimKeysToKeymap { get; init; } = string.Empty;
+
     /// <summary>In XAML, XML, MSBuild's files and HTML, a start tag's '>' writes its end tag after the caret, and "&lt;/"
     /// the open element's name.</summary>
     public bool CloseTags { get; init; } = true;
+
+    /// <summary>In C#, a method chosen from the completion list by Enter, Tab or a click is written called, its parentheses
+    /// after it and the caret between them where it takes arguments; off, its name alone.</summary>
+    public bool CompletionParentheses { get; init; } = true;
 
     /// <summary>The XAML workspace: an Avalonia or WPF file opens beside its preview and, while its app runs, its Live Visual
     /// Tree, an element chosen in any of the three chosen in the others.</summary>
@@ -85,6 +129,15 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     /// <summary>"Change font size with Ctrl+Mouse Wheel" (Command on macOS): off at first, so the wheel only
     /// scrolls.</summary>
     public bool WheelZoom { get; init; }
+
+    /// <summary>"Reformat on save": a save (File, Save All) first reformats each changed file as Reformat Code does, but one
+    /// a language's own on-save formatting takes (Prettier's Run on save, GDScript's Reformat on save).</summary>
+    public bool ReformatOnSave { get; init; }
+
+    /// <summary>"Ensure a final line break on save": every save, autosave too, ends a file with a line break where no
+    /// .editorconfig sets <c>insert_final_newline</c> for it.</summary>
+    public bool EnsureFinalLineBreak { get; init; }
+
     public double TerminalFontSize { get; init; } = 13;
     /// <summary>The terminal's own font by its family's name, or null for the code font in force.</summary>
     public string? TerminalFontFamily { get; init; }
@@ -160,6 +213,9 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     public bool SaveWhenIdle { get; init; }
 
     public int IdleSeconds { get; init; } = 15;
+
+    /// <summary>How long the first key of a shortcut of two keys waits for its second before it is forgotten, in seconds.</summary>
+    public double ChordWaitSeconds { get; init; } = 2;
 
     /// <summary>"Reopen projects on startup": started with nothing named, the window opens the folder or solution
     /// opened last, rather than the Welcome screen.</summary>
@@ -345,9 +401,9 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     /// diff's Settings changes it for every diff after.</summary>
     public DiffHighlighting DiffHighlighting { get; init; } = DiffHighlighting.Words;
 
-    /// <summary>Where a diff opens (Show Diff, Compare With, a commit's file in the log, Compare Files): a window of its
-    /// own over the IDE's at first, or a tab of the editors.</summary>
-    public DiffPlace OpenDiffsIn { get; init; } = DiffPlace.Window;
+    /// <summary>Where a diff opens (Show Diff, Compare With, a commit's file in the log, Compare Files): a tab of the
+    /// editors at first, or a window of its own over the IDE's.</summary>
+    public DiffPlace OpenDiffsIn { get; init; } = DiffPlace.Tab;
 
     /// <summary>Highlight Words in a change bar's popup: the words that changed marked in what the lines were and in
     /// the file while the popup is open; the popup's toggle changes it.</summary>
@@ -376,11 +432,19 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     /// <summary>"Reformat on save": a save (File, Save All) first reformats each changed GDScript as Reformat Code does.</summary>
     public bool GDScriptFormatOnSave { get; init; }
 
-    public static IReadOnlyList<Action<JsonObject>> Upgrades { get; } = [StateStore.Unversioned, DiscordKeptAsItWas, MouseShortcutsKept];
+    public static IReadOnlyList<Action<JsonObject>> Upgrades { get; } = [StateStore.Unversioned, DiscordKeptAsItWas, MouseShortcutsKept, ThemesFromTheirRepository, CodeSizeOwnOnlyWhereSet];
 
-    /// <summary><see cref="AgentFolders"/> is a set: a folder let in always from one window while another's Settings takes
-    /// back a different one stays let in.</summary>
-    public static IReadOnlyList<string> Sets { get; } = [nameof(AgentFolders)];
+    /// <summary><see cref="AgentFolders"/> and <see cref="ThemeSources"/> are sets: a folder let in always (a source added)
+    /// from one window while another's Settings takes back a different one stays.</summary>
+    public static IReadOnlyList<string> Sets { get; } = [nameof(AgentFolders), nameof(ThemeSources)];
+
+    /// <summary>The settings naming a program Passenger runs, or a package of code it loads (the terminal's shell, the Node.js
+    /// the web servers run on, the browser and the Godot it debugs in, ESLint's and Prettier's packages): the person's alone to
+    /// change, which settings_set refuses an agent.</summary>
+    public static IReadOnlySet<string> NamingPrograms { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        nameof(TerminalShell), nameof(NodeInterpreter), nameof(DebugBrowser), nameof(GodotExecutable), nameof(EslintPackage), nameof(PrettierPackage),
+    };
 
     /// <summary>A shortcut kept under an action's former id is kept under its id now, unless one is there already, as
     /// <see cref="Clamped"/> reads them: written so, the former id leaves the file, and an action's shortcuts reset stay so.</summary>
@@ -446,6 +510,37 @@ public sealed record AppSettings : IStateDocument<AppSettings>
         }
     }
 
+    /// <summary>Version 3 to 4: a theme and a code colour scheme chosen when Passenger carried them are the same from
+    /// Passenger's themes repository, where they moved.</summary>
+    private static void ThemesFromTheirRepository(JsonObject settings) => ThemeSource.MoveFormerChoices(settings,
+        StateFile.Options.PropertyNamingPolicy!.ConvertName(nameof(Look)), StateFile.Options.PropertyNamingPolicy.ConvertName(nameof(ColourScheme)));
+
+    /// <summary>Version 4 to 5: the code's size kept as 13, which every earlier version wrote whether or not the person set
+    /// it, is left unset, so a theme's size shows; any other size stays the person's.</summary>
+    private static void CodeSizeOwnOnlyWhereSet(JsonObject settings)
+    {
+        string name = StateFile.Options.PropertyNamingPolicy!.ConvertName(nameof(EditorFontSize));
+        if (settings[name] is JsonValue size && size.TryGetValue(out double points) && points == OwnCodeSize)
+        {
+            settings.Remove(name);
+        }
+    }
+
+    /// <summary>The code's size in force: the person's, else the theme's, else Passenger's own.</summary>
+    public double CodeSize() => EditorFontSize ?? Themes.Fonts.CodeSize ?? OwnCodeSize;
+
+    /// <summary>Where the editor's tabs stand: the person's place, else the theme's, else across the top.</summary>
+    public EditorTabsPlace TabsPlace() => EditorTabs ?? Themes.Layout?.EditorTabs ?? EditorTabsPlace.Top;
+
+    /// <summary>How docked tool windows are named: the person's choice, else the theme's, else by stripe icons alone.</summary>
+    public ToolWindowLook ToolWindowsAs() => ToolWindowLook ?? Themes.Layout?.ToolWindows ?? Passenger.App.ToolWindowLook.StripeIcons;
+
+    /// <summary>What closing a tool window does to its stripe icon: the person's choice, else the theme's, else keeps it.</summary>
+    public ClosedToolWindows ClosedWindows() => ClosedToolWindows ?? Themes.Layout?.ClosedWindows ?? Passenger.App.ClosedToolWindows.KeepIcons;
+
+    /// <summary>Where Find in Files' results stay: the person's choice, else the theme's, else in its popup alone.</summary>
+    public FindResults FindResultsIn() => FindResults ?? Themes.Layout?.FindResults ?? Passenger.App.FindResults.Popup;
+
     /// <summary>A hand-edited or later build's value this build cannot use is brought into range, or back to its default
     /// (each setting of one value as <see cref="Declared"/> says); a shortcut that does not parse is the keymap's to pass over.</summary>
     public AppSettings Clamped()
@@ -467,12 +562,19 @@ public sealed record AppSettings : IStateDocument<AppSettings>
             XamlFormat = (XamlFormat ?? defaults.XamlFormat).Clamped(),
             GDScriptFormat = (GDScriptFormat ?? defaults.GDScriptFormat).Clamped(),
             AgentFolders = [.. (AgentFolders ?? []).Where(f => !string.IsNullOrWhiteSpace(f)).Distinct(Passenger.Core.PathNames.Comparer)],
+            Look = Named(Look),
+            ColourScheme = Named(ColourScheme),
+            ThemeSources = [.. (ThemeSources ?? []).Where(s => s is not null && ThemeSource.Of(s, out _) is { Kind: ThemeSourceKind.Folder or ThemeSourceKind.GitHub or ThemeSourceKind.Web } source
+                && source != ThemeSource.Repository).Distinct(StringComparer.Ordinal)],
         };
         foreach (Setting setting in Declared.All)
         {
             clamped = setting.Clamp(clamped);
         }
         return clamped;
+
+        // A theme named by nothing, or by no name, is Passenger's own.
+        static SourcedTheme? Named(SourcedTheme? theme) => theme is { Source: { Length: > 0 }, Name: { Length: > 0 } } ? theme : null;
 
         // A shortcut kept under an action's former id is the action's now (one kept under its id now winning).
         static Dictionary<string, string[]> Readable(Dictionary<string, string[]>? shortcuts) =>

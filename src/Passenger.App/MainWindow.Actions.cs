@@ -36,7 +36,7 @@ public partial class MainWindow
         {
             return true;
         }
-        Say(why, RefusalPlace(action));
+        Refuse(why, RefusalPlace(action));
         return false;
     }
 
@@ -88,7 +88,10 @@ public partial class MainWindow
 
     /// <summary>A folder open whose tests can run: with a .NET SDK where a run builds first, and with none where it does not,
     /// as GUT's tests of a game of GDScript alone.</summary>
-    private string? NeedsTestBuild(ActionContext context) => NeedsFolder(context) ?? (WithoutSdk() is { } none && session.Tests.Builds ? none : null);
+    private string? NeedsTestBuild(ActionContext context) => NeedsFolder(context) ?? Untrusted() ?? (WithoutSdk() is { } none && session.Tests.Builds ? none : null);
+
+    /// <summary>Why nothing of the open folder's code runs: it is not trusted (<see cref="ProjectSession.Trusted"/>).</summary>
+    private string? Untrusted() => session.Folder is not null && !session.Trusted ? Refusals.Untrusted : null;
 
     /// <summary>Why Expand All or Collapse All cannot run: no tool window with rows to open or close has the keys.</summary>
     private static string? NoTree(ActionContext context, Action? does, string verb) =>
@@ -134,16 +137,17 @@ public partial class MainWindow
             status.ShowWork(change, work.Latest);
             ShowStop();
         };
+        work.Told += (_, told) => announcer.Tell(told.Said, told.Succeeded ? Urgency.Polite : Urgency.Assertive);
         AddEditing();
         Add(A.Open, "Open…", "IDE", context => IdeErrors.Observe(PickWorkspace()), menu: ("File", 0, 0));
         actions.Add(new IdeAction(A.RecentFiles, "Recent Files", "IDE", _ => ShowRecentFiles()) { Menus = [new("File", 0, 4), new("View", 2, 0)] });
         Add(A.Save, "Save", "IDE", context => IdeErrors.Observe(SaveExplicitly(all: false)), Refusals.NeedsUnsaved, ("File", 1, 0));
         Add(A.SaveAll, "Save All", "IDE", context => IdeErrors.Observe(SaveExplicitly(all: true)), _ => Editors.Documents.Any(d => d.IsModified) ? null : "Every file is saved", ("File", 1, 1));
         // Quit is the application menu's on macOS; either closes every window.
-        Add(A.Exit, "Exit", "IDE", _ => PassengerApp.Quit(), menu: OperatingSystem.IsMacOS() ? null : ("File", 4, 0));
+        Add(A.Exit, "Exit", "IDE", _ => Exit(), c => c.ByAgent ? Refusals.QuitIsThePersons : null, OperatingSystem.IsMacOS() ? null : ("File", 4, 0));
         Add(A.FindAction, "Find Action…", "IDE", _ => ShowFindAction(), menu: ("Help", 0, 0));
 
-        // Unit Tests, Problems and the Explorer take Find's keys for their filters, a console's window for its text.
+        // Unit Tests, Problems, the Explorer and the Step Library take Find's keys for their filters, a console its text.
         Add(A.Find, "Find", "IDE", c =>
         {
             if (c.ToolWindow?.Id == ToolWindowIds.Tests)
@@ -157,6 +161,10 @@ public partial class MainWindow
             else if (c.ToolWindow?.Id == ToolWindowIds.Explorer && Explorer.Tree.Root is not null)
             {
                 Explorer.FocusFilter();
+            }
+            else if (c.ToolWindow?.Id == ToolWindowIds.StepLibrary)
+            {
+                StepLibraryWindow.FocusFilter();
             }
             else if (c.ToolWindow?.Id == ToolWindowIds.Aspire)
             {
@@ -174,7 +182,7 @@ public partial class MainWindow
             {
                 Editors.ShowFind(replace: false);
             }
-        }, c => c.ToolWindow?.Id is ToolWindowIds.Tests or ToolWindowIds.Problems || c.ToolWindow?.Id == ToolWindowIds.Explorer && Explorer.Tree.Root is not null || ConsoleFind(c) is not null
+        }, c => c.ToolWindow?.Id is ToolWindowIds.Tests or ToolWindowIds.Problems or ToolWindowIds.StepLibrary || c.ToolWindow?.Id == ToolWindowIds.Explorer && Explorer.Tree.Root is not null || ConsoleFind(c) is not null
             || DiffWindowOf(c) is not null ? null : Refusals.NeedsFile(c), ("Edit/Find", 0, 0));
         Add(A.Replace, "Replace", "IDE", c => (DiffWindowOf(c) is { } window ? (Action<bool>)window.ShowFind : Editors.ShowFind)(true),
             c => DiffWindowOf(c) is not null ? null : Refusals.NeedsFile(c), ("Edit/Find", 0, 1));
@@ -206,11 +214,17 @@ public partial class MainWindow
         AddTests();
 
         AddTabActions();
+        AddRegions();
 
         // The tool windows' frame, run from the terminal too.
         actions.Add(new IdeAction(A.MaximizeToolWindow, "Maximize Tool Window", "Tool Windows", _ => Dock.ToggleMaximize()) { Menus = [new("View", 3, 0)], FromTerminal = true });
         actions.Add(new IdeAction(A.HideAllToolWindows, "Hide All Tool Windows", "Tool Windows", _ => Dock.ToggleHideAll()) { Menus = [new("View", 3, 1)], FromTerminal = true });
         actions.Add(new IdeAction(A.HideToolWindow, "Hide Active Tool Window", "Tool Windows", HideToolWindow) { Menus = [new("View", 3, 2)], FromTerminal = true });
+        actions.Add(new IdeAction(A.CloseToolWindow, "Close Active Tool Window", "Tool Windows", CloseToolWindow)
+        {
+            FromTerminal = true,
+            WhyNot = _ => !Dock.ClosesOffStripe ? Refusals.ClosedKeepIcons : Dock.Active is not { IsShown: true } ? Refusals.NoToolWindowOpen : null,
+        });
         actions.Add(new IdeAction(A.ExpandAll, "Expand All", "Tool Windows", c => c.ToolWindow!.ExpandAll!()) { WhyNot = c => NoTree(c, c.ToolWindow?.ExpandAll, "open") });
         actions.Add(new IdeAction(A.CollapseAll, "Collapse All", "Tool Windows", c => c.ToolWindow!.CollapseAll!()) { WhyNot = c => NoTree(c, c.ToolWindow?.CollapseAll, "close") });
         // Pressed in a tool window by the editor's Escape (KeysIn), where nothing of the window's own takes that key.
@@ -220,12 +234,12 @@ public partial class MainWindow
             KeysOf = () => AppActions.KeysIn(A.FocusEditor) is var keys && keys != A.FocusEditor ? keys : null,
         });
         Add(A.ToggleSolutionAnalysis, "Toggle Solution-Wide Analysis", "IDE", _ => ToggleSolutionAnalysis(),
-            _ => session.CSharp is null ? Refusals.NoCSharp : null, ("Code", 4, 0));
+            _ => session.CSharp is null ? session.WhyNoCSharp : null, ("Code", 4, 0));
         Add(A.RestartCSharpServer, "Restart C# Language Server", "IDE", _ =>
         {
             session.CSharp!.Restart();
             status.Text = "Starting the C# language server again";
-        }, _ => session.CSharp is null ? Refusals.NoCSharp : null, ("Code", 4, 1), words: ["Roslyn"]);
+        }, _ => session.CSharp is null ? session.WhyNoCSharp : null, ("Code", 4, 1), words: ["Roslyn"]);
     }
 
     /// <summary>The editor's actions, run where the keys are: a text box's own editing there, another editor (a diff's)
@@ -263,12 +277,23 @@ public partial class MainWindow
             {
                 InEditor = true,
                 WhyNot = context => ExplorerEdits(id, context) ? WhyNotOnRow(id, context)
-                    : context.File is null && context.Focused is not (TextBox or CodeEditor) ? Refusals.NoFile : null,
+                    : context.File is null && context.Focused is not (TextBox or CodeEditor) ? Refusals.NoFile
+                    : E.IsChange(id) ? ChangeRefused(id, context) : null,
                 TitleIn = id == E.Delete ? context => DeleteTitle(context) ?? title : null,
                 Menus = menus.GetValueOrDefault(id, []),
             });
         }
     }
+
+    /// <summary>Why an action changing the text greys: the editor it goes to (another with the keys, a diff's side, else the
+    /// one showing the file) refuses changes, in that editor's words, or the file shown is read-only; null where it takes
+    /// them, a text box with the keys taking its own unless read-only, and a console those its program's input takes
+    /// (<see cref="ToolWindows.OutputView.TakesEdit"/>).</summary>
+    private static string? ChangeRefused(string action, ActionContext context) =>
+        context.Focused is TextBox box && TextBoxEdits.ContainsKey(action) ? (box.IsReadOnly ? Refusals.TextReadOnly : null)
+        : context.Focused is CodeEditor other && other != context.Editor
+            ? (other.IsReadOnly && other.FindAncestorOfType<ToolWindows.OutputView>()?.TakesEdit(other, action) != true ? other.ReadOnlyWhy : null)
+        : context.File is { } shown && context.Editor.IsReadOnly ? Refusals.ReadOnly(shown.Name) : null;
 
     private void Edit(string action, ActionContext context)
     {
@@ -284,7 +309,10 @@ public partial class MainWindow
             case Tables.CellGrid table when table.Execute(action):
                 return;
             case CodeEditor editor when editor != Editors.CodeEditor:
-                editor.TryExecute(action);
+                if (editor.FindAncestorOfType<ToolWindows.OutputView>()?.EditInput(editor, action) != true)
+                {
+                    editor.TryExecute(action);
+                }
                 return;
         }
         if (action is E.Undo or E.Redo && UndoCommand(action == E.Redo, Editors.Active))
@@ -307,12 +335,20 @@ public partial class MainWindow
         Add(A.CleanSelected, "Clean Selected Projects", "Build", _ => Build(BuildKind.Clean, SelectedProjects()), NoneSelected, ("Build", 1, 2), works: A.Build);
 
         Add(A.RunProgram, "Run", "Run", _ => RunSelected(), _ => Unconfigured("run"), ("Run", 0, 0));
-        Add(A.Debug, "Debug", "Run", _ => DebugSelected(), _ => Unconfigured("debug"), ("Run", 0, 1));
-        Add(A.RunCurrentScene, "Run Current Scene", "Run", _ => IdeErrors.Observe(buildRun.RunCurrentSceneAsync()), _ => buildRun.WhyNotRunScene(), ("Run", 0, 2));
+        Add(A.Debug, "Debug", "Run", _ => DebugSelected(), _ => Untrusted() ?? (Configuration is { IsScript: true } script ? Refusals.ScriptOnlyRuns(script.Name) : Unconfigured("debug")),
+            ("Run", 0, 1));
+        Add(A.RunCurrentScene, "Run Current Scene", "Run", _ => IdeErrors.Observe(buildRun.RunCurrentSceneAsync()), _ => Untrusted() ?? buildRun.WhyNotRunScene(), ("Run", 0, 2));
         Add(A.RunAnotherCopy, "Run Another Copy", "Run", _ => IdeErrors.Observe(buildRun.RunAnotherCopyAsync()),
-            _ => session.Configurations.Chosen is { } chosen ? buildRun.WhyNotRunAnotherCopy(chosen) : Unconfigured("run"), ("Run", 0, 2), works: A.RunProgram);
+            _ => Untrusted() ?? (session.Configurations.Chosen is { } chosen ? buildRun.WhyNotRunAnotherCopy(chosen) : Unconfigured("run")), ("Run", 0, 2), works: A.RunProgram);
         Add(A.DebugAnotherCopy, "Debug Another Copy", "Run", _ => IdeErrors.Observe(DebugAnotherCopyAsync()),
-            _ => session.Configurations.Chosen is { } chosen ? buildRun.WhyNotAnotherCopy(chosen) : Unconfigured("debug"), ("Run", 0, 2), works: A.Debug);
+            _ => Untrusted() ?? (session.Configurations.Chosen is { } chosen ? buildRun.WhyNotAnotherCopy(chosen) : Unconfigured("debug")), ("Run", 0, 2), works: A.Debug);
+        Add(A.RunInTerminal, "Run in the Terminal", "Run", c => StartInTerminal(c, A.RunProgram), _ => Untrusted() ?? (buildRun.RunNeed is null ? Refusals.NoTerminalNeed("Run") : null),
+            words: ["Use external console", "Console.ReadKey"], works: A.RunProgram);
+        Add(A.DebugInTerminal, "Debug in the Terminal", "Run", c => StartInTerminal(c, A.Debug), _ => Untrusted() ?? (buildRun.DebugNeed is null ? Refusals.NoTerminalNeed("Debug") : null),
+            words: ["Use external console", "Console.ReadKey"], works: A.Debug);
+        Add(A.ProfileInTerminal, "Profile in the Terminal", "Run", c => StartInTerminal(c, A.Profile),
+            _ => Untrusted() ?? (buildRun.RunNeed is not { Profiled: true } ? Refusals.NoTerminalNeed("Profiler") : null),
+            words: ["Use external console", "Console.ReadKey"], works: A.Profile);
         // No key in Rider's Visual Studio keymaps.
         Add(A.EditConfigurations, "Edit Configurations…", "Run", _ => ShowRunConfigurations(), NeedsFolder, ("Run", 0, 5));
         // Edit Configurations' button, on the configuration chosen there; elsewhere, on the toolbar's.
@@ -369,13 +405,13 @@ public partial class MainWindow
         }, Refusals.NeedsFile, ("Run", 2, 2));
         Add(A.ViewBreakpoints, "View Breakpoints and Exceptions…", "Debug", _ => ShowBreakpoints(null), menu: ("Run", 2, 3));
 
-        string? Unbuildable(ActionContext _) => Folder is null ? Refusals.NoFolderTo("build") : IsBuilding ? Refusals.Building
+        string? Unbuildable(ActionContext _) => Folder is null ? Refusals.NoFolderTo("build") : Untrusted() is { } untrusted ? untrusted : IsBuilding ? Refusals.Building
             : session.Workspace is { Solution: null, Projects.Count: 0, GodotGames.Count: > 0 } ? Refusals.NothingToBuildOfScripts : WithoutSdk();
 
         string? NoneSelected(ActionContext context) => Unbuildable(context)
             ?? (SelectedProjects().Count == 0 ? "No project is chosen in the Explorer or open in the editor" : null);
 
-        string? Unconfigured(string verb) => Configuration is null ? WithoutSdk() ?? session.NothingTo(verb)
+        string? Unconfigured(string verb) => Untrusted() is { } untrusted ? untrusted : Configuration is null ? WithoutSdk() ?? session.NothingTo(verb)
             : Configuration is { Kind: Run.RunKind.Project or Run.RunKind.Projects, RunsScriptGame: false } ? WithoutSdk() : null;
     }
 
@@ -427,7 +463,7 @@ public partial class MainWindow
 
     /// <summary>The test a file's line is in, as its code declares it or a runner found it; null where there is none.</summary>
     private Testing.DeclaredPlace? TestAt(OpenDocument file, int line) =>
-        file.Syntax is { } syntax ? Testing.TestsAtCaret.At(syntax.Current, line, testGutter.Knows) : testGutter.ScriptTestAt(file, line);
+        file.Syntax is { } syntax ? Testing.TestsAtCaret.At(syntax.Current, line, testGutter.Knows) : testGutter.ScriptTestAt(file, line) ?? testGutter.FeatureTestAt(file, line);
 
     /// <summary>Adds one of the window's actions, listed in one place of the menus if given.</summary>
     /// <summary>A key the keymap gives one action where another takes it by place (<see cref="AppActions.KeysIn"/>): New

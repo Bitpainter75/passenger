@@ -89,7 +89,7 @@ public sealed record GitBranchesState : IStateDocument<GitBranchesState>
 public sealed class BranchesPanel : DockPanel
 {
     private VcsController vcs;
-    private readonly ListBox list;
+    private readonly TreeList list;
     private readonly TextBox search;
     private readonly Dictionary<string, bool> expanded = [];
     private readonly Button newBranch;
@@ -101,23 +101,18 @@ public sealed class BranchesPanel : DockPanel
     private readonly TreeRows<BranchNode> rows = [];
     private int loads;
 
+    /// <summary>Whether the rows are being listed again, the choice let go and taken again in the same moment.</summary>
+    private bool listing;
+
     public BranchesPanel(VcsController git)
     {
         vcs = git;
-        list = new ListBox
+        list = new TreeList
         {
             Classes = { StyleClasses.Tree },
             ItemsSource = rows,
         };
         ReusedRows.Use(list, Row);
-        list.DoubleTapped += (_, e) =>
-        {
-            if (Selected is { } node)
-            {
-                Activate(node);
-                e.Handled = true;
-            }
-        };
         TreeKeys.Attach<BranchNode>(list, Toggle, node =>
         {
             if (node.IsGroup)
@@ -126,9 +121,15 @@ public sealed class BranchesPanel : DockPanel
             }
             Activate(node);
             return true;
-        });
-        list.AddHandler(KeyDownEvent, OnKey, Avalonia.Interactivity.RoutingStrategies.Tunnel);
-        list.SelectionChanged += (_, _) => UpdateTools();
+        }, new ListActs { Keys = Take });
+        // A listing again passes through no choice, which would grey every button for that moment and let go of one pressed.
+        list.SelectionChanged += (_, _) =>
+        {
+            if (!listing)
+            {
+                UpdateTools();
+            }
+        };
         ListMenus.Attach(list, () => Selected is { Branch: { } branch } ? Menu(branch) : []);
         search = new TextBox { Classes = { StyleClasses.Search }, PlaceholderText = "Branch or tag", Margin = new Thickness(6, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center };
         search.TextChanged += (_, _) => Show();
@@ -214,6 +215,7 @@ public sealed class BranchesPanel : DockPanel
         if (!isCurrent)
         {
             Add("Checkout", () => IdeErrors.Observe(vcs.CheckoutRefAsync(branch, Branches)));
+            IdeErrors.Observe(GreyWhenRefusedAsync((MenuItem)items[^1], vcs.WhyNotCheckoutRefAsync(branch, Branches)));
         }
         Add($"New Branch from {it}…", () => NewBranchRequested?.Invoke(this, branch));
         if (branch.Kind == RefKind.Local && !isCurrent)
@@ -241,7 +243,9 @@ public sealed class BranchesPanel : DockPanel
             string? notUpdated = WhyNotUpdate(branch);
             Add("Update", () => IdeErrors.Observe(vcs.UpdateBranchAsync(branch)), notUpdated is null);
             ToolTip.SetTip(items[^1], notUpdated);
-            Add("Push…", () => IdeErrors.Observe(vcs.PushBranchAsync(branch)));
+            string? notPushed = vcs.WhyNotRemote;
+            Add("Push…", () => IdeErrors.Observe(vcs.PushBranchAsync(branch)), notPushed is null);
+            ToolTip.SetTip(items[^1], notPushed);
             Separate();
             Add("Rename…", () => RenameRequested?.Invoke(this, branch));
         }
@@ -254,6 +258,17 @@ public sealed class BranchesPanel : DockPanel
             items.RemoveAt(items.Count - 1);
         }
         return items;
+    }
+
+    /// <summary>A menu's item greyed once what it does is found refused (a checkout writing out a file git cannot here), its
+    /// tip saying why.</summary>
+    private static async Task GreyWhenRefusedAsync(MenuItem item, Task<string?> refused)
+    {
+        if (await refused is { } why)
+        {
+            item.IsEnabled = false;
+            ToolTip.SetTip(item, why);
+        }
     }
 
     /// <summary>A name quoted for a menu, a long one cut short.</summary>
@@ -413,8 +428,16 @@ public sealed class BranchesPanel : DockPanel
         {
             Flatten(root, shown, text.Length > 0);
         }
-        rows.Show(shown);
-        list.SelectedItem = rows.FirstOrDefault(r => r.Key == chosen);
+        listing = true;
+        try
+        {
+            rows.Show(shown);
+            list.SelectedItem = rows.FirstOrDefault(r => r.Key == chosen);
+        }
+        finally
+        {
+            listing = false;
+        }
         UpdateTools();
     }
 
@@ -527,20 +550,22 @@ public sealed class BranchesPanel : DockPanel
     private static string? WhyNotFrom(BranchInfo? branch) => branch is null ? Refusals.NoRefChosen : null;
 
     /// <summary>Why Update Selected can't act: it brings a local branch up to the remote's branch it tracks, as
-    /// <see cref="VcsController.UpdateBranchAsync"/> does, and nothing else.</summary>
-    private static string? WhyNotUpdate(BranchInfo? branch) => branch switch
+    /// <see cref="VcsController.UpdateBranchAsync"/> does, and nothing else, where a remote can be reached.</summary>
+    private string? WhyNotUpdate(BranchInfo? branch) => branch switch
     {
         { Kind: RefKind.Local, Upstream: null } => Refusals.Untracked(branch.Name),
-        { Kind: RefKind.Local } => null,
+        { Kind: RefKind.Local } => vcs.WhyNotRemote,
         { Kind: RefKind.Remote } => Refusals.FetchedNotUpdated(branch.Name),
         _ => Refusals.NoLocalBranchChosen,
     };
 
-    /// <summary>Why Delete can't act: git deletes no branch while it is checked out.</summary>
-    private static string? WhyNotDelete(BranchInfo? branch) => branch switch
+    /// <summary>Why Delete can't act: git deletes no branch while it is checked out, and a remote's only where the remote
+    /// can be reached.</summary>
+    private string? WhyNotDelete(BranchInfo? branch) => branch switch
     {
         null => Refusals.NoRefChosen,
         { IsCurrent: true } => Refusals.CheckedOut(branch.Name),
+        { Kind: RefKind.Remote } => vcs.WhyNotRemote,
         _ => null,
     };
 
@@ -550,12 +575,12 @@ public sealed class BranchesPanel : DockPanel
     /// <summary>Rider's keys here, beside the tree's (<see cref="TreeKeys"/>): Delete (Backspace too on the Mac) deletes, F2 or
     /// Shift+F6 renames a local branch on the Mac (Rename's Ctrl+R, R elsewhere, which the window routes here), and
     /// Ctrl+Alt+N (Cmd+Alt+N) makes one from the chosen.</summary>
-    private void OnKey(object? sender, KeyEventArgs e)
+    private bool Take(KeyEventArgs e)
     {
         bool mac = OperatingSystem.IsMacOS();
         if (Selected is not { } node)
         {
-            return;
+            return false;
         }
         KeyModifiers command = Keystroke.Command;
         if (node.Branch is { } branch && (e.Key == Key.Delete && e.KeyModifiers == KeyModifiers.None
@@ -573,9 +598,9 @@ public sealed class BranchesPanel : DockPanel
         }
         else
         {
-            return;
+            return false;
         }
-        e.Handled = true;
+        return true;
     }
 
     /// <summary>A row for whichever group, branch or tag the list hands its container: a group's chevron, a branch's or

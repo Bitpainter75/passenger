@@ -73,7 +73,7 @@ public sealed class MemoryView : DockPanel
     private readonly ListBox deltas;
     private readonly ListBox objects;
     private readonly TreeRows<RetentionRow> pathRows = [];
-    private readonly ListBox paths;
+    private readonly TreeList paths;
     private readonly ListBox keyPaths;
     private readonly ToggleButton[] setTabs;
     private readonly DockPanel typePage;
@@ -102,14 +102,16 @@ public sealed class MemoryView : DockPanel
                 Go([new SnapshotPage(snapshot)]);
             }
         };
-        snapshotList.KeyDown += (_, e) =>
+        ListKeys.Act(snapshotList, new ListActs
         {
-            if (e.Key is Key.Delete or Key.Back && e.KeyModifiers == KeyModifiers.None && snapshotList.SelectedItem is SnapshotRow { Snapshot: var chosen })
+            Remove = () =>
             {
-                Remove(chosen);
-                e.Handled = true;
-            }
-        };
+                if (snapshotList.SelectedItem is SnapshotRow { Snapshot: var chosen })
+                {
+                    Remove(chosen);
+                }
+            },
+        });
         ListMenus.Attach(snapshotList, () => snapshotList.SelectedItem is not SnapshotRow { Snapshot: var chosen } ? [] :
         [
             ListMenus.Item("Remove Snapshot", "Delete", () => Remove(chosen)),
@@ -137,7 +139,7 @@ public sealed class MemoryView : DockPanel
                 Put(numbers, $"{type.Count:N0}", Sizes.Said(type.Bytes), Sizes.Said(type.RetainedBytes));
             });
         });
-        OnEnter(types, OpenType);
+        ListKeys.Act(types, new ListActs { Open = OpenType });
         typePage = Framed(typeTable.Sorting(SortTypes), types);
 
         ColumnTitles deltaTable = ColumnTitles.OfNumbers(("Type", 0), ("Objects delta", NumberWidth), ("Bytes delta", NumberWidth), ("New objects", NumberWidth),
@@ -152,7 +154,7 @@ public sealed class MemoryView : DockPanel
                     $"{type.DeadObjects:N0}", Sizes.Said(type.DeadBytes), $"{type.SurvivedObjects:N0}");
             });
         });
-        OnEnter(deltas, () => OpenDelta(Kind.New));
+        ListKeys.Act(deltas, new ListActs { Open = () => OpenDelta(Kind.New) });
         deltaPage = Framed(deltaTable.Sorting(SortDeltas), deltas);
 
         ColumnTitles objectTable = ColumnTitles.OfNumbers(("Object", 0), ("Bytes", NumberWidth), ("Retained bytes", NumberWidth + 16));
@@ -173,11 +175,11 @@ public sealed class MemoryView : DockPanel
                 Put(numbers, Sizes.Said(item.Bytes), Sizes.Said(item.RetainedBytes));
             });
         });
-        OnEnter(objects, OpenObject);
+        ListKeys.Act(objects, new ListActs { Open = OpenObject });
         objectsPage = Framed(objectTable, objects);
 
         ColumnTitles pathTable = ColumnTitles.OfNumbers(("Path", 0), ("Objects", NumberWidth), ("Retained bytes", NumberWidth + 16));
-        paths = List(() =>
+        paths = List<TreeList>(() =>
         {
             TextBlock[] numbers = Numbers(2);
             return pathTable.Row([PathStep(), .. numbers]).Showing<RetentionRow>(row => Put(numbers, $"{row.Node.Objects:N0}", Sizes.Said(row.Node.RetainedBytes)));
@@ -400,7 +402,7 @@ public sealed class MemoryView : DockPanel
         {
             case SnapshotPage { Snapshot: var snapshot }:
                 summary.Text = $"{snapshot.Objects:N0} objects, {Sizes.Said(snapshot.Bytes)} live, in {snapshot.Types.Count:N0} types; taken at "
-                    + $"{snapshot.Taken:HH:mm:ss} in {snapshot.Took.TotalSeconds:0.0} s ({snapshot.Phases})"
+                    + $"{snapshot.Taken:HH:mm:ss} in {Durations.Said(snapshot.Took)} ({snapshot.Phases})"
                     + (snapshot.Lacks is { } lacks ? $". {lacks}" : string.Empty)
                     + (snapshot.Gone is { } gone ? $". {gone}: its types are listed, its objects no longer open" : string.Empty);
                 types.ItemsSource = snapshot.Types;
@@ -571,21 +573,6 @@ public sealed class MemoryView : DockPanel
         pathRows.Close(row);
     }
 
-    /// <summary>Enter on a row opens it, as a double-click does; the row takes Enter as handled already, so it is heard
-    /// handled or not.</summary>
-    private static void OnEnter(ListBox list, Action open)
-    {
-        list.AddHandler(KeyDownEvent, (_, e) =>
-        {
-            if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.None)
-            {
-                open();
-                e.Handled = true;
-            }
-        }, Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
-        list.DoubleTapped += (_, _) => open();
-    }
-
     /// <summary>A column's header clicked: the list by that column, the most first (the type's name from A); again, the other way.</summary>
     private void SortTypes(int column)
     {
@@ -640,9 +627,12 @@ public sealed class MemoryView : DockPanel
         return button;
     }
 
-    private static ListBox List(Func<Control> row)
+    private static ListBox List(Func<Control> row) => List<ListBox>(row);
+
+    private static T List<T>(Func<Control> row)
+        where T : ListBox, new()
     {
-        ListBox list = new() { Classes = { StyleClasses.Tree } };
+        T list = new() { Classes = { StyleClasses.Tree } };
         ReusedRows.Use(list, row);
         // Rows fill the list's width, so their columns line up under the header's.
         list.Styles.Add(new Style(x => x.OfType<ListBoxItem>())

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Passenger.App.Editors;
+using Passenger.App.History;
 using Passenger.App.MSBuild;
 using Passenger.App.Workspace;
 using Passenger.Core;
@@ -12,9 +14,9 @@ namespace Passenger.App.Packages;
 
 /// <summary>The folder's NuGet, whoever asks of it (the NuGet window, MSBuild files' code help, Migrations, an agent): the
 /// package sources its nuget.config files give, read when first asked for and again after one changes, their feeds, the
-/// audit's known vulnerabilities, and the one way a package goes in, moves or comes out of a project, through the .NET
-/// command line (under central package management written by Passenger, then restored), one change at a time, each one
-/// command of Undo. A session's own, ended with it; a UI-thread object.</summary>
+/// audit's known vulnerabilities, the versions their owners deprecated, and the one way a package goes in, moves or comes
+/// out of a project, through the .NET command line (under central package management written by Passenger, then
+/// restored), one change at a time, each one command of Undo. A session's own, ended with it; a UI-thread object.</summary>
 public sealed partial class FolderPackages
 {
     /// <summary>What a package change's work is held under in the window, which no action names.</summary>
@@ -33,6 +35,13 @@ public sealed partial class FolderPackages
     private string? changing;
 
     private (Task Until, TaskCompletionSource Reached)? holdNext;
+
+    /// <summary>The Local History set each command's package changes are named in, so a command of several is one set.</summary>
+    private readonly ConditionalWeakTable<CommandHistory.Recording, LocalHistory.Activity> named = [];
+
+    /// <summary>Each assets file as last read, with the time it was written and its length then, so a list made again reads
+    /// only what a restore wrote since.</summary>
+    private readonly ConcurrentDictionary<string, (DateTime Written, long Length, RestoredVersions Read)> assetsRead = new(PathNames.Comparer);
 
     /// <param name="projects">The folder's projects, whose packages are listed and changed.</param>
     /// <param name="root">The folder NuGet's configuration is read from: the solution's, else the one open.</param>
@@ -63,6 +72,9 @@ public sealed partial class FolderPackages
 
     /// <summary>Where a package change is recorded as one command of Undo, unless its caller records it; null records none.</summary>
     public CommandHistory? Commands { get; set; }
+
+    /// <summary>The folder's Local History, which keeps each package change as one set named as its command, or null.</summary>
+    public Func<LocalHistory?>? History { get; set; }
 
     /// <summary>Saves the open files and waits for the saves still landing before a change rewrites a project or a
     /// nuget.config, so what is rewritten, and what the restore then reads, holds their edits. Null once all are on disk,
@@ -109,6 +121,7 @@ public sealed partial class FolderPackages
         Sources = loaded;
         feeds = made;
         audit = null;
+        deprecations = new(StringComparer.OrdinalIgnoreCase);
         SourcesChanged?.Invoke(this, EventArgs.Empty);
         return true;
     }
@@ -169,6 +182,13 @@ public sealed partial class FolderPackages
     /// <summary>The vulnerabilities as far as they are known: none until they are read, or when they could not be.</summary>
     public VulnerabilityData Known => audit is { IsCompletedSuccessfully: true } read ? read.Result : VulnerabilityData.None;
 
+    /// <summary>The audit as asked for since the sources were read (<see cref="Audit"/>), read or still being read; null
+    /// until something asks for it, which this never does.</summary>
+    public Task<VulnerabilityData>? AuditAsked => audit;
+
+    /// <summary>Whether the audit's feeds are still being asked for the known vulnerabilities, so no version is known safe.</summary>
+    public bool IsAuditing => audit is { IsCompleted: false };
+
     /// <summary>The packages the projects reference: by package, each project's reference for each of its frameworks.</summary>
     public Dictionary<string, Dictionary<string, IReadOnlyList<InstalledVersion>>> Installed()
     {
@@ -212,18 +232,81 @@ public sealed partial class FolderPackages
         return installed;
     }
 
+    /// <summary>The packages each project gets only through a package or project it references, as its restore resolved
+    /// them (<see cref="RestoredVersions.Transitive"/>): by package, each project's uses; read off the window's thread from
+    /// the projects' project.assets.json, never restoring, so a project not restored yet gets none.</summary>
+    public async Task<Dictionary<string, Dictionary<string, IReadOnlyList<TransitiveUse>>>> TransitiveAsync()
+    {
+        ProjectModel[] each = [.. Projects.Where(p => p.Exists)];
+        (string Path, IReadOnlyDictionary<string, IReadOnlyList<TransitiveUse>> Uses)[] read =
+            await BackgroundWork.Run(() => each.Select(p => (p.Path, RestoredSince(p).Transitive())).ToArray());
+        Dictionary<string, Dictionary<string, IReadOnlyList<TransitiveUse>>> transitive = new(StringComparer.OrdinalIgnoreCase);
+        foreach ((string path, IReadOnlyDictionary<string, IReadOnlyList<TransitiveUse>> uses) in read)
+        {
+            foreach ((string id, IReadOnlyList<TransitiveUse> at) in uses)
+            {
+                (transitive.TryGetValue(id, out Dictionary<string, IReadOnlyList<TransitiveUse>>? byProject) ? byProject
+                    : transitive[id] = new Dictionary<string, IReadOnlyList<TransitiveUse>>(PathNames.Comparer))[path] = at;
+            }
+        }
+        return transitive;
+    }
+
+    /// <summary>The packages a project gets only through a package or project it references, in the frameworks where none
+    /// of its own references stands (<see cref="TransitiveFix.Left"/>), as its restore resolved them: by package, each
+    /// framework's use; none before it is restored.</summary>
+    public async Task<IReadOnlyDictionary<string, IReadOnlyList<TransitiveUse>>> BroughtAsync(ProjectModel project)
+    {
+        IReadOnlyDictionary<string, IReadOnlyList<TransitiveUse>> uses = project.Exists ? await BackgroundWork.Run(() => RestoredSince(project).Transitive()) : new Dictionary<string, IReadOnlyList<TransitiveUse>>();
+        ILookup<string, InstalledVersion> referenced = References(project).ToLookup(r => r.Id, r => r.Version, StringComparer.OrdinalIgnoreCase);
+        return uses.Select(u => (u.Key, Left: TransitiveFix.Left(u.Value, [.. referenced[u.Key]]))).Where(u => u.Left.Count > 0)
+            .ToDictionary(u => u.Key, u => u.Left, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>What fixes the vulnerable versions a project gets of a package only through others (<see cref="TransitiveFix.Of"/>),
+    /// as its restore resolved them, the audit knows them and the folder's feeds offer versions; null where there is none.</summary>
+    public async Task<TransitiveFix?> TransitiveFixAsync(ProjectModel project, string id, CancellationToken cancel)
+    {
+        if ((await BroughtAsync(project)).GetValueOrDefault(id) is not { } brought)
+        {
+            return null;
+        }
+        VulnerabilityData known = await VulnerabilitiesAsync();
+        if (!brought.Any(b => known.Of(id, b.Version).Count > 0))
+        {
+            return null;
+        }
+        IReadOnlyList<string> offered = await (await FeedAsync(null)).VersionsAsync(id, prerelease: brought.Any(b => VersionOrder.IsPrerelease(b.Version)), cancel);
+        return TransitiveFix.Of(id, brought, [.. References(project).Where(r => r.Id.Equals(id, StringComparison.OrdinalIgnoreCase)).Select(r => r.Version)],
+            project.TargetFrameworks, known, offered);
+    }
+
     /// <summary>What a project's restore resolved: its project.assets.json, where its evaluation says, else in its obj
     /// folder or an artifacts folder above it; none before it is restored, or while its file does not read.</summary>
-    internal static RestoredVersions Restored(ProjectModel project)
+    internal static RestoredVersions Restored(ProjectModel project) => AssetsOf(project) is { } assets ? Read(assets, null) : RestoredVersions.None;
+
+    /// <summary>What a project's restore resolved (<see cref="Restored"/>), read again only once a restore wrote its file.</summary>
+    private RestoredVersions RestoredSince(ProjectModel project) => AssetsOf(project) is { } assets ? Read(assets, assetsRead) : RestoredVersions.None;
+
+    private static string? AssetsOf(ProjectModel project) =>
+        project.Property(Passenger.Host.CarriedProperties.ProjectAssetsFile) ?? Passenger.Xaml.Projects.ProjectInputs.FindAssets(project.Path);
+
+    private static RestoredVersions Read(string assets, ConcurrentDictionary<string, (DateTime Written, long Length, RestoredVersions Read)>? kept)
     {
-        if ((project.Property(Passenger.Host.CarriedProperties.ProjectAssetsFile) ?? Passenger.Xaml.Projects.ProjectInputs.FindAssets(project.Path)) is not { } assets)
-        {
-            return RestoredVersions.None;
-        }
         try
         {
             using FileStream stream = new(assets, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            return RestoredVersions.Read(stream);
+            (DateTime Written, long Length) now = (File.GetLastWriteTimeUtc(assets), stream.Length);
+            if (kept is not null && kept.TryGetValue(assets, out (DateTime Written, long Length, RestoredVersions Read) last) && (last.Written, last.Length) == now)
+            {
+                return last.Read;
+            }
+            RestoredVersions read = RestoredVersions.Read(stream);
+            if (kept is not null)
+            {
+                kept[assets] = (now.Written, now.Length, read);
+            }
+            return read;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
@@ -243,9 +326,15 @@ public sealed partial class FolderPackages
 
     /// <summary>Adds a package to a project at a version, or moves it to that version, a pin kept a pin: the one way a
     /// package goes in (<see cref="ChangeAsync"/>). Passenger writes the files where dotnet add package would write them
-    /// otherwise than the evaluation keeps them (<see cref="WrittenChangeAsync"/>), then restores.</summary>
-    public Task<PackageOutcome> InstallAsync(ProjectModel project, string id, string version, CommandHistory.Recording? within = null)
+    /// otherwise than the evaluation keeps them (<see cref="WrittenChangeAsync"/>), then restores. With
+    /// <paramref name="frameworks"/>, a reference in those alone (<see cref="InFrameworksAsync"/>).</summary>
+    public Task<PackageOutcome> InstallAsync(ProjectModel project, string id, string version, CommandHistory.Recording? within = null,
+        IReadOnlyList<string>? frameworks = null)
     {
+        if (frameworks is { Count: > 0 })
+        {
+            return InFrameworksAsync(project, id, version, frameworks, within);
+        }
         string stage = $"Installing {id} {version} in {project.Name}…";
         string name = $"Install {id} {version} in {project.Name}";
         return Kept(project, [id]) is { } kept
@@ -301,24 +390,59 @@ public sealed partial class FolderPackages
     private async Task<CentralWrites> WritesAsync(ProjectModel project, IReadOnlyList<(string Id, string Version)> packages, string kept,
         IReadOnlyList<(string Id, string Version)> alongside)
     {
-        IReadOnlyDictionary<string, string> properties = EvaluationProperties?.Invoke(project) ?? ProjectModels.Properties(null, project);
-        MSBuildInsight? insight = null;
-        string? unread = null;
-        try
-        {
-            ProjectHost host = await ProjectHosts.ForAsync(project.Folder, CancellationToken.None);
-            insight = await BackgroundWork.Run(async () => new MSBuildInsight(await host.InspectAsync(project.Path, properties, new Dictionary<string, string>())));
-            unread = insight.Evaluated ? null : $"{project.Name} does not evaluate, so where it keeps its package versions is not known";
-        }
-        catch (ProjectHostFailed failed)
-        {
-            unread = $"Where {project.Name} keeps its package versions could not be read: {failed.Reason}";
-        }
+        (MSBuildInsight? insight, string? unread) = await InsightAsync(project);
         if (unread is not null || insight is null)
         {
             return kept.Length > 0 ? CentralWrites.Refusing(unread ?? string.Empty) : CentralWrites.None with { Left = packages };
         }
         return await BackgroundWork.Run(() => kept.Length > 0 ? CentralWrites.Of(insight, project.Path, kept, packages, alongside) : CentralWrites.OfReferences(insight, packages));
+    }
+
+    /// <summary>A project's evaluation as the session evaluates it, read once the open files are saved, or why it could not be.</summary>
+    private async Task<(MSBuildInsight? Insight, string? Unread)> InsightAsync(ProjectModel project)
+    {
+        IReadOnlyDictionary<string, string> properties = EvaluationProperties?.Invoke(project) ?? ProjectModels.Properties(null, project);
+        try
+        {
+            ProjectHost host = await ProjectHosts.ForAsync(project.Folder, CancellationToken.None);
+            MSBuildInsight insight = await BackgroundWork.Run(async () => new MSBuildInsight(await host.InspectAsync(project.Path, properties, new Dictionary<string, string>())));
+            return (insight, insight.Evaluated ? null : $"{project.Name} does not evaluate, so where it keeps its package versions is not known");
+        }
+        catch (ProjectHostFailed failed)
+        {
+            return (null, $"Where {project.Name} keeps its package versions could not be read: {failed.Reason}");
+        }
+    }
+
+    /// <summary>A package referenced in some of a project's frameworks alone, at a version, as a vulnerable version they get
+    /// through others is fixed: Passenger writes a reference under each framework's condition where the project's own
+    /// references are, its version there or under central package management where the evaluation keeps central versions
+    /// (<see cref="CentralWrites.InFrameworks"/>), then restores; one change (<see cref="ChangeAsync"/>), the other frameworks'
+    /// references as they were.</summary>
+    private async Task<PackageOutcome> InFrameworksAsync(ProjectModel project, string id, string version, IReadOnlyList<string> frameworks, CommandHistory.Recording? within)
+    {
+        string where = TransitiveFix.Within(frameworks);
+        string name = $"Install {id} {version} in {project.Name}{where}";
+        if (frameworks.FirstOrDefault(f => !project.TargetFrameworks.Contains(f, StringComparer.OrdinalIgnoreCase)) is { } unbuilt)
+        {
+            string built = project.TargetFrameworks.Count > 0 ? $": it builds for {Plural.Listed([.. project.TargetFrameworks])}" : string.Empty;
+            return new PackageOutcome(false, [], []) { Name = name, Refused = $"{project.Name} is not built for {unbuilt}{built}" };
+        }
+        string? props = CentralPackages.PropsOf(project);
+        CentralWrites writes = CentralWrites.None;
+        PackageOutcome outcome = await ChangeAsync($"Installing {id} {version} in {project.Name}{where}…", name, project, within, () => manager.RestoreAsync(project.Path),
+            () => manager.RestoreAsync(project.Path), () => WrittenAsync(project, writes), async () =>
+            {
+                (MSBuildInsight? insight, string? unread) = props is null ? (null, null) : await InsightAsync(project);
+                writes = unread is not null ? CentralWrites.Refusing(unread)
+                    : await BackgroundWork.Run(() => CentralWrites.InFrameworks(insight, project.Path, props, id, version, frameworks));
+                return writes.Texts.Keys;
+            });
+        if (bulkRecording is not null && outcome.Done)
+        {
+            Reached(project, writes.Moved, outcome.Written);
+        }
+        return props is not null ? outcome with { Moved = writes.Moved } : outcome;
     }
 
     /// <summary>A change's own texts written (<see cref="CentralWrites"/>), off the window's thread, their saves waited for:
@@ -448,6 +572,9 @@ public sealed partial class FolderPackages
                     {
                         recording?.Watch(file);
                     }
+                    // One set of Local History, named as the command, over the change's own files: a save meanwhile is the person's.
+                    using LocalHistory.Activity? history = Naming(recording?.Name ?? name, files, recording);
+                    using IDisposable? owned = history?.Own();
                     // Its own writes before a save is heard as the person's.
                     string? unwritten = heldChange ?? (bulkStopping?.IsCancellationRequested == true ? "Stopped"
                         : bulkRecording is not null && ChangedBulkFile() is { } changed ? changed : own is null ? null : await own());
@@ -535,6 +662,21 @@ public sealed partial class FolderPackages
             // Ended once the window has taken the files into its editors, so the command holds their reload.
             recorded?.Dispose();
         }
+    }
+
+    /// <summary>A change's files named one set of Local History until disposed, the set of its command's earlier changes.</summary>
+    private LocalHistory.Activity? Naming(string name, IReadOnlyList<string> files, CommandHistory.Recording? recording)
+    {
+        if (History?.Invoke() is not { } history)
+        {
+            return null;
+        }
+        LocalHistory.Activity over = history.Over(name, files, recording is not null && named.TryGetValue(recording, out LocalHistory.Activity? earlier) ? earlier : null);
+        if (recording is not null)
+        {
+            named.AddOrUpdate(recording, over);
+        }
+        return over;
     }
 
     /// <summary>Where the files' bytes are not those read before.</summary>

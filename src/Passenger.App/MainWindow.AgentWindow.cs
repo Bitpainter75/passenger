@@ -36,6 +36,7 @@ public partial class MainWindow
         }, Docking.ToolAnchor.RightTop)
         {
             Action = A.ShowAgent,
+            Serves = ToolWindowServes.EveryFolder,
             Menus = [new MenuPlace("Tools", 0, 10)],
         });
         foreach (AgentChat chat in agentChats)
@@ -98,7 +99,7 @@ public partial class MainWindow
         AgentWindow.Written = string.Empty;
         // The window as the agent's MCP server, where agents may reach it: it attaches to this process from the folder.
         AgentMcpServer? server = AgentsAllowed && AgentSocket is not null
-            ? new AgentMcpServer(Mcp.AgentSetup.ThisExecutable(), ["--mcp-attach", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)])
+            ? new AgentMcpServer(Passenger.Core.Product.Program, ["--mcp-attach", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)])
             : null;
         chat.Say(prompt, new AgentStart(Folder!, server));
     }

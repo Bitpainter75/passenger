@@ -30,6 +30,10 @@ public sealed class RunConfigurationsDialog : IdeWindow
     /// <summary>The solution the launch profiles are kept beside, or null with none open, when none can be made.</summary>
     private readonly string? solution;
     private readonly IReadOnlyList<ProjectModel> projects;
+
+    /// <summary>The build configurations the folder offers, and the one it builds as, which a configuration naming none takes.</summary>
+    private readonly IReadOnlyList<BuildConfiguration> buildConfigurations;
+    private readonly BuildConfiguration? folderBuild;
     private readonly Action<IReadOnlyList<RunConfiguration>, IReadOnlyList<RunConfiguration>, string?> apply;
     private readonly IReadOnlyList<string> singleFileAppHosts;
     private readonly ListBox list = new() { Classes = { StyleClasses.Tree } };
@@ -39,6 +43,7 @@ public sealed class RunConfigurationsDialog : IdeWindow
     private readonly Control aspireRow;
     private readonly Control godotRow;
     private readonly Control telemetryRow;
+    private readonly Control buildConfigurationRow;
     private readonly Control sceneRow;
 
     /// <summary>The rows of a Godot game's copies: how many, and each one's own arguments.</summary>
@@ -78,9 +83,12 @@ public sealed class RunConfigurationsDialog : IdeWindow
 
     public RunConfigurationsDialog(IReadOnlyList<RunConfiguration> generated, IReadOnlyList<RunConfiguration> own,
         IReadOnlyList<ProjectModel> projects, string? chosen, Action<IReadOnlyList<RunConfiguration>, IReadOnlyList<RunConfiguration>, string?> apply,
-        Func<string, bool>? isRunning = null, IReadOnlyList<RunConfiguration>? profiles = null, string? solution = null, IReadOnlyList<string>? unread = null)
+        Func<string, bool>? isRunning = null, IReadOnlyList<RunConfiguration>? profiles = null, string? solution = null, IReadOnlyList<string>? unread = null,
+        IReadOnlyList<BuildConfiguration>? buildConfigurations = null, BuildConfiguration? folderBuild = null)
     {
         FormRows.Scope(this);
+        this.buildConfigurations = buildConfigurations ?? [];
+        this.folderBuild = folderBuild;
         IsRunning = isRunning ?? (_ => false);
         this.generated = [.. generated.Select(Made)];
         mine = [.. own.Select(c => new Entry(c))];
@@ -117,6 +125,8 @@ public sealed class RunConfigurationsDialog : IdeWindow
         NameBox = Field();
         ProjectBox = new ComboBox { Classes = { StyleClasses.Form } };
         FrameworkBox = new ComboBox { Classes = { StyleClasses.Form } };
+        BuildConfigurationBox = new ComboBox { Classes = { StyleClasses.Form }, Name = "BuildConfigurationBox" };
+        ToolTip.SetTip(BuildConfigurationBox, "What its run builds, evaluates and starts as, in place of the build configuration the folder builds as");
         ProfileBox = new ComboBox { Classes = { StyleClasses.Form } };
         SaveAsProfileButton = new Button { Name = "SaveAsProfileButton", IsVisible = false };
         SaveAsProfileButton.Click += (_, _) => SaveAsLaunchProfile();
@@ -160,6 +170,10 @@ public sealed class RunConfigurationsDialog : IdeWindow
             _ => c,
         }, reshow: true);
         FrameworkBox.SelectionChanged += (_, _) => Edit(c => c with { Framework = FrameworkBox.SelectedIndex <= 0 ? string.Empty : FrameworkBox.SelectedItem as string ?? string.Empty });
+        BuildConfigurationBox.SelectionChanged += (_, _) => Edit(c => c with
+        {
+            BuildConfiguration = BuildConfigurationBox.SelectedIndex <= 0 ? string.Empty : (BuildConfigurationBox.SelectedItem as ComboBoxItem)?.Tag as string ?? c.BuildConfiguration,
+        });
         ProfileBox.SelectionChanged += (_, _) => Edit(FromProfile, reshow: true);
         GodotBox.SelectionChanged += (_, _) => Edit(c => c with { GodotEditor = GodotBox.SelectedIndex == 1, GodotInEditor = GodotBox.SelectedIndex == 2, GodotInPane = GodotBox.SelectedIndex == 3 },
             reshow: true);
@@ -173,7 +187,8 @@ public sealed class RunConfigurationsDialog : IdeWindow
         ArgumentsBox.TextChanged += (_, _) => Edit(c => c with { Arguments = ArgumentsBox.Text ?? string.Empty });
         WorkingDirectoryBox.TextChanged += (_, _) => Edit(c => c with { WorkingDirectory = WorkingDirectoryBox.Text?.Trim() ?? string.Empty });
         BuildBox.IsCheckedChanged += (_, _) => Edit(c => c with { BuildBeforeLaunch = BuildBox.IsChecked == true });
-        ConsoleBox.IsCheckedChanged += (_, _) => Edit(c => c with { Console = ConsoleBox.IsChecked == true ? ConsoleKind.Terminal : ConsoleKind.Internal });
+        // Shown again, as the note says why a drawing program runs in the terminal while it does.
+        ConsoleBox.IsCheckedChanged += (_, _) => Edit(c => c with { Console = ConsoleBox.IsChecked == true ? ConsoleKind.Terminal : ConsoleKind.Internal }, reshow: true);
         BrowserBox.IsCheckedChanged += (_, _) => Edit(c => c with { LaunchBrowser = BrowserBox.IsChecked == true });
         BrowserUrlBox.TextChanged += (_, _) => Edit(c => c with { BrowserUrl = BrowserUrlBox.Text?.Trim() ?? string.Empty });
         AddVariableButton.Click += (_, _) => AddVariable(string.Empty, string.Empty, focus: true);
@@ -262,9 +277,12 @@ public sealed class RunConfigurationsDialog : IdeWindow
             (copyRows[0], [RunKind.Project]),
             (copyRows[1], [RunKind.Project]),
             (builtRows[0] = Row("Target framework", FrameworkBox, fields: ["framework"]), [RunKind.Project, RunKind.Dockerfile, RunKind.SdkContainer]),
+            (buildConfigurationRow = Row("Build configuration", BuildConfigurationBox, fields: ["buildConfiguration"]),
+                [RunKind.Project, RunKind.Compose, RunKind.Dockerfile, RunKind.SdkContainer]),
             (builtRows[1] = Row("Launch profile", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { ProfileBox, SaveAsProfileButton } }), [RunKind.Project]),
             (launchRows[0] = Row("Exe path", ProgramBox, fields: ["program"]), [RunKind.Project]),
-            (launchRows[1] = Row("Program arguments", ArgumentsBox, fields: ["arguments"]), [RunKind.Project]),
+            (Row("Script", ScriptText, fields: ["script"]), [RunKind.Script]),
+            (launchRows[1] = Row("Program arguments", ArgumentsBox, fields: ["arguments"]), [RunKind.Project, RunKind.Script]),
             (launchRows[2] = Row("Working directory", WorkingDirectoryBox, fields: ["workingDirectory"]), [RunKind.Project]),
             (Row("Compose files", ComposeFilesBox, fields: ["composeFiles"]), [RunKind.Compose]),
             (Row("Env files", EnvFilesBox, fields: ["envFiles"]), [RunKind.Compose]),
@@ -278,8 +296,8 @@ public sealed class RunConfigurationsDialog : IdeWindow
             (Row(string.Empty, KeepBackingBox, marked: keepWords, fields: ["keepBackingServices"]), [RunKind.Compose]),
             (telemetryRow = Row(string.Empty, TelemetryBox, marked: telemetryWords, fields: ["telemetry"]), [RunKind.Project, RunKind.Compose, RunKind.Dockerfile, RunKind.SdkContainer]),
             (launchRows[3] = Row("Environment variables", new StackPanel { Spacing = 6, Children = { VariablesHeader(), variables, AddVariableButton } }, top: true, fields: ["environment"]),
-                [RunKind.Project, RunKind.Dockerfile, RunKind.SdkContainer]),
-            (launchRows[4] = Row(string.Empty, ConsoleBox, marked: consoleWords, fields: ["console"]), [RunKind.Project]),
+                [RunKind.Project, RunKind.Dockerfile, RunKind.SdkContainer, RunKind.Script]),
+            (launchRows[4] = Row(string.Empty, ConsoleBox, marked: consoleWords, fields: ["console"]), [RunKind.Project, RunKind.Script]),
             (browserRows[0], [RunKind.Project, RunKind.Compose, RunKind.Dockerfile, RunKind.SdkContainer]),
             (browserRows[1], [RunKind.Project, RunKind.Compose, RunKind.Dockerfile, RunKind.SdkContainer]),
             (Row("Launched service", LaunchServiceBox, fields: ["launchService"]), [RunKind.Compose]),
@@ -374,6 +392,9 @@ public sealed class RunConfigurationsDialog : IdeWindow
     public TextBox NameBox { get; }
 
     public ComboBox ProjectBox { get; }
+
+    /// <summary>The build configuration its run builds as: the folder's first, then each the folder offers.</summary>
+    public ComboBox BuildConfigurationBox { get; }
 
     /// <summary>Other AppHosts that start and stop with the chosen configuration.</summary>
     public IReadOnlyList<CheckBox> LinkedAppHostBoxes => [.. linkedAppHosts.Children.OfType<CheckBox>()];
@@ -478,6 +499,7 @@ public sealed class RunConfigurationsDialog : IdeWindow
     /// <summary>What the program, arguments and working folder boxes say left empty, for a project and for a Godot project's.</summary>
     private const string OwnProgram = "The project's own program";
     private const string OwnArguments = "The project's RunArguments, if it has any";
+    private const string ScriptArguments = "Given to the script after its own command";
     private const string OwnWorkingDirectory = "The project's RunWorkingDirectory, else its output folder";
     private const string GodotArguments = "Godot's own after --path: a scene to start in (res://level.tscn), --debug-collisions";
     private const string GodotWorkingDirectory = "The Godot project's folder";
@@ -505,6 +527,9 @@ public sealed class RunConfigurationsDialog : IdeWindow
 
     /// <summary>The configuration's kind, which its page follows: a .NET project, Docker Compose, a Dockerfile, an SDK container.</summary>
     public TextBlock KindText { get; }
+
+    /// <summary>A package.json script configuration's script and its package's folder.</summary>
+    public TextBlock ScriptText { get; } = new() { VerticalAlignment = VerticalAlignment.Center };
 
     /// <summary>A Compose configuration's files, the base first, separated by ';' (relative to the open folder or full).</summary>
     public TextBox ComposeFilesBox { get; }
@@ -629,8 +654,19 @@ public sealed class RunConfigurationsDialog : IdeWindow
     /// <summary>Each kind's rows of the form, and the kinds that show each.</summary>
     private readonly (Control Row, RunKind[] Kinds)[] pages;
 
-    /// <summary>The open folder, against which the paths typed are read and shown.</summary>
-    public string? Folder { get; init; }
+    /// <summary>The open folder, against which the paths typed are read and shown: the configuration shown as the dialog was
+    /// made shows its paths from it once it is given.</summary>
+    public string? Folder
+    {
+        get => folder;
+        init
+        {
+            folder = value;
+            ShowChosen();
+        }
+    }
+
+    private readonly string? folder;
 
     private static string KindName(RunKind kind) => kind switch
     {
@@ -638,6 +674,7 @@ public sealed class RunConfigurationsDialog : IdeWindow
         RunKind.Compose => "Docker Compose",
         RunKind.Dockerfile => "Dockerfile",
         RunKind.SdkContainer => "SDK Container",
+        RunKind.Script => "package.json Script",
         _ => ".NET Project",
     };
 
@@ -664,9 +701,7 @@ public sealed class RunConfigurationsDialog : IdeWindow
     }
 
     /// <summary>A path as the form shows it: relative to the open folder when inside it.</summary>
-    private string Shown(string path) => Folder is { } folder && path.Length > 0 && Core.PathNames.IsUnder(path, folder)
-        ? Path.GetRelativePath(folder, path).Replace('\\', '/')
-        : path;
+    private string Shown(string path) => Folder is { } folder && path.Length > 0 && Core.PathNames.Relative(path, folder) is { } relative ? relative : path;
 
     /// <summary>A path typed, made full against the open folder.</summary>
     private string Full(string? typed) => typed?.Trim() is not { Length: > 0 } path ? string.Empty
@@ -1130,6 +1165,23 @@ public sealed class RunConfigurationsDialog : IdeWindow
     }
 
     /// <summary>Shows the chosen configuration in the fields, a generated one's name, project and launch profile read-only.</summary>
+    /// <summary>The build configurations a configuration may name, the folder's choice first; one it names that the folder
+    /// no longer offers is listed after them, so the dialog shows what it builds as.</summary>
+    private void ShowBuildConfigurations(RunConfiguration shown)
+    {
+        List<ComboBoxItem> items = [new() { Content = folderBuild is { } folder ? $"The folder's ({folder.Shown(buildConfigurations)})" : "The folder's" }];
+        items.AddRange(buildConfigurations.Select(offered => new ComboBoxItem { Content = offered.Shown(buildConfigurations), Tag = offered.Key }));
+        int chosen = shown.BuildConfiguration.Length == 0 ? 0
+            : buildConfigurations.ToList().FindIndex(offered => BuildConfiguration.Of(shown.BuildConfiguration) is { } named && offered.Is(named)) + 1;
+        if (chosen == 0 && shown.BuildConfiguration.Length > 0)
+        {
+            items.Add(new ComboBoxItem { Content = $"{shown.BuildConfiguration} (not offered)", Tag = shown.BuildConfiguration });
+            chosen = items.Count - 1;
+        }
+        BuildConfigurationBox.ItemsSource = items;
+        BuildConfigurationBox.SelectedIndex = chosen;
+    }
+
     private void ShowChosen()
     {
         RunConfiguration? shown = Chosen;
@@ -1177,6 +1229,7 @@ public sealed class RunConfigurationsDialog : IdeWindow
             IReadOnlyList<string> frameworks = project?.TargetFrameworks ?? [];
             FrameworkBox.ItemsSource = (string[])[frameworks.Count > 0 ? $"Default ({frameworks[0]})" : "Default", .. frameworks];
             FrameworkBox.SelectedIndex = shown.Framework.Length == 0 ? 0 : Math.Max(0, frameworks.ToList().IndexOf(shown.Framework) + 1);
+            ShowBuildConfigurations(shown);
             IReadOnlyList<LaunchProfile> profiles = project is null ? [] : LaunchProfile.Read(project);
             ProfileBox.ItemsSource = (string[])["None", .. profiles.Select(p => p.Name)];
             ProfileBox.SelectedIndex = Math.Max(0, profiles.ToList().FindIndex(p => p.Name == shown.LaunchProfile) + 1);
@@ -1186,7 +1239,8 @@ public sealed class RunConfigurationsDialog : IdeWindow
             CopiesBox.Value = shown.GodotCopies;
             CopyArgumentsBox.Text = string.Join(Environment.NewLine, shown.CopyArguments);
             ProgramBox.PlaceholderText = godot ? GodotProgram(project?.IsScriptGame == true) : OwnProgram;
-            ArgumentsBox.PlaceholderText = godot ? GodotArguments : OwnArguments;
+            ArgumentsBox.PlaceholderText = godot ? GodotArguments : shown.IsScript ? ScriptArguments : OwnArguments;
+            ScriptText.Text = shown.IsScript ? $"{shown.Script}, in {Shown(Path.GetDirectoryName(shown.Project) ?? shown.Project)}" : string.Empty;
             WorkingDirectoryBox.PlaceholderText = godot ? GodotWorkingDirectory : OwnWorkingDirectory;
             ProgramBox.Text = shown.Program;
             ArgumentsBox.Text = shown.Arguments;
@@ -1235,7 +1289,7 @@ public sealed class RunConfigurationsDialog : IdeWindow
             {
                 browser.IsVisible = false;
             }
-            foreach (Control built in project?.IsScriptGame == true ? builtRows : [])
+            foreach (Control built in project?.IsScriptGame == true ? [.. builtRows, buildConfigurationRow] : (Control[])[])
             {
                 built.IsVisible = false;
             }
@@ -1268,8 +1322,8 @@ public sealed class RunConfigurationsDialog : IdeWindow
         ShowAspireServices();
     }
 
-    /// <summary>What the fields cannot say: where a generated one comes from and how a change to it is kept, and why one
-    /// cannot run here.</summary>
+    /// <summary>What the fields cannot say: where a generated one comes from and how a change to it is kept, why it runs in
+    /// the terminal where that is its project's own default, and why one cannot run here.</summary>
     private static string NoteOn(RunConfiguration shown, ProjectModel? project, string? whyNot)
     {
         string name = project?.Name ?? Path.GetFileNameWithoutExtension(shown.Project);
@@ -1287,6 +1341,10 @@ public sealed class RunConfigurationsDialog : IdeWindow
         {
             origin = $"{origin} Hot Reload: {GodotLaunch.EditorReloads}.".Trim();
         }
+        if (shown is { Generated: true, Console: ConsoleKind.Terminal, DrawsWith: { } package })
+        {
+            origin = $"{origin} It runs in the terminal: {name} draws with {package}, whose colours, live output and prompts need one.".Trim();
+        }
         return whyNot is { } why ? $"{origin} It cannot run here: {why}.".Trim() : origin;
     }
 
@@ -1298,6 +1356,7 @@ public sealed class RunConfigurationsDialog : IdeWindow
         { Kind: RunKind.Compose } when Containers.ContainerConfigurations.IsComposeProject(generated.Project) => "Docker Compose project",
         { Kind: RunKind.Compose } => "compose file",
         { Kind: RunKind.Dockerfile } => "Dockerfile",
+        { Kind: RunKind.Script } => "package.json",
         _ => "project",
     };
 
