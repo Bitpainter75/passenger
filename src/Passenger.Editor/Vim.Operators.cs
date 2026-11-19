@@ -311,7 +311,7 @@ public sealed partial class Vim
     private VimResult Wrap(bool stay, TextSnapshot text, SelectionSet selections, List<Stretch> stretches, IVimView view)
     {
         int width = Options.TextWidth > 0 ? Options.TextWidth : view.LineLength > 0 ? view.LineLength : VimWrapping.DefaultWidth;
-        VimWrapping.Wrapped wrapped = VimWrapping.Wrap(text, LinesOf(stretches), width, view.Indent.TabWidth, view.LineEnding, view.LineComment, Options.JoinSpaces);
+        VimWrapping.Wrapped wrapped = VimWrapping.Wrap(text, LinesOf(stretches), width, view.Indent, view.LineEnding, view.LineComment, Options.JoinSpaces);
         IReadOnlyList<TextEdit> edits = wrapped.Edits;
         TextSnapshot after = text.Apply(edits);
         SelectionSet carets = selections.With(c =>

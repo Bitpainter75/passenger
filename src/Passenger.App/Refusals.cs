@@ -21,6 +21,15 @@ public static class Refusals
     /// <summary>No file is shown in the editor.</summary>
     public const string NoFile = "No file is open";
 
+    /// <summary>A regex stopped at its time limit, wherever that cuts an answer short (<see cref="TextSearch.RegexStopped"/>).</summary>
+    public const string RegexStopped = TextSearch.RegexStopped;
+
+    /// <summary><see cref="RegexStopped"/> naming where it stopped: a file, or what it was matching.</summary>
+    public static string RegexStoppedIn(string where) => TextSearch.RegexStoppedIn(where);
+
+    /// <summary>No tab is open and no tool window serves the folder, for the Switcher.</summary>
+    public const string NothingToSwitchTo = "No tab or tool window is open to switch to";
+
     /// <summary>The file shown is no Godot scene, nor a script a scene runs, of a Godot project the folder builds a game of.</summary>
     public const string NoGodotScene = "No scene of a Godot game is open: open a .tscn, or a script one of its nodes runs";
 
@@ -188,8 +197,21 @@ public static class Refusals
     /// <summary>What an answer given before the C# language server took C# files come under its projects into them went
     /// without (<see cref="CSharp.CSharpService.UntakenAsync"/>), the files named as shown.</summary>
     public static string Untaken(IReadOnlyList<string> files) =>
-        $"Without {string.Join(", ", files.Take(3))}{(files.Count > 3 ? $" and {files.Count - 3} more" : string.Empty)}, which the C# language server "
-        + $"has not loaded into {Plural.Agreeing(files.Count, "its project", "their projects")} yet";
+        $"Without {FirstNamed(files)}, which the C# language server has not loaded into {Plural.Agreeing(files.Count, "its project", "their projects")} yet";
+
+    /// <summary>What an answer of the solution's whole code went without once the wait for the C# language server ran out:
+    /// the files come under its projects it has not taken in (<see cref="Untaken"/>), and the projects it answered from as
+    /// they were before they changed, not loaded again yet.</summary>
+    public static string WentWithout(IReadOnlyList<string> files, IReadOnlyList<string> projects) => string.Join(". ", new[]
+    {
+        files.Count > 0 ? Untaken(files) : null,
+        projects.Count > 0 ? $"From {FirstNamed(projects)} as {Plural.Agreeing(projects.Count, "it was", "they were")} before "
+            + $"{Plural.Agreeing(projects.Count, "it", "they")} changed, which the C# language server has not loaded again yet" : null,
+    }.OfType<string>());
+
+    /// <summary>The first three names, and how many more.</summary>
+    private static string FirstNamed(IReadOnlyList<string> names) =>
+        $"{string.Join(", ", names.Take(3))}{(names.Count > 3 ? $" and {names.Count - 3} more" : string.Empty)}";
 
     /// <summary>The folder's projects have no .NET SDK to load, build and run them with: the one its global.json asks
     /// for (named from <paramref name="folder"/>) is not installed, none is, or dotnet found none for another reason it
@@ -200,7 +222,7 @@ public static class Refusals
             + "asks for is not installed: install it, or have global.json name one that is",
         { NoHost: true } => NoDotnet,
         { ForOtherProcessor: true } => OnlyNativeSdk,
-        { NoneInstalled: true } => $"Only the .NET runtime is installed: {NeedsTheSdk}",
+        { NoneInstalled: true } => $"{RuntimeAlone(null)}: {NeedsTheSdk}",
         _ => $"No .NET SDK was found for this folder: {ChildResult.FirstLineOf(missing.Said)}",
     };
 
@@ -233,14 +255,39 @@ public static class Refusals
 
     /// <summary>An x64 Passenger the system translates found only a .NET SDK of the system's own processor, whose MSBuild it
     /// cannot load (<see cref="MissingSdk.ForOtherProcessor"/>).</summary>
-    public static string OnlyNativeSdk => OperatingSystem.IsMacOS()
-        ? "This Intel build of Passenger, run by Rosetta, loads projects only with an Intel (x64) .NET SDK, and this Mac's is Apple Silicon's: "
-            + "download Passenger for Apple Silicon, which suits this Mac, or install the x64 .NET SDK beside it"
-        : "This x64 build of Passenger, run by emulation, loads projects only with an x64 .NET SDK, and this computer's is Arm64's: "
-            + "download Passenger for Arm64, which suits this computer, or install the x64 .NET SDK beside it";
+    public static string OnlyNativeSdk => $"This {TranslatedBuild}, loads projects only with {X64Sdk}, and {ThisComputer}'s is {SystemsProcessor}'s: "
+        + $"{SystemsOwnPassenger}, or install the x64 .NET SDK beside it";
+
+    /// <summary>An x64 Passenger the system translates with no .NET SDK at all: no .NET, or a runtime alone, in
+    /// <paramref name="runtime"/>.</summary>
+    public static string TranslatedWithoutSdk(string? runtime) =>
+        $"{(runtime is null ? NoneOfDotnet : RuntimeAlone(runtime))}, and this {TranslatedBuild}, loads projects "
+        + $"only with {X64Sdk}: {SystemsOwnPassenger} and installs the .NET SDK for it, or install the x64 .NET SDK yourself";
+
+    /// <summary>Install .NET SDK in an x64 Passenger the system translates: the SDK it installs, the system's own processor's,
+    /// is one this Passenger cannot load.</summary>
+    public static string InstallsOnlyNative => $"Install .NET SDK installs only {ThisComputer}'s own .NET SDK, {SystemsProcessor}'s, which this {TranslatedBuild}, cannot load: "
+        + $"{SystemsOwnPassenger}, or install the x64 .NET SDK yourself";
+
+    /// <summary>An x64 build of Passenger, as the system translating it runs it.</summary>
+    private static string TranslatedBuild => OperatingSystem.IsMacOS() ? "Intel build of Passenger, run by Rosetta" : "x64 build of Passenger, run by emulation";
+
+    private static string X64Sdk => OperatingSystem.IsMacOS() ? "an Intel (x64) .NET SDK" : "an x64 .NET SDK";
+
+    private static string ThisComputer => OperatingSystem.IsMacOS() ? "this Mac" : "this computer";
+
+    private static string SystemsProcessor => OperatingSystem.IsMacOS() ? "Apple Silicon" : "Arm64";
+
+    /// <summary>The way on for an x64 Passenger the system translates: the build for the system's own processor.</summary>
+    private static string SystemsOwnPassenger => $"download Passenger for {SystemsProcessor}, which suits {ThisComputer}";
 
     /// <summary>No dotnet at all, runtime or SDK, was found.</summary>
-    public const string NoDotnet = $"No .NET is installed: files open and edit, and Git and the terminal work, but {NeedsTheSdk}";
+    public const string NoDotnet = $"{NoneOfDotnet}: files open and edit, and Git and the terminal work, but {NeedsTheSdk}";
+
+    private const string NoneOfDotnet = "No .NET is installed";
+
+    /// <summary>A dotnet with runtimes alone, in <paramref name="root"/> where it is known.</summary>
+    private static string RuntimeAlone(string? root) => $"Only the .NET runtime is installed{(root is { } at ? $", in {PathNames.Shown(at, null)}" : string.Empty)}";
 
     private const string NeedsTheSdk = "projects need the .NET SDK to load, build, run and test";
 
@@ -249,7 +296,8 @@ public static class Refusals
     public static string? Dotnet(DotnetWant want, string? folder) => want.Lack switch
     {
         DotnetLack.NoDotnet => NoDotnet,
-        DotnetLack.RuntimeOnly => $"Only the .NET runtime is installed{(want.Root is { } root ? $", in {PathNames.Shown(root, null)}" : string.Empty)}: {NeedsTheSdk}",
+        DotnetLack.RuntimeOnly => $"{RuntimeAlone(want.Root)}: {NeedsTheSdk}",
+        DotnetLack.OtherProcessor => want.SystemsOwn is null ? TranslatedWithoutSdk(want.Root) : OnlyNativeSdk,
         DotnetLack.GlobalJsonSdk or DotnetLack.NoSdk => NoSdk(want.Missing!, folder),
         DotnetLack.OlderThanProject when want.ChosenBy is { } asked => $"{want.Newer!.Value.Project} targets .NET {want.Newer.Value.Framework}, which the .NET SDK {want.Sdk} "
             + $"does not build: {PathNames.Shown(asked.Path, folder)} chose it, asking for {asked.Version}{(asked.RollForward is { } roll ? $" with rollForward {roll}" : string.Empty)}; "
@@ -276,14 +324,54 @@ public static class Refusals
     public const string AgentChangesPath = "An agent never changes the person's shell PATH: ask the person, who does it with the banner over Passenger's window, "
         + "or Tools, Add .NET to the Shell's PATH…";
 
+    /// <summary>An agent's Add or Remove the passenger-ide Command, or its input answering the person's question of it: the
+    /// person's shell is theirs to change.</summary>
+    public static readonly string CommandIsThePersons = $"An agent never adds or removes the person's {PassengerCommand.Name} command: ask the person, who does it "
+        + $"with Tools, Add the {PassengerCommand.Name} Command… or Remove the {PassengerCommand.Name} Command…";
+
+    /// <summary>Add or Remove the passenger-ide Command where Passenger's installer makes the command (Windows) or
+    /// install.sh does (Linux); null on macOS, where the person does.</summary>
+    public static string? CommandMadeElsewhere =>
+        OperatingSystem.IsWindows() ? $"On Windows, Passenger's installer puts the {PassengerCommand.Name} command on your Path, and uninstalling takes it off"
+        : OperatingSystem.IsMacOS() ? null
+        : $"On Linux, install.sh links the {PassengerCommand.Name} command, and install.sh --uninstall removes it";
+
+    /// <summary>The passenger-ide command while the window has not yet read what stands at its place.</summary>
+    public static readonly string CommandStillRead = $"Passenger is still reading where the {PassengerCommand.Name} command stands";
+
+    /// <summary>The passenger-ide command of a Passenger in no app bundle, as a build from source is not.</summary>
+    public static readonly string CommandOfNoBundle = $"This Passenger is in no app bundle, as a build from source is not, so it carries no {PassengerCommand.Name} command";
+
+    /// <summary>The passenger-ide command of a Passenger macOS runs from a copy of its own, which goes as it ends.</summary>
+    public static string CommandOfTranslocated(string bundle) =>
+        $"macOS runs this Passenger from a copy of its own ({bundle}), which goes as it ends: once Passenger is in Applications, its {PassengerCommand.Name} command can be added";
+
+    /// <summary>The passenger-ide command of a Passenger on a disk image, which goes as the image is ejected.</summary>
+    public static string CommandOfDiskImage(string bundle) =>
+        $"This Passenger runs from {bundle}, on a disk image or a disk it cannot write: drag it onto Applications, then add its {PassengerCommand.Name} command";
+
+    /// <summary>The passenger-ide command where the app's bundle carries no launcher for it.</summary>
+    public static string CommandNotCarried(string launcher) => $"This Passenger carries no {PassengerCommand.Name} command at {launcher}";
+
+    /// <summary>The passenger-ide command's place held by another program, a folder, or a link to one: the person's own.</summary>
+    public static string CommandOthers(string link) => $"{PathNames.Shown(link, null)} is another program's, not Passenger's: move it away, then add the command again";
+
+    /// <summary>Add the passenger-ide Command where it is there, leading to this Passenger, its folder on the PATH.</summary>
+    public static string CommandThere(string link) => $"{PathNames.Shown(link, null)} is there already, leading to this Passenger";
+
+    /// <summary>Remove the passenger-ide Command where nothing is at its place.</summary>
+    public static string NoCommand(string link) => $"There is no {PassengerCommand.Name} command at {PathNames.Shown(link, null)} to remove";
+
     /// <summary>The banner's word of a C# file of no project shown while the machine has no .NET SDK: what Roslyn's server
     /// cannot give it, and why.</summary>
     public static string LooseWithoutSdk(string file) =>
         $"{file} is a C# file of no project, which knows no framework types until a .NET SDK is installed: Roslyn reads a loose file's framework only from a project the SDK's MSBuild builds";
 
-    /// <summary>Install .NET SDK with nothing lacking: the newest SDK found, and where.</summary>
+    /// <summary>Install .NET SDK with nothing it installs mending the want: the newest SDK found, and where; or, for a
+    /// Passenger the system translates, which loads none of the system's own SDKs, that it installs none it loads.</summary>
     public static string NothingToInstall(DotnetMachine? machine, DotnetWant want) =>
-        machine?.NewestSdk is { } sdk && machine.Found is { } found
+        want.Lack == DotnetLack.OtherProcessor || want is { Translated: true, Install: not null } ? InstallsOnlyNative
+        : machine?.NewestSdk is { } sdk && machine.Found is { } found
             ? $"The .NET SDK {want.Sdk ?? sdk} is installed, in {PathNames.Shown(found.Root, null)}: nothing is missing"
             : "Passenger is still looking for .NET";
 
@@ -485,6 +573,15 @@ public static class Refusals
     /// <summary>The container engine's CLI answers, but its engine does not, and it gave no words of its own.</summary>
     public const string EngineNotRunning = "The container engine is not running";
 
+    /// <summary>An image built for x86-64 alone (SQL Server's, <see cref="BackingService.X64Only"/>) on an Arm engine without
+    /// Rosetta: one that runs no x86-64 image, or emulates x86-64 otherwise (QEMU), under which SQL Server fails as it starts.
+    /// Docker Desktop and Podman are told how they would use Rosetta.</summary>
+    public static string X64OnlyUnrunnable(string what, Containers.EngineState engine) =>
+        $"{what} can't run on this {(OperatingSystem.IsMacOS() ? "Mac" : "machine")}: its image is built for x86-64 alone, and {engine.EngineName} "
+        + (engine.Amd64 == Containers.Amd64Runs.Never ? "runs no x86-64 image here" : $"emulates x86-64 here without Rosetta, under which {what} fails as it starts")
+        + (engine.DockerDesktop ? ". Choose the Apple Virtualization framework and turn on Use Rosetta for x86_64/amd64 emulation on Apple Silicon in Docker Desktop's settings (General)"
+            : engine.IsPodman ? ". Run it on a Podman machine that uses Rosetta" : string.Empty);
+
     /// <summary>A profile asked for while another run of the window is profiled or starting to be: one records at a time.</summary>
     public const string Profiling = "A run is already being profiled";
 
@@ -503,6 +600,12 @@ public static class Refusals
     /// <summary>Why a program cannot be profiled, or its heap read (<paramref name="doing"/> it), now: the debugger holds it
     /// paused, and its runtime answers the profiler only as it runs.</summary>
     public static string PausedInDebugger(string program, string doing) => $"{program} is paused in the debugger: continue it to {doing}";
+
+    /// <summary>Why a Blazor app's WebAssembly half is not debugged in the browser a run names (<paramref name="where"/>, a
+    /// place in words that begins a sentence): <paramref name="program"/> is known to be no Chromium browser, the one kind
+    /// .NET's browser debug proxy drives.</summary>
+    public static string NotChromium(string where, string program) =>
+        $"{where} names {program}, which is no Chromium browser, and only a Chromium browser debugs them: name Chrome, Edge, Chromium or Brave there to debug them";
 
     /// <summary>A program's metrics asked for while the debugger holds it paused, read once it runs.</summary>
     public static string MetricsWhilePaused(string program) => $"{program} is paused in the debugger: its metrics come once it runs";
@@ -532,16 +635,25 @@ public static class Refusals
     public static string RemovedAlone(string name, string from) =>
         $"Delete moves several files and folders to the Trash at once, but {name} only leaves {from}, its files staying on disk: choose it alone to remove it";
 
+    /// <summary>A file or <paramref name="folder"/> of a NuGet package folder, every project's copy of that version, which no
+    /// restore writes again.</summary>
+    public static string OfPackage(string name, string package, bool folder = false) => $"{name} is {PackagesOwn(package, folder)}";
+
+    /// <summary>What a file or <paramref name="folder"/> of a NuGet package folder is (<see cref="OfPackage"/>), said after
+    /// its name where a list of files left as they were names each.</summary>
+    public static string PackagesOwn(string package, bool folder = false) =>
+        $"a {(folder ? "folder" : "file")} of the package {package}, as NuGet restored it for every project";
+
     /// <summary>A file shown read-only (decompiled, installed, carried by the app, a copy to read), which nothing edits or
     /// saves.</summary>
     public static string ReadOnly(string name) => $"{name} is read-only";
 
     /// <summary>A path an agent named that its tools may not reach (<see cref="Mcp.AgentReach"/>): outside the open folder
-    /// and the projects its trusted solution names beside it, and to read, outside the files made or installed to be read
-    /// too; <paramref name="changes"/> for one it would change.</summary>
+    /// and the projects its trusted solution and AppHosts name beside it, and to read, outside the files made or installed to
+    /// be read too; <paramref name="changes"/> for one it would change.</summary>
     public static string OutOfReach(string path, string? folder, bool changes) =>
         $"{path} is outside {(folder is null ? "any open folder" : $"the open folder {folder}")}: an agent's tools {(changes ? "change" : "read and change")} "
-        + "only the folder's files and, where it is trusted, those of the projects its solution names beside it"
+        + "only the folder's files and, where it is trusted, those of the projects its solution and AppHosts name beside it"
         + (changes ? string.Empty
             : ", and read outside them only what Go to Declaration leads to: the packages its projects restore, the SDK's MSBuild files, "
             + "and the copies Passenger makes to be read (a source generator's code, a library's decompiled or linked source)");
@@ -628,7 +740,7 @@ public static class Refusals
     /// <summary>Why the file shown cannot be saved (the one a diff's tab edits, <see cref="Workspace.OpenDocument.Saves"/>): none is
     /// shown, it is read-only, or it has nothing to save.</summary>
     public static string? NeedsUnsaved(ActionContext context) =>
-        context.File?.Saves is not { } file ? NoFile : file.IsReadOnly ? ReadOnly(file.Name) : file.IsModified ? null : $"{file.Name} is saved";
+        context.File?.Saves is not { } file ? NoFile : file.ReadOnlyWhy ?? (file.IsModified ? null : $"{file.Name} is saved");
 
     /// <summary>Why an action on the file shown cannot run: none is shown.</summary>
     public static string? NeedsFile(ActionContext context) => context.File is null ? NoFile : null;
@@ -660,6 +772,30 @@ public static class Refusals
     public static string MacCatalystUnprofiled(string app) =>
         $"Passenger's profiler does not record a Mac Catalyst app yet, so {app} cannot be profiled: Run starts it";
 
+    /// <summary>A program built for 32-bit x86 debugged (by its build, or a test host's or a process's own processor), which
+    /// Passenger's debugger cannot follow (<see cref="DotnetProcesses.Undebugged32Bit"/>): Run starts it, and built for
+    /// AnyCPU it runs, and debugs, as a 64-bit program.</summary>
+    public static string X86Undebugged(string program) =>
+        $"Could not debug {program}: {DotnetProcesses.Undebugged32Bit}. Run starts it; built for AnyCPU (its PlatformTarget), it runs as a 64-bit program, which debugs";
+
+    /// <summary>A running 32-bit program the debugger was to attach to (a test host a runner started), by the name its tab takes.</summary>
+    public static string X86Unattached(string name) => $"Cannot attach to {name}: {DotnetProcesses.Undebugged32Bit}";
+
+    /// <summary>A 32-bit x86 program run with Hot Reload, which reaches it only through the debugger.</summary>
+    public const string X86Unreloaded = $"it {DotnetProcesses.RunsAs32Bit}, and Hot Reload reaches it only through Passenger's debugger, a 64-bit program";
+
+    /// <summary>A program built for 32-bit x86 run off Windows, the one system .NET runs x86 programs on.</summary>
+    public const string X86OnWindowsAlone = "it is built for 32-bit x86 (its PlatformTarget), which .NET runs only on Windows";
+
+    /// <summary>A 32-bit x86 program whose x86 .NET installation, in <paramref name="root"/>, lacks what it runs on, each by
+    /// the installer that brings it and its version (<see cref="Run.X86Programs.Installers"/>), with where to download each.</summary>
+    public static string X86RuntimeMissing(string root, IReadOnlyList<(string Installer, string Version)> lacking)
+    {
+        string named = Plural.Listed([.. lacking.Select(l => $"{l.Installer} {l.Version}")]);
+        string where = string.Join(", ", lacking.Select(l => $"https://dotnet.microsoft.com/download/dotnet/{l.Version}").Distinct(StringComparer.Ordinal));
+        return $"it {DotnetProcesses.RunsAs32Bit}, on the x86 .NET in {PathNames.Shown(root, null)}, which has no {named}: install the {named} for x86, from {where}";
+    }
+
     /// <summary>An Android app run where this machine (<paramref name="host"/>, "Linux on Arm64") builds none.</summary>
     public static string AndroidBuiltElsewhere(string host) => $"Android apps are built only on {AndroidHosts.Builders}: {AndroidHosts.Why(host)}";
 
@@ -689,6 +825,11 @@ public static class Refusals
     public const string QuitIsThePersons = "Only the person quits Passenger or closes its last window, which ends what runs there and installs an update made ready: "
         + "ask them to";
 
+    /// <summary>An attached agent's input closing a window that Settings' Confirm before closing asks the person about, or
+    /// answering that question: the person closes it.</summary>
+    public const string CloseIsThePersons = "Only the person closes this window, which Passenger asks them about first as Settings says (Confirm before closing): "
+        + "ask them to";
+
     /// <summary>An agent's install of what a mobile project needs: the person installs it, accepting what it asks.</summary>
     public const string AgentInstallsMobile = "Only the person installs what a mobile project needs (a workload downloads from NuGet, the Android SDK asks them to accept "
         + "its licences): ask them to, with the banner over Passenger's window";
@@ -705,10 +846,11 @@ public static class Refusals
     /// <summary>Make the Mobile Edits with no mobile head needing an edit Passenger makes.</summary>
     public const string NoMobileEdits = "No mobile app's head of the folder needs an edit Passenger makes";
 
-    /// <summary>A .NET installed for every user, which a workload installs into only with an administrator's rights.</summary>
+    /// <summary>A .NET installed for every user that installs workloads into itself, not each user's own folder, which takes
+    /// an administrator's rights: <paramref name="command"/> as an administrator runs it (<see cref="WorkloadInstalls.AsAdministrator"/>).</summary>
     public static string WorkloadsNeedAdministrator(string root, string command) =>
         $"The .NET in {PathNames.Shown(root, null)} was installed for every user, so its workloads install only with an administrator's rights: run "
-        + (OperatingSystem.IsWindows() ? $"{command} in a terminal run as administrator" : $"sudo {command} in a terminal");
+        + $"{command} in a terminal{(OperatingSystem.IsWindows() ? " run as administrator" : string.Empty)}";
 
     /// <summary>A Functions app an AppHost asks for, with no Azure Functions Core Tools' func on the PATH to host it.</summary>
     public static string NoFunc(string project) =>
@@ -718,6 +860,32 @@ public static class Refusals
     /// <summary>A service an AppHost's orchestrator asked to start with a variable loading code from where another user may
     /// write (<see cref="LoadingVariables"/>), which it is not.</summary>
     public static string LoadsOthersCode(string project, string why) => $"{project} was not started: {why}";
+
+    /// <summary>A service an AppHost's orchestrator asked to start outside the open folder and what it reaches beside it
+    /// (<see cref="ProjectSession.Reaches"/>).</summary>
+    public static string NotReached(string project) =>
+        $"{project} was not started: it lies outside the open folder and the projects its solution and AppHosts name beside it";
+
+    /// <summary>A service an AppHost in the open folder names by path in a folder no workspace lends its trust to
+    /// (<see cref="WorkspaceTrust.WhyNotLent"/>), which its orchestrator asked to start.</summary>
+    public static string NotLent(string project, string folder, Unlent why) =>
+        $"{project} was not started: its AppHost names it in {Unlendable(folder, why)}, to which the open folder lends none of its trust, "
+        + "as that would trust what you never chose: open a folder holding both";
+
+    /// <summary>A folder no workspace lends its trust to, said with why.</summary>
+    private static string Unlendable(string folder, Unlent why) => why switch
+    {
+        Unlent.Root => $"the disk's root {folder}",
+        Unlent.HoldsOpen => $"{folder}, which holds the open folder",
+        Unlent.HoldsHome when PathNames.Same(folder, PathNames.Canonical(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))) => $"your home folder {folder}",
+        Unlent.HoldsHome => $"{folder}, which holds your home folder",
+        _ => folder,
+    };
+
+    /// <summary>A service only an agent's edit of an AppHost in the open folder names by path beside it, which lends it no
+    /// trust (<see cref="Mcp.AgentReach.WroteFor"/>), its orchestrator asking to start it.</summary>
+    public static string NamedByAgent(string project) =>
+        $"{project} was not started: only an agent's edit of its AppHost names it beside the open folder, which lends it no trust until you save that AppHost yourself";
 
     /// <summary>Profile of a Functions app (its own project's, or an AppHost's), whose worker func starts and the profiler
     /// does not reach.</summary>

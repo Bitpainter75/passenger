@@ -2,6 +2,8 @@ using Avalonia.Platform.Storage;
 using Passenger.App.Run;
 using Passenger.App.ToolWindows;
 using Passenger.Core;
+using Passenger.Editor;
+using Passenger.Text;
 
 namespace Passenger.App;
 
@@ -19,6 +21,12 @@ public partial class MainWindow
     /// <summary>Every address the window opened in the person's browser, in order, kept since the headless platform's
     /// launcher opens nothing.</summary>
     public IReadOnlyList<Uri> Browsed => browsed;
+
+    private readonly List<string> browsersStarted = [];
+
+    /// <summary>Every browser program the window started to open a page in (<see cref="PageBrowsers"/>), as its command line,
+    /// in order, or would have where nobody sees it.</summary>
+    public IReadOnlyList<string> BrowsersStarted => browsersStarted;
 
     private void AddLinks()
     {
@@ -100,6 +108,14 @@ public partial class MainWindow
         return FoundPaths.OfFileAddress(uri) is { } path ? new ProgramFileLink(path) : null;
     }
 
+    /// <summary>What an address written in a file's comment or string opens (<see cref="DocumentDecorations.Addresses"/>), its
+    /// editor's Go to Declaration following it: a web address in the browser, a file address on this machine its file or
+    /// folder once followed, as a program's link in the terminal (<see cref="ProgramLink"/>), so drawing it asks nothing of
+    /// the disk; null for any other, which stays text.</summary>
+    public static readonly Func<string, object?> WrittenLink = address => WebAddresses.Parse(address) is not { } uri ? null
+        : uri.IsFile ? (FoundPaths.OfFileAddress(uri) is { } path ? new ProgramFileLink(path) : null)
+        : new WebLink(uri);
+
     /// <summary>Opens a path a program linked, once clicked: its file in the editor, else its folder in the file manager,
     /// as the disk has them, asked off the window's thread; one that is neither is said in the status bar.</summary>
     private async Task OpenProgramFileAsync(string path)
@@ -170,13 +186,57 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>Opens an address in the person's browser, through the system's launcher as every link the IDE opens is:
-    /// the browser is the person's, never ended with the IDE.</summary>
-    public void Browse(Uri address)
+    /// <summary>Opens an address in the person's browser, through the system's launcher as every link the IDE opens is: the
+    /// browser is the person's, never ended with the IDE.</summary>
+    public void Browse(Uri address) => Browse(address, null);
+
+    /// <summary>Opens a page a run serves (a resource's endpoint, a container's port) in the browser Settings names, else the
+    /// system's default.</summary>
+    private void BrowsePage(Uri page) => Browse(page, PageBrowsers.Of(settings.Browser));
+
+    /// <summary>Opens an address in the person's browser: through the system's launcher as every link the IDE opens is, or
+    /// in the browser program a run names (<paramref name="browser"/>), started apart, which a window nobody sees never
+    /// starts. The browser is the person's, never ended with the IDE.</summary>
+    public void Browse(Uri address, PageBrowser? browser)
     {
         UiThread.Check();
         browsed.Add(address);
-        IdeErrors.Observe(Launcher.LaunchUriAsync(address));
+        IdeErrors.Observe(browser is null ? Launcher.LaunchUriAsync(address) : BrowseInAsync(address, browser));
+    }
+
+    /// <summary>Opens an address in a browser program, its command found off the window's thread (a name on the PATH as
+    /// the login shell has it); what fails is said in the status bar.</summary>
+    private async Task BrowseInAsync(Uri address, PageBrowser browser)
+    {
+        (System.Diagnostics.ProcessStartInfo? start, bool bundle, string? whyNot) = await BackgroundWork.Run(() => PageBrowsers.Opening(browser, address));
+        if (start is null)
+        {
+            status.Text = PageBrowsers.NotOpened(address, whyNot!);
+            return;
+        }
+        browsersStarted.Add(ChildProcesses.Display(start));
+        if (Unseen)
+        {
+            return;
+        }
+        try
+        {
+            if (bundle)
+            {
+                // The system's open ends once the app has the page.
+                ChildResult opened = await ChildProcesses.RunAsync(start, limit: TimeSpan.FromSeconds(30));
+                if (!opened.Succeeded)
+                {
+                    status.Text = PageBrowsers.NotOpened(address, $"{browser.Where} names {browser.Line}, which did not open it: {opened.Said}");
+                }
+                return;
+            }
+            ChildProcesses.StartApart(start);
+        }
+        catch (Exception failed) when (ChildFailures.Of(failed))
+        {
+            status.Text = PageBrowsers.NotOpened(address, $"{browser.Where} names {browser.Line}, which did not start: {failed.Message}");
+        }
     }
 
     private readonly List<string> played = [];
@@ -266,7 +326,7 @@ public partial class MainWindow
                 }
                 if (up == true)
                 {
-                    Browse(address);
+                    Browse(address, PageBrowsers.Of(plan.BrowserLine, plan.Name, settings.Browser));
                 }
                 else
                 {

@@ -54,6 +54,7 @@
     <Compile Include="../../src/Passenger.App/Containers/DockerfileImages.cs" Link="App/DockerfileImages.cs" />
     <Compile Include="../../src/Passenger.App/Containers/DockerfileStages.cs" Link="App/DockerfileStages.cs" />
     <Compile Include="../../src/Passenger.App/Containers/ImageReference.cs" Link="App/ImageReference.cs" />
+    <Compile Include="../../src/Passenger.App/Containers/EngineEmulation.cs" Link="App/EngineEmulation.cs" />
   </ItemGroup>
 
   <!-- The order a program's update handlers run in, compiled in since its project is a hook carried beside the app. -->
@@ -71,6 +72,11 @@
   <!-- Which of the sounds asked for in turn runs, by the order of its asks alone, compiled in since its project is the app's. -->
   <ItemGroup>
     <Compile Include="../../src/Passenger.App/OnePlaying.cs" Link="App/OnePlaying.cs" />
+  </ItemGroup>
+
+  <!-- The order the Switcher lists tabs in, from what came forward and went alone, compiled in since its project is the app's. -->
+  <ItemGroup>
+    <Compile Include="../../src/Passenger.App/Editors/UsedOrder.cs" Link="App/UsedOrder.cs" />
   </ItemGroup>
 
   <!-- How a tool window shares out its room, from widths alone, compiled in since its project is the app's. -->
@@ -251,6 +257,7 @@
   <ItemGroup>
     <Compile Include="../../src/Passenger.Languages/CSharp/TemplateScope.cs" Link="Languages/TemplateScope.cs" />
     <Compile Include="../../src/Passenger.Languages/CSharp/CompletionTriggers.cs" Link="Languages/CompletionTriggers.cs" />
+    <Compile Include="../../src/Passenger.Languages/CSharp/TypedFormatting.cs" Link="Languages/TypedFormatting.cs" />
     <Compile Include="../../src/Passenger.Languages/CSharp/StringLines.cs" Link="Languages/StringLines.cs" />
   </ItemGroup>
 
@@ -313,6 +320,13 @@
     <Compile Include="../../src/Passenger.Roslyn.Extension/Messages.cs" Link="App/RoslynMessages.cs" />
   </ItemGroup>
 
+  <!-- How a Markdown file reads into blocks and words, GFM's emphasis and the HTML a README holds, from its text alone,
+       compiled in since its project is the app's. -->
+  <ItemGroup>
+    <Compile Include="../../src/Passenger.App/Editors/Markdown.cs" Link="App/Markdown.cs" />
+    <Compile Include="../../src/Passenger.App/Editors/Markdown.Html.cs" Link="App/Markdown.Html.cs" />
+  </ItemGroup>
+
   <!-- What a hover's Markdown says, as the card shows it and an agent reads it, from its text alone, compiled in since its
        project is the app's. -->
   <ItemGroup>
@@ -343,6 +357,12 @@
     <Compile Include="../../src/Passenger.Roslyn.Extension/JsInteropImport.cs" Link="Roslyn/JsInteropImport.cs" />
   </ItemGroup>
 
+  <!-- Semantic tokens written again in the legend the server gave, a name it could not bind left out, compiled in since
+       their project is built against Roslyn's server. -->
+  <ItemGroup>
+    <Compile Include="../../src/Passenger.Roslyn.Extension/ColourTokens.cs" Link="Roslyn/ColourTokens.cs" />
+  </ItemGroup>
+
   <!-- What the extension keeps by a solution's documents and projects, each workspace's apart, and each document's read
        while what it was read from stands, over Roslyn's own workspaces, compiled in since its project is built against
        Roslyn's server. -->
@@ -355,6 +375,11 @@
        through the debugger's CodeBrackets. -->
   <ItemGroup>
     <Compile Include="../../src/Passenger.Roslyn.Extension/RefactoringChecks.cs" Link="Roslyn/RefactoringChecks.cs" />
+  </ItemGroup>
+
+  <!-- The services an Aspire AppHost names, read from its syntax as Passenger.Languages compiles the reader. -->
+  <ItemGroup>
+    <Compile Include="../../src/Passenger.Roslyn.Extension/AspireServices.cs" Link="Roslyn/AspireServices.cs" />
   </ItemGroup>
 
   <!-- Where a launch profile's browser opens, read from its URLs alone, the Node.js versions a package.json's engines
@@ -381,11 +406,13 @@
     <Compile Include="../../src/Passenger.App/Debugging/HotReloadOutcome.cs" Link="App/HotReloadOutcome.cs" />
   </ItemGroup>
 
-  <!-- What a runner's names for a test say of its method and its row, from the names alone, and the stacks a failure shows,
-       from its text alone, compiled in since their project is the app's. -->
+  <!-- What a runner's names for a test say of its method and its row, from the names alone, the stacks a failure shows,
+       from its text alone, and what a run broken off says, from VSTest's error and words alone, compiled in since their
+       project is the app's. -->
   <ItemGroup>
     <Compile Include="../../src/Passenger.App/Testing/TestModel.cs" Link="App/TestModel.cs" />
     <Compile Include="../../src/Passenger.App/Testing/FailureStacks.cs" Link="App/FailureStacks.cs" />
+    <Compile Include="../../src/Passenger.App/Testing/BrokenRuns.cs" Link="App/BrokenRuns.cs" />
   </ItemGroup>
 
   <!-- What desktop app a program's start runs, from its command line and the files beside it in a temporary folder,
@@ -419,9 +446,10 @@
   </ItemGroup>
 
   <!-- Whether a plan starts a project's apphost and with which variable of its .NET, from an evaluation's properties alone,
-       compiled in since its project is the app's. -->
+       and where an x86 program's .NET is and what it lacks, compiled in since their project is the app's. -->
   <ItemGroup>
     <Compile Include="../../src/Passenger.App/Run/AppHosts.cs" Link="App/AppHosts.cs" />
+    <Compile Include="../../src/Passenger.App/Run/X86Programs.cs" Link="App/X86Programs.cs" />
   </ItemGroup>
 
   <!-- What a publish profile is written with for the Publish dialog's options, from their values alone, compiled in since

@@ -25,6 +25,9 @@ public enum ExplorerViewKind
 
 public partial class ExplorerView : UserControl
 {
+    /// <summary>The room round the Explorer's own header: its title in from the pane's edge, its widget clear of it.</summary>
+    public static readonly Thickness HeaderMargin = new(Gaps.Wide, Gaps.Small, Gaps.Normal, Gaps.Hair);
+
     private readonly DropOverlay drop = new();
     private readonly DragGesture<IReadOnlyList<ExplorerNode>> drag;
     private bool copyHeld;
@@ -58,11 +61,11 @@ public partial class ExplorerView : UserControl
     public ExplorerView()
     {
         InitializeComponent();
-        filter.Margin = new Thickness(6, 0, 4, 0);
+        filter.Margin = new Thickness(Gaps.Small, 0, Gaps.Tight, 0);
         filterBar = ToolWindows.ToolBars.Top(filter);
         filterBar.IsVisible = false;
         Body.Children.Add(filterBar);
-        more.Margin = new Thickness(16, 6);
+        more.Margin = new Thickness(Gaps.Group, Gaps.Small);
         Grid.SetRow(more, 2);
         Body.Children.Add(more);
         filtering = new Debounce(FilterPause, MatchAsync);
@@ -635,7 +638,7 @@ public partial class ExplorerView : UserControl
         RowGlyphs glyphs = new();
         glyphs.ChevronPressed += OnChevronPressed;
         TextBlock name = new() { VerticalAlignment = VerticalAlignment.Center };
-        TextBlock detail = new() { Classes = { StyleClasses.Muted }, FontSize = 12, Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        TextBlock detail = new() { Classes = { StyleClasses.Muted }, FontSize = 12, Margin = new Thickness(Gaps.Normal, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         StackPanel row = new() { Orientation = Orientation.Horizontal, Height = ListRow.Height, Children = { glyphs, name, detail } };
         return row.Showing<ExplorerNode>(node =>
         {
@@ -732,7 +735,8 @@ public partial class ExplorerView : UserControl
     }
 
     /// <summary>The folder or project what is dragged would go into at a point: the one under it, or a file's; none where
-    /// it would not move (all of it there already), a folder would go inside itself, or a folder the SDK reads would move.</summary>
+    /// it would not move (all of it there already), a folder would go inside itself, a folder the SDK reads would move, or
+    /// it would go into a NuGet package's folder.</summary>
     private ExplorerNode? TargetAt(IReadOnlyList<ExplorerNode> items, Point at)
     {
         if (Surface.TranslatePoint(at, Rows) is not { } inRows || RowAt(inRows) is not { } row)
@@ -745,7 +749,7 @@ public partial class ExplorerView : UserControl
         {
             target = Tree.Rows.Holder(target);
         }
-        if (target?.Into is not { } into)
+        if (target?.Into is not { } into || ExplorerNode.KeptOut(into) is not null)
         {
             return null;
         }

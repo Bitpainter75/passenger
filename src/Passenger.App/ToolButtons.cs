@@ -41,12 +41,12 @@ public static class ToolButtons
         PathIcon mark = new();
         mark.Bind(PathIcon.DataProperty, mark.GetResourceObservable(icon));
         mark.Bind(PathIcon.ForegroundProperty, mark.GetResourceObservable(brush));
-        count = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
+        count = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Classes = { StyleClasses.Count } };
         ToggleButton button = new()
         {
             Classes = { StyleClasses.Outcome },
             Focusable = false,
-            Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, Children = { mark, count } },
+            Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Gaps.Tight, Children = { mark, count } },
         };
         return Tip(button, tip);
     }
@@ -54,11 +54,12 @@ public static class ToolButtons
     /// <summary>A toolbar's button that stays pressed while what it turns on is on (Mute Breakpoints, Select Element).</summary>
     public static ToggleButton Toggle(string icon, string tip) => Made(new ToggleButton(), icon, tip);
 
-    /// <summary>Gives a button with no words on it its tip, and those words as the name a screen reader says for it.</summary>
-    public static T Tip<T>(T button, string tip)
+    /// <summary>Gives a button with no words on it its tip, and those words as the name a screen reader says for it; with
+    /// <paramref name="keys"/>, the keys that do the same, which the tip names after its words as every tip does.</summary>
+    public static T Tip<T>(T button, string tip, string? keys = null)
         where T : Control
     {
-        ToolTip.SetTip(button, tip);
+        ToolTip.SetTip(button, ActionTips.Named(tip, keys));
         AutomationProperties.SetName(button, tip);
         return button;
     }

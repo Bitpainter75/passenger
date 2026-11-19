@@ -73,6 +73,31 @@ public partial class ManagedDebugger
         Continue(clearVariables: false);
     }
 
+    /// <summary>Every thread but the evaluation's, held while it runs alone, but the runtime's tiering worker
+    /// (<see cref="RuntimeThreads"/>), which runs none of the program's code and is never told to the debugger as one that
+    /// does; one the debugger cannot tell, through a relay to a device, is held with the rest.</summary>
+    private void HoldOthersDuringEvaluation(ICorDebugThread evaluating)
+    {
+        ICorDebugProcess process = evaluating.Process;
+        process.SetAllThreadsDebugState(CorDebugThreadState.THREAD_SUSPEND, evaluating);
+        if (_throughRelay || process.TryGetID(out uint processId) is not Cor.S_OK)
+        {
+            return;
+        }
+        foreach (ICorDebugThread thread in process.EnumerateThreads())
+        {
+            int id = thread.Id;
+            if (!_threads.ContainsKey(id) && RuntimeThreads.IsTieringWorker((int)processId, id) && thread.TrySetDebugState(CorDebugThreadState.THREAD_RUN) is Cor.S_OK
+                && _leftRunning.Add(id))
+            {
+                _logger?.Invoke($"Left running during evaluations: thread {id}, the runtime's tiering worker");
+            }
+        }
+    }
+
+    /// <summary>The runtime's own threads left running during an evaluation, each said once in the engine's log.</summary>
+    private readonly HashSet<int> _leftRunning = [];
+
     /// <summary>A thread made while an evaluation runs its own thread alone, which the evaluation's hold of every other thread
     /// came too early for: held as they are until the evaluation ends, when every thread is let go again. Left running, it
     /// would pass a breakpoint whose event waits for the evaluation's end and run on, so the stop shown later is not where
@@ -161,8 +186,9 @@ public partial class ManagedDebugger
             return;
         }
 
-        // Unoptimized code (a Debug build's, Edit and Continue's) is the user's; emitted code, with no source, never.
-        bool isUserCode = !emitted && corModule.JITCompilerFlags is CorDebugJITCompilerFlags.CORDEBUG_JIT_DISABLE_OPTIMIZATION or CorDebugJITCompilerFlags.CORDEBUG_JIT_ENABLE_ENC;
+        // Unoptimized code (a Debug build's, Edit and Continue's) is the user's; emitted code, with no source, never, nor what the client carries in.
+        bool isUserCode = !emitted && !(AssemblyNameOf(metadataReader) is { } assembly && _carried.Contains(assembly))
+            && corModule.JITCompilerFlags is CorDebugJITCompilerFlags.CORDEBUG_JIT_DISABLE_OPTIMIZATION or CorDebugJITCompilerFlags.CORDEBUG_JIT_ENABLE_ENC;
         if (_justMyCode && isUserCode && metadataReader.HasSymbols)
         {
             // The module is the user's, but not the methods its own code says are not: steppers pass over them.
@@ -245,6 +271,7 @@ public partial class ManagedDebugger
         _logger?.Invoke($"Module unloaded: {moduleInfo.ModulePath} from 0x{(long)moduleInfo.BaseAddress:X}");
         moduleInfo.Dispose();
         ModuleSet_Version++;
+        SystemTypes.LetGo();
 
         foreach (BreakpointManager.BreakpointInfo breakpoint in _breakpointManager.GetAllBreakpoints())
         {
@@ -481,11 +508,20 @@ public partial class ManagedDebugger
             return;
         }
         TakeBehindStep();
-        if (_returnGuard is ({ } guard, { } guarded) && _stepper is { } lost && guarded == lost && stepCompleteEventArgs.Stepper == guard)
+        if (_returnGuard is ({ } guard, { } guarded, bool runsOn) && _stepper is { } lost && guarded == lost && stepCompleteEventArgs.Stepper == guard)
         {
-            _logger?.Invoke($"The step on thread {corThread.Id} ends where its guard's step out did, its frame having returned to native code");
             _returnGuard = null;
             lost.TryDeactivate();
+            if (runsOn)
+            {
+                _logger?.Invoke($"The step on thread {corThread.Id} ends as its frame returns to code that is not the user's, none of theirs below it: the program runs on");
+                _stepper = null;
+                EndStepForStop();
+                EndReturnWatch();
+                Continue(clearVariables: true);
+                return;
+            }
+            _logger?.Invoke($"The step on thread {corThread.Id} ends where its guard's step out did, its frame having returned to native code");
             _stepper = guard;
         }
         if (stepCompleteEventArgs.Stepper != _stepper)

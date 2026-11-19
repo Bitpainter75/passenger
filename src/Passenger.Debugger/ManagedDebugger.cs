@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Passenger.Core;
@@ -50,6 +51,9 @@ public partial class ManagedDebugger
     private int? _pendingAttachProcessId;
     private (string Relay, string? Modules, string? Token)? _pendingRelay;
 
+    /// <summary>Whether the program is a device's, reached through Passenger's relay: its threads' ids are the device's.</summary>
+    private bool _throughRelay;
+
     /// <summary>The process attached to, by its id where the adapter runs, while held; 0 for none.</summary>
     private int _attachedId;
 
@@ -62,6 +66,14 @@ public partial class ManagedDebugger
     /// attached to: only such a program ends with a client that goes without disconnecting (<see cref="AbandonAsync"/>).</summary>
     private bool _launched;
     private bool _justMyCode;
+
+    /// <summary>The assemblies the client carries into the program, by name, never the user's code (<see cref="Carry"/>).</summary>
+    private HashSet<string> _carried = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Takes the names of the assemblies the client carries into the program for this session, before it launches
+    /// or attaches: their code, however built, is never the user's, so Just My Code steps through it and over it.</summary>
+    public void Carry(IReadOnlyList<string> assemblies) => _carried = new HashSet<string>(assemblies, StringComparer.OrdinalIgnoreCase);
+
     private bool _stopAtEntry;
     private EntryBreakpoint? _entryBreakpoint;
     private sealed record EntryBreakpoint(ICorDebugFunctionBreakpoint CorBreakpoint, ModuleInfo Module, int MethodToken, int IlOffset);
@@ -84,6 +96,9 @@ public partial class ManagedDebugger
     /// <summary>The program the adapter launched, and how it ended once it has.</summary>
     private SuspendedLaunch? _launch;
     private Task<int?>? _launchExit;
+
+    /// <summary>The socket and pipes the launched program's runtime keeps in its temporary folder, which it leaves when ended.</summary>
+    private Core.RuntimeFiles? _launchFiles;
     private Task? _launchOutput;
 
     /// <summary>When the launched program's output was last read (a <see cref="Stopwatch"/> timestamp).</summary>
@@ -106,10 +121,14 @@ public partial class ManagedDebugger
         }
     }
 
-    /// <summary>A launched program's process has ended: its end told, then the end of its debugging.</summary>
-    private async Task EndedLaunchAsync(Task<int?> ended)
+    /// <summary>A launched program's process has ended: what its runtime <paramref name="left"/> in its temporary folder
+    /// removed, its end told, then the end of its debugging.</summary>
+    private async Task EndedLaunchAsync(Task<int?> ended, Core.RuntimeFiles? left)
     {
-        await ReportExitAsync(await ended.ConfigureAwait(false)).ConfigureAwait(false);
+        int? exitCode = await ended.ConfigureAwait(false);
+        // Its runtime takes its socket and pipes away only as it ends of itself, never as Stop ends it.
+        left?.Remove();
+        await ReportExitAsync(exitCode).ConfigureAwait(false);
         ReportTerminated();
     }
 
@@ -214,6 +233,9 @@ public partial class ManagedDebugger
 
     internal EvalStatus EvalStatus { get; }
 
+    /// <summary>The System.Type the program made for each type an expression named, kept for the session.</summary>
+    internal ExpressionEvaluator.Cil.SystemTypes SystemTypes { get; } = new();
+
     private readonly Channel<CorDebugManagedCallbackEventArgs> _runtimeEventChannel;
     public readonly EngineLock DapRequestAndRuntimeEventLock = new();
 
@@ -265,6 +287,8 @@ public partial class ManagedDebugger
         {
             AbortWhenDue = (thread, eval, after) => Core.UnawaitedWork.Observe(AbortWhenDueAsync(thread, eval, after)),
             WhyNoAbortTakes = WhyNoAbortTakes,
+            Running = EvaluationRunning,
+            HoldOthers = HoldOthersDuringEvaluation,
             Log = logger,
             TellThreads = logger is null ? null : thread => logger(WhereThreadsStand(thread)),
         };
@@ -285,6 +309,10 @@ public partial class ManagedDebugger
         if (e is ExitProcessCorDebugManagedCallbackEventArgs)
         {
             _exited.Set();
+        }
+        else if (e is EvalCompleteCorDebugManagedCallbackEventArgs or EvalExceptionCorDebugManagedCallbackEventArgs)
+        {
+            EvalStatus.EndCame(e);
         }
         _runtimeEventChannel.Writer.TryWrite(e);
     }
@@ -604,6 +632,7 @@ public partial class ManagedDebugger
         });
         connection.Go();
         _isAttached = true;
+        _throughRelay = true;
         _attachedId = processId;
         ConfigureExceptionCallbacks();
         _logger?.Invoke($"Attached through the relay to process {processId}");
@@ -758,9 +787,11 @@ public partial class ManagedDebugger
         EndReturnGuard();
     }
 
-    /// <summary>A step out standing guard over a step whose frame returns to native code, Just My Code off, with the step it
-    /// guards: the runtime's stepper loses that return, so the guard's end is the step's (<see cref="AboveShownCaller"/>).</summary>
-    private (ICorDebugStepper Guard, ICorDebugStepper Step)? _returnGuard;
+    /// <summary>A step out standing guard over the return of a step's frame, with the step it guards. Just My Code off, over a
+    /// frame whose caller is native code, which the runtime's stepper loses: the guard's end is the step's
+    /// (<see cref="AboveShownCaller"/>). Just My Code on, over a frame with none of the user's code below it to go back to
+    /// (<see cref="GoesBackToUsersCode"/>): the guard's end ends the step with no stop, the program running on.</summary>
+    private (ICorDebugStepper Guard, ICorDebugStepper Step, bool RunsOn)? _returnGuard;
 
     /// <summary>Ends a step's guard, with the step it guards or when another step begins.</summary>
     private void EndReturnGuard()
@@ -824,7 +855,9 @@ public partial class ManagedDebugger
         BeginStep(handler.CreateStepper(), thread, handler, justMyCode: true, stepper => stepper.StepOut());
 
     /// <summary>Makes a stepper (a frame's, or a thread's outside managed code) the step in progress: it stops nowhere
-    /// unmapped, and, Just My Code, only in the user's code; <paramref name="step"/> says where it goes.</summary>
+    /// unmapped, and, Just My Code, only in the user's code, ending where its frame returns if none of that code is below
+    /// it to go back to, as the runtime's would stop in whatever of it the thread runs next; <paramref name="step"/> says
+    /// where it goes.</summary>
     private ICorDebugStepper BeginStep(ICorDebugStepper stepper, ICorDebugThread thread, ICorDebugFrame? from, bool justMyCode, Action<ICorDebugStepper> step)
     {
         EndReturnGuard();
@@ -836,7 +869,88 @@ public partial class ManagedDebugger
         step(stepper);
         _stepper = stepper;
         _stepping = (thread.Id, from is null ? null : RangeOf(from));
+        if (justMyCode && from is not null && !GoesBackToUsersCode(thread, from))
+        {
+            ICorDebugStepper guard = Intercepting(from.CreateStepper());
+            guard.SetUnmappedStopMask(CorDebugUnmappedStop.STOP_NONE);
+            guard.StepOut();
+            _returnGuard = (guard, stepper, RunsOn: true);
+            _logger?.Invoke($"  None of the user's code is below {FrameTold(from)}: a step out of it stands guard, the step ending as it returns");
+        }
         return stepper;
+    }
+
+    /// <summary>Whether a frame, once it returns, goes back to the user's code on its thread: a frame of theirs below it
+    /// before native code, or past native code that called the frame itself (a static constructor's, a native library's
+    /// callback's), but one past its last line (<see cref="PastItsLastLine"/>). Not where it returns to code that is not
+    /// theirs with none of theirs below (a web request's, a window's event loop, a timer's): what that thread runs next
+    /// comes of something else, never of the step.</summary>
+    private bool GoesBackToUsersCode(ICorDebugThread thread, ICorDebugFrame frame)
+    {
+        if (RangeOf(frame) is not { } stepping)
+        {
+            return true;
+        }
+        bool found = false;
+        List<ICorDebugChain> chains = [.. thread.EnumerateChains()];
+        for (int at = chains.FindLastIndex(chain => chain.Reason is CorDebugChainReason.CHAIN_FUNC_EVAL) + 1; at < chains.Count; at++)
+        {
+            if (!chains[at].IsManaged)
+            {
+                continue;
+            }
+            bool returnsHere = false;
+            foreach (ICorDebugFrame below in chains[at].EnumerateFrames())
+            {
+                if (!found)
+                {
+                    found = RangeOf(below) == stepping;
+                    continue;
+                }
+                if (below is ICorDebugInternalFrame)
+                {
+                    continue;
+                }
+                if (IsUserCodeFrame(below))
+                {
+                    if (!PastItsLastLine(below))
+                    {
+                        _logger?.Invoke($"  The user's {FrameTold(below)} is below it: the step goes on to their code as its frame returns");
+                        return true;
+                    }
+                    _logger?.Invoke($"  The user's {FrameTold(below)} below it is past its last line, completing its task: none of their code is left there");
+                }
+                returnsHere = true;
+            }
+            if (returnsHere)
+            {
+                return false;
+            }
+        }
+        return !found;
+    }
+
+    /// <summary>Whether a frame of an async method's state machine stands in the compiler's code past its last line, where
+    /// its builder completes the method's task: that may go on with what awaits it, on this thread above the frame, and
+    /// what is left of the frame once it returns runs none of the user's code.</summary>
+    private bool PastItsLastLine(ICorDebugFrame frame)
+    {
+        try
+        {
+            if (frame is not ICorDebugILFrame il || FindModule(il.Function.Module) is not { } module)
+            {
+                return false;
+            }
+            int token = il.Function.Token;
+            int? version = ModuleMetadataReader.VersionOf(il);
+            int at = il.IP.pnOffset;
+            return module.MetadataReader.GetAsyncMethodSteppingInfo(token, version) is { } method && at > method.LastUserCodeIlOffset
+                && module.MetadataReader.IsCurrentSequencePointHidden(token, at, version);
+        }
+        catch (Exception error) when (Failures.OfRuntime(error))
+        {
+            return false;
+        }
     }
 
     /// <summary>A step under way whose frame an exception will unwind, to a handler outside the user's code: the runtime's
@@ -909,7 +1023,7 @@ public partial class ManagedDebugger
             ICorDebugStepper guard = Intercepting(below.CreateStepper());
             guard.SetUnmappedStopMask(CorDebugUnmappedStop.STOP_NONE);
             guard.StepOut();
-            _returnGuard = (guard, begun);
+            _returnGuard = (guard, begun, RunsOn: false);
             _logger?.Invoke($"  Its frame's caller is native code: a step out of {FrameTold(below)} stands guard over its return");
         }
         return begun;
@@ -1410,6 +1524,7 @@ public partial class ManagedDebugger
         _breakpointManager.Clear();
         // Before the program is let go: a debug register left set would end it at the next write it watched.
         ForgetDataBreakpoints(exited);
+        SystemTypes.LetGo(exited);
 
         _asyncStepper?.Dispose();
         _asyncStepper = null;
@@ -1451,6 +1566,7 @@ public partial class ManagedDebugger
         EvalStatus.DueAt.Clear();
         EvalStatus.ImplicitOff = null;
         _threads.Clear();
+        _leftRunning.Clear();
         _deferredEvents.Clear();
         _behindStep.Clear();
         _mainThreadId = null;
@@ -1506,6 +1622,7 @@ public partial class ManagedDebugger
         }
 
         _isAttached = false;
+        _throughRelay = false;
         _attachedId = 0;
         _process = null;
         _corDebug = null;
@@ -1559,6 +1676,16 @@ internal sealed class EvalStatus
 
     internal bool IsRunning => ThreadId is not null;
 
+    /// <summary>When each evaluation's end came from the runtime (a <see cref="System.Diagnostics.Stopwatch"/> timestamp), taken
+    /// on its callback thread, so the time the program took is told from the time the debugger took to hear it.</summary>
+    private readonly ConditionalWeakTable<CorDebugManagedCallbackEventArgs, StrongBox<long>> came = [];
+
+    /// <summary>An evaluation's end has come from the runtime, before it is queued.</summary>
+    internal void EndCame(CorDebugManagedCallbackEventArgs end) => came.AddOrUpdate(end, new StrongBox<long>(System.Diagnostics.Stopwatch.GetTimestamp()));
+
+    /// <summary>When an evaluation's end came (<see cref="EndCame"/>), or null for one never stamped.</summary>
+    internal long? CameAt(CorDebugManagedCallbackEventArgs end) => came.TryGetValue(end, out StrongBox<long>? at) ? at.Value : null;
+
     /// <summary>Cancelled when the running evaluation is given up, so its wait for the runtime's events ends with it and
     /// nothing reads them outside the engine's lock.</summary>
     internal CancellationToken Reading { get; set; }
@@ -1580,6 +1707,14 @@ internal sealed class EvalStatus
     /// when it would (<see cref="ManagedDebugger.WhyNoAbortTakes"/>).</summary>
     internal required Func<ICorDebugThread, string?> WhyNoAbortTakes { get; init; }
 
+    /// <summary>The method an evaluation on the thread runs, the program held, as the call stack names it; null where none
+    /// of its own runs there (<see cref="ManagedDebugger.EvaluationRunning"/>).</summary>
+    internal required Func<ICorDebugThread, string?> Running { get; init; }
+
+    /// <summary>Holds every thread but the one given while an evaluation runs on it alone, but the runtime's own that runs
+    /// none of the program's code (<see cref="ManagedDebugger.HoldOthersDuringEvaluation"/>).</summary>
+    internal required Action<ICorDebugThread> HoldOthers { get; init; }
+
     /// <summary>The engine's log, for what becomes of an evaluation past its time.</summary>
     internal Action<string>? Log { get; init; }
 
@@ -1592,8 +1727,9 @@ internal sealed class EvalStatus
     /// one still running as it falls due says where the threads stand.</summary>
     internal ExpressionEvaluator.Cil.ExpressionTime? Expression { get; set; }
 
-    /// <summary>Why code the debugger would run of itself (a getter, a ToString, a proxy) is not run, once an
-    /// evaluation has timed out, until the program next runs on.</summary>
+    /// <summary>Why code the debugger would run of itself (a getter, a ToString, a proxy) is not run, once an evaluation
+    /// past its time was stopped or is held unfinished, until the program next runs on, naming that evaluation; one that
+    /// ended of itself as it was looked at turns nothing off.</summary>
     internal string? ImplicitOff { get; set; }
 
     /// <summary>Set while an evaluation asked for by name runs (the Evaluate window, a watch), which runs code regardless.</summary>

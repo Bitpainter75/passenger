@@ -40,9 +40,9 @@ public sealed class SqlServerView : DockPanel
     private readonly ComboBox targets = new() { Name = "SqlDatabase", MinWidth = 180, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBox script;
     private readonly TextBlock status = MutedText.Of(string.Empty);
-    private readonly StackPanel tabs = new() { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(8, 0), VerticalAlignment = VerticalAlignment.Center };
+    private readonly StackPanel tabs = new() { Orientation = Orientation.Horizontal, Spacing = Gaps.Hair, Margin = new Thickness(Gaps.Normal, 0), VerticalAlignment = VerticalAlignment.Center };
     private readonly CellGrid grid = new();
-    private readonly SelectableTextBlock messages = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(10, 8) };
+    private readonly SelectableTextBlock messages = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(Gaps.Normal, Gaps.Normal) };
     private readonly ScrollViewer messagesPage;
     private readonly List<SqlNode> servers = [];
     private List<SqlRowsTable> results = [];
@@ -99,10 +99,10 @@ public sealed class SqlServerView : DockPanel
         });
         ToolTip.SetTip(targets, "The database the script runs in");
         status.Name = "SqlStatus";
-        status.Margin = new Thickness(10, 0);
+        status.Margin = new Thickness(Gaps.Normal, 0);
         status.FontSize = 12;
         SetDock(status, Dock.Right);
-        ToolFlow bar = new() { Margin = new Thickness(6, 2) };
+        ToolFlow bar = new() { Margin = new Thickness(Gaps.Small, Gaps.Hair) };
         bar.Children.AddRange(
         [
             ToolButtons.Of(AppActions.SqlExecute, IconKeys.Run, "Execute", request), ToolButtons.Of(AppActions.SqlStop, IconKeys.Stop, "Stop", request), targets,
@@ -134,7 +134,7 @@ public sealed class SqlServerView : DockPanel
             Children =
             {
                 ToolBars.Top(bar),
-                new Border { [DockProperty] = Dock.Top, Padding = new Thickness(8, 6), Child = script },
+                new Border { [DockProperty] = Dock.Top, Padding = new Thickness(Gaps.Normal, Gaps.Small), Child = script },
                 ToolBars.Top(new DockPanel
                 {
                     Children = { status, new ScrollViewer { Content = tabs, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled } },
@@ -756,10 +756,10 @@ public sealed class SqlServerView : DockPanel
     {
         RowIcon chevron = RowIcon.Chevron();
         Border toggle = new() { Width = 18, Height = ListRow.Height, Background = Brushes.Transparent, Child = chevron };
-        RowIcon icon = new() { Width = 14, Height = 14, Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
+        RowIcon icon = new() { Width = 14, Height = 14, Margin = new Thickness(0, 0, Gaps.Small, 0), VerticalAlignment = VerticalAlignment.Center };
         TextBlock title = new() { VerticalAlignment = VerticalAlignment.Center };
         TextBlock detail = MutedText.Of(string.Empty);
-        detail.Margin = new Thickness(8, 0, 6, 0);
+        detail.Margin = new Thickness(Gaps.Normal, 0, Gaps.Small, 0);
         detail.FontSize = 12;
         StackPanel line = new() { Orientation = Orientation.Horizontal, Height = ListRow.Height, Children = { toggle, icon, title, detail } };
         toggle.PointerPressed += (_, e) =>
@@ -772,7 +772,7 @@ public sealed class SqlServerView : DockPanel
         };
         return line.Showing<SqlNode>(node =>
         {
-            line.Margin = new Thickness(node.Depth * 14, 0, 0, 0);
+            line.Margin = new Thickness(node.Depth * Gaps.Indent, 0, 0, 0);
             chevron.IsVisible = node.Expands;
             chevron.Turned = node.IsExpanded;
             icon.DataKey = node.Kind switch

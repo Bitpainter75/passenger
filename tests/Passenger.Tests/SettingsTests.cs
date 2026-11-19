@@ -10,8 +10,10 @@ using Avalonia.LogicalTree;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using Passenger.App;
+using Passenger.App.Run;
 using Passenger.App.Settings;
 using Passenger.App.State;
+using Passenger.App.Workspace;
 using Passenger.Editor;
 
 namespace Passenger.Tests;
@@ -470,6 +472,111 @@ public sealed class SettingsTests : IDisposable
         TestFolders.Delete(settings);
     }
 
+    /// <summary>Every page of Settings at the dialog's least width cuts no word and lays nothing over anything
+    /// (LayoutFaults): a field's placeholder too long for it, as the Run page's browser where one is found at a long path,
+    /// ends in an ellipsis rather than being cut mid-letter at the field's edge.</summary>
+    [AvaloniaFact]
+    public void Every_page_at_the_least_width_cuts_no_word_and_lays_nothing_over_anything()
+    {
+        MainWindow window = Open();
+        SettingsDialog dialog = window.ShowSettings();
+        List<string> found = [];
+        try
+        {
+            Ui.Settle();
+            dialog.Width = dialog.MinWidth;
+            foreach (string page in dialog.Pages.ToList())
+            {
+                dialog.Page = page;
+                Ui.Settle();
+                found.AddRange(LayoutFaults.Of(dialog, dialog, $"Settings › {page}, at the dialog's least width,"));
+            }
+        }
+        finally
+        {
+            dialog.Close();
+            window.Close();
+        }
+        Assert.True(found.Count == 0, string.Join("\n", found.Distinct()));
+    }
+
+    /// <summary>Every row of every Settings page, at the dialog's usual width and at its least, stands its editor level with
+    /// its label's first line where the two stand side by side, and lays its note a gap below what stands over it in its
+    /// column, so a label running on below its editor (Remote Stylesheets') leaves no empty room beside it under the editor.</summary>
+    [AvaloniaFact]
+    public void Every_rows_editor_stands_by_its_labels_first_line_with_its_note_right_under_it()
+    {
+        MainWindow window = Open();
+        SettingsDialog dialog = window.ShowSettings();
+        List<string> found = [];
+        int rows = 0;
+        int longBeside = 0;
+        try
+        {
+            Ui.Settle();
+            foreach (double width in (double[])[dialog.Width, dialog.MinWidth])
+            {
+                dialog.Width = width;
+                foreach (string page in dialog.Pages.ToList())
+                {
+                    dialog.Page = page;
+                    Ui.Settle();
+                    foreach (OptionRow row in dialog.GetVisualDescendants().OfType<OptionRow>().Where(r => r.IsEffectivelyVisible))
+                    {
+                        rows++;
+                        string what = $"Settings › {page}, at {width:0} wide, '{row.Label.Text}'";
+                        found.AddRange(RoomBesideEditor(row, what));
+                        if (!row.IsStacked && row.Label.TextLayout.TextLines.Count > 1 && row.Note is { IsVisible: true })
+                        {
+                            longBeside++;
+                        }
+                    }
+                }
+            }
+        }
+        finally
+        {
+            dialog.Close();
+            window.Close();
+        }
+        Assert.True(rows >= 200, $"Only {rows} rows of Settings were found at the two widths: the search no longer reads them");
+        Assert.True(longBeside > 0, "No row with a label of several lines and a note stood beside its editor: nothing here reads the room beside an editor under a long label");
+        Assert.True(found.Count == 0, $"These rows leave empty room beside their editors, a person's eye crossing a gap from the label to what edits it "
+            + $"or from the editor to its note:\n{string.Join("\n", found.Distinct())}");
+    }
+
+    /// <summary>Where a row's label and editor stand side by side and not level (the editor's box and the label's first
+    /// line, neither within the other), and each line under them begun more than the row's gap below what stands over it
+    /// in its column.</summary>
+    private static IEnumerable<string> RoomBesideEditor(OptionRow row, string what)
+    {
+        const double Slack = 0.5;
+        Rect label = row.Label.Bounds;
+        Rect editor = row.Editor.Bounds;
+        bool across = label.Right <= editor.Left + Slack || editor.Right <= label.Left + Slack;
+        if (across && row.Label.TextLayout.TextLines is [{ } first, ..])
+        {
+            double top = label.Top + row.Label.Padding.Top;
+            double bottom = top + first.Height;
+            bool level = (top >= editor.Top - Slack && bottom <= editor.Bottom + Slack) || (editor.Top >= top - Slack && editor.Bottom <= bottom + Slack);
+            if (!level)
+            {
+                yield return $"{what} stands its editor at {editor.Top:0.#}–{editor.Bottom:0.#} px beside its label's first line at {top:0.#}–{bottom:0.#} px";
+            }
+        }
+        List<Rect> over = [label, editor];
+        foreach (TextBlock under in ((TextBlock?[])[row.Note, row.SaidOver]).OfType<TextBlock>().Where(t => t.IsVisible))
+        {
+            Rect line = under.Bounds;
+            double[] above = [.. over.Where(r => r.Right > line.Left + Slack && r.Left < line.Right - Slack && r.Bottom <= line.Top + Slack).Select(r => r.Bottom)];
+            if (above.Length > 0 && line.Top - above.Max() > Gaps.Tight + Slack)
+            {
+                yield return $"{what} leaves {line.Top - above.Max():0.#} px empty over '{under.Text}', which stands a gap of {Gaps.Tight:0} below what is over it in its column";
+            }
+            over.Add(line);
+        }
+    }
+
     [AvaloniaFact]
     public void A_search_keeps_the_pages_and_options_it_matches()
     {
@@ -620,6 +727,43 @@ public sealed class SettingsTests : IDisposable
         {
             // The keymap in force is the process's; the next test starts on the platform's own.
             window.ApplySettings(new AppSettings());
+            window.Close();
+        }
+    }
+
+    /// <summary>The browser debugging was given, kept as debugBrowser, is Settings' Browser, the one pages open and are
+    /// debugged in: Settings › Run shows it there, the system's default browser said where it is empty, and a change to it is
+    /// kept under browser alone.</summary>
+    [AvaloniaFact]
+    public void The_browser_kept_for_debugging_is_the_browser_settings_shows_and_keeps_under_its_name()
+    {
+        string file = Path.Combine(settings, StateStore.SettingsFile);
+        string line = $"\"{Path.Combine(folder, "Chrome Dev", "chrome")}\" --lang=fr";
+        File.WriteAllText(file, new JsonObject { ["version"] = AppSettings.Upgrades.Count, ["debugBrowser"] = line }.ToJsonString());
+        MainWindow window = Open();
+        try
+        {
+            window.KeepSettings();
+            Assert.Equal(line, window.Settings.Browser);
+            SettingsDialog dialog = window.ShowSettings();
+            Ui.Settle();
+            dialog.Page = SettingsDialog.RunPage;
+            Ui.Settle();
+            TextBox browser = Editor<TextBox>(dialog, PageBrowsers.Row);
+            Assert.True(browser.Text == line && browser.PlaceholderText == PageBrowsers.SystemDefault,
+                $"Settings › Run's Browser shows \"{browser.Text}\" over \"{browser.PlaceholderText}\", where the browser kept for debugging is {line}");
+            browser.Text = $"{line} --incognito";
+            Ui.Settle();
+            dialog.Ok();
+            Ui.Settle();
+            Assert.Equal($"{line} --incognito", window.Settings.Browser);
+            StateStore.Open(settings).Settings.Flush();
+            JsonObject written = JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+            Assert.True(written["browser"]?.GetValue<string>() == $"{line} --incognito" && !written.ContainsKey("debugBrowser"),
+                $"settings.json keeps the browser so: {written.ToJsonString()}");
+        }
+        finally
+        {
             window.Close();
         }
     }
@@ -880,15 +1024,15 @@ public sealed class SettingsTests : IDisposable
         window.KeepSettings();
         StateStore store = StateStore.Open(settings);
         string file = Path.Combine(settings, StateStore.SettingsFile);
-        FileSystemWatcher watcher = store.Settings.Watched?.Watcher ?? throw new InvalidOperationException($"{file} is not watched");
+        WatchedFile watched = store.Settings.Watched ?? throw new InvalidOperationException($"{file} is not watched");
+        IDisposable deaf = watched.Deaf();
         try
         {
-            watcher.EnableRaisingEvents = false;
             window.ApplySettings(window.Settings with { EditorFontSize = 15 });
             store.Settings.Flush();
 
             WrittenElsewhere(file, 21);
-            FolderWatchTests.RaiseError(watcher, new InternalBufferOverflowException("Too many changes at once; directory listing is required."));
+            watched.Fail();
             Ui.WaitFor(() => window.EditorArea.CodeEditor.FontSize == 21,
                 $"the window to follow another Passenger's change to settings.json, lost in the watcher's overflow (its font is {window.EditorArea.CodeEditor.FontSize})");
 
@@ -901,7 +1045,7 @@ public sealed class SettingsTests : IDisposable
         }
         finally
         {
-            watcher.EnableRaisingEvents = true;
+            deaf.Dispose();
             store.Release();
             window.Close();
         }
@@ -917,11 +1061,11 @@ public sealed class SettingsTests : IDisposable
         window.KeepSettings();
         StateStore store = StateStore.Open(settings);
         string file = Path.Combine(settings, StateStore.SettingsFile);
-        FileSystemWatcher watcher = store.Settings.Watched?.Watcher ?? throw new InvalidOperationException($"{file} is not watched");
+        WatchedFile watched = store.Settings.Watched ?? throw new InvalidOperationException($"{file} is not watched");
+        // Deaf, so its word of the window's own write, which comes when the system sends it, is no part of the test.
+        IDisposable deaf = watched.Deaf();
         try
         {
-            // Deaf, so its word of the window's own write, which comes when the system sends it, is no part of the test.
-            watcher.EnableRaisingEvents = false;
             window.ApplySettings(window.Settings with { EditorFontSize = 15 });
             store.Settings.Flush();
             ChangedUnstamped(file, 16);
@@ -929,7 +1073,7 @@ public sealed class SettingsTests : IDisposable
             window.Activate();
             Ui.Settle();
             Assert.True(window.EditorArea.CodeEditor.FontSize == 15, "settings.json was read again as the window came in front, though only the window's own change had moved it");
-            FolderWatchTests.RaiseError(watcher, new InternalBufferOverflowException("Too many changes at once; directory listing is required."));
+            watched.Fail();
             Ui.Settle();
             Assert.True(window.EditorArea.CodeEditor.FontSize == 15, "settings.json was read again as its watcher overflowed, though only the window's own change had moved it");
 
@@ -939,7 +1083,7 @@ public sealed class SettingsTests : IDisposable
         }
         finally
         {
-            watcher.EnableRaisingEvents = true;
+            deaf.Dispose();
             store.Release();
             window.Close();
         }

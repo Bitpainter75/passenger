@@ -371,7 +371,6 @@ public class MobileNeedsTests
         ProjectNeeds ios = new("IosApp", ["net11.0-ios"]) { Apple = new AppleAnswer("Could not find a valid Xcode developer path") };
 
         Assert.Equal("IosApp builds only on a Mac, with Xcode", Want([ios], onMac: false).Said);
-        Assert.Null(Want([new ProjectNeeds(Maui, MauiFrameworks)], onMac: false).Said);
 
         // Linux's SDK names wasm-tools for a tvOS app, which names no framework of it; Windows' tvos lets it load to be edited.
         ProjectNeeds onLinux = new("Tv", ["net11.0-tvos"]) { Workloads = [new WorkloadLacked("wasm-tools", null)] };
@@ -382,6 +381,28 @@ public class MobileNeedsTests
         Assert.Equal(["tvos"], Want([tv], onMac: false).Workloads);
         Assert.Equal(["tvos"], Want([tv]).Workloads);
         Assert.Equal("IosApp needs Xcode (Could not find a valid Xcode developer path)", Want([ios]).Said);
+    }
+
+    [Fact]
+    public void Off_a_Mac_an_app_with_Apple_heads_beside_others_is_said_to_build_them_only_on_a_Mac_whatever_else_it_lacks()
+    {
+        const string AppleHeads = "MauiApp1 builds for iOS and Mac Catalyst only on a Mac, with Xcode";
+        ProjectNeeds maui = new(Maui, MauiFrameworks);
+        ProjectNeeds lacking = maui with { Android = MobileAnswers.Android(Answer(AndroidSaid, AndroidWarned)) };
+
+        MobileWant want = Want([maui], onMac: false);
+
+        Assert.Equal([$"{Maui}: iOS, Mac Catalyst"], want.AppleAppsOffMac.Select(p => $"{p.Project}: {string.Join(", ", p.Platforms)}"));
+        Assert.Equal(AppleHeads, want.Said);
+        Assert.False(want.MayChange, "What only a Mac builds is asked again each time the window comes in front");
+        Assert.Empty(want.Workloads);
+        Assert.Equal($"MauiApp1 needs a JDK (Java 21.0.8) and the Android SDK's platforms;android-37.0 and build-tools;37.0.0. {AppleHeads}",
+            Want([lacking], onMac: false).Said);
+        Assert.Equal("MauiApp1 and Phone build for iOS and Mac Catalyst only on a Mac, with Xcode. Tv builds for tvOS only on a Mac, with Xcode",
+            Want([maui, new ProjectNeeds("Phone", [.. MauiFrameworks, "net11.0-windows10.0.19041.0"]), new ProjectNeeds("Tv", ["net11.0-android", "net11.0-tvos"])],
+                onMac: false).Said);
+        Assert.Empty(Want([maui]).AppleAppsOffMac);
+        Assert.Null(Want([maui]).Said);
     }
 
     /// <summary>The first bytes of the Android workload's Linux aapt2 (37.2.31), an x64 program's ELF header.</summary>
@@ -409,6 +430,59 @@ public class MobileNeedsTests
         Assert.Equal("Linux on Arm64", AndroidHosts.Unbuilt(Architecture.Arm64, Processors("#!/bin/bash -e\nexec as\n"u8.ToArray())));
     }
 
+    /// <summary>Where the .NET installs workloads for each user, the Android workload's Linux pack is in the user's own
+    /// .dotnet alone: its aapt2 is read there, the newest version of either folder's.</summary>
+    [Fact]
+    public void The_Android_workloads_tools_are_read_from_the_users_own_dotnet_where_the_dotnet_installs_workloads_there()
+    {
+        string place = PathNames.Canonical(Directory.CreateTempSubdirectory("passenger-unit-").FullName);
+        try
+        {
+            string root = Directory.CreateDirectory(Path.Combine(place, "usr", "lib64", "dotnet")).FullName;
+            string home = Directory.CreateDirectory(Path.Combine(place, "home", "ann")).FullName;
+            string marker = WorkloadFolders.UserLocalMarker(root, "10.0.113")!;
+            Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
+            File.WriteAllText(marker, string.Empty);
+            void Aapt2(string under, string version, byte[] header)
+            {
+                string tools = Directory.CreateDirectory(Path.Combine(under, "packs", "Microsoft.Android.Sdk.Linux", version, "tools", "Linux")).FullName;
+                File.WriteAllBytes(Path.Combine(tools, "aapt2"), header);
+            }
+            WorkloadFolders folders = WorkloadFolders.Of(root, "10.0.113", home);
+            Assert.Empty(AndroidHosts.ToolsProcessors(folders));
+
+            Aapt2(Path.Combine(home, ".dotnet"), "37.2.31", [.. X64Aapt2[..18], 183, 0]);
+            Assert.Equal([Architecture.Arm64], AndroidHosts.ToolsProcessors(folders));
+            Assert.Empty(AndroidHosts.ToolsProcessors(new WorkloadFolders(root, null)));
+
+            Aapt2(root, "36.1.2", X64Aapt2);
+            Assert.Equal([Architecture.Arm64], AndroidHosts.ToolsProcessors(folders));
+            Aapt2(root, "37.3.0", X64Aapt2);
+            Assert.Equal([Architecture.X64], AndroidHosts.ToolsProcessors(folders));
+        }
+        finally
+        {
+            Directory.Delete(place, recursive: true);
+        }
+    }
+
+    /// <summary>Where Install puts a workload, as an offer and a question say it, and the command an administrator runs
+    /// where it needs one, naming the .NET's dotnet by its path wherever sudo runs it.</summary>
+    [Fact]
+    public void A_workload_install_says_where_it_puts_the_workload_and_an_administrators_command_names_the_dotnet_by_its_path()
+    {
+        Assert.Equal("into the .NET in /usr/share/dotnet", WorkloadInstalls.Into(new WorkloadFolders("/usr/share/dotnet", null)));
+        Assert.Equal("into /home/ann/.dotnet, for you alone, as the .NET in /usr/lib64/dotnet installs workloads for each user",
+            WorkloadInstalls.Into(new WorkloadFolders("/usr/lib64/dotnet", "/home/ann/.dotnet")));
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal("dotnet workload install android ios", WorkloadInstalls.AsAdministrator(@"C:\Program Files\dotnet", ["android", "ios"]));
+            return;
+        }
+        Assert.Equal("sudo /usr/share/dotnet/dotnet workload install android ios", WorkloadInstalls.AsAdministrator("/usr/share/dotnet", ["android", "ios"]));
+        Assert.Equal("sudo '/opt/my dotnet/dotnet' workload install android", WorkloadInstalls.AsAdministrator("/opt/my dotnet", ["android"]));
+    }
+
     [Fact]
     public void On_Linux_on_Arm64_an_Android_app_is_said_to_build_elsewhere_its_workload_still_offered_and_no_Android_SDK_or_JDK_asked()
     {
@@ -425,7 +499,7 @@ public class MobileNeedsTests
         Assert.False(loaded.AndroidLacks, "The Android SDK and a JDK, which build nothing here, were offered");
         Assert.Equal($"AndroidApp {Elsewhere}", loaded.Said);
         Assert.Equal($"MauiApp1 and AndroidApp build{Elsewhere["builds".Length..]}",
-            Want([new ProjectNeeds(Maui, MauiFrameworks), lacking], onMac: false, androidHost: "Linux on Arm64").Said);
+            Want([new ProjectNeeds(Maui, ["net11.0-android"]), lacking], onMac: false, androidHost: "Linux on Arm64").Said);
         Assert.Null(Want([new ProjectNeeds("Desktop", ["net11.0"])], onMac: false, androidHost: "Linux on Arm64").Said);
         Assert.Equal("AndroidApp needs the .NET workload android", Want([lacking], onMac: false).Said);
     }

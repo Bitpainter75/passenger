@@ -54,6 +54,32 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
         Assert.True(late.Result == "\"late\"", $"A getter that had returned was answered \"{late.Result}\", its value lost with nothing left to run; the engine's log:\n{host.EngineLog()}");
     }
 
+    /// <summary>A getter run of itself (here a hover's) that ends of itself just past the evaluation's time, in a finally where
+    /// no abort is asked, gives its value and leaves the getters after it running, as one slow on a busy machine does; one the
+    /// debugger stops past its time turns them off until the program runs on, the words naming the getter it stopped.</summary>
+    [Fact]
+    public async Task Only_an_evaluation_stopped_past_its_time_turns_implicit_evaluation_off_naming_what_it_ran()
+    {
+        await using DebugSession host = await LaunchCase("leaves", "Console.WriteLine($\"turn {turn}\");");
+        StoppedEvent stop = await host.WaitForStoppedEvent();
+        int frame = (await host.TopFrameAsync(stop.ThreadId!.Value)).Id;
+
+        string late = await Hovered(host, frame, "Reads.LateFinally");
+        Assert.True(late == "\"late\"", $"A getter ending of itself just past its time was answered {late}; the engine's log:\n{host.EngineLog()}");
+        string counted = await Hovered(host, frame, "Leaves.Count");
+        Assert.True(counted == "1", $"The getter after one that ended of itself past its time was answered {counted}, so a slow getter turned the rest off");
+
+        string endless = await Hovered(host, frame, "Leaves.Endless");
+        Assert.True(endless.Contains("and was stopped", StringComparison.Ordinal), $"The spinning getter was answered {endless}, not stopped; the engine's log:\n{host.EngineLog()}");
+        string refused = await Hovered(host, frame, "Leaves.Count");
+        const string Off = "error: Implicit evaluation is disabled: the evaluation of PassengerCases.dll!Leaves.get_Endless() took longer than 3 s and was stopped. "
+            + "It is enabled again once the program runs on";
+        Assert.True(refused == Off, $"The getter after the one stopped was answered \"{refused}\", where implicit evaluation was off, naming the getter stopped");
+    }
+
+    private static async Task<string> Hovered(DebugSession host, int frame, string expression) =>
+        (await host.RequestAsync<EvaluateResponse>(DapCommands.Evaluate, new EvaluateArguments(expression, frame, EvaluateContexts.Hover))).Result;
+
     [Fact]
     public async Task An_exception_stop_is_still_described_once_an_evaluation_there_could_not_be_stopped()
     {
@@ -256,6 +282,64 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
         Assert.Contains("let out, 1 turns", output, StringComparison.Ordinal);
         Assert.Equal(0, exitCode);
     }
+
+    /// <summary>The runtime's own tiering worker, which runs none of the program's code, is not held while an evaluation
+    /// runs, where held it would stand partway through compiling a method, inside the load of a type or the check of a
+    /// call to inline, and an evaluation needing what it held there would wait past its time. An evaluation that has it
+    /// compile a method again sees it do so, and the type that compile loads is there for the next.</summary>
+    [Fact]
+    public async Task An_evaluation_leaves_the_runtimes_tiering_worker_running_so_what_it_compiles_meanwhile_holds_none_up()
+    {
+        Assert.SkipWhen(OperatingSystem.IsMacOS(), "macOS keeps no name the runtime gives its tiering worker, the only word of it the debugger has, so an evaluation holds it there with the rest");
+        const string looping = "LoopingConsoleApp";
+        await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
+        await host
+            .InitializeAsync()
+            .LaunchAsync(Debuggees.Program(looping), stopAtEntry: false, justMyCode: true, arguments: ["tiers"], environment: Tiering)
+            .WaitForInitializedEvent();
+        await host.BreakpointsAsync(Debuggees.Line(looping, "Console.WriteLine(\"tiers\");"), Debuggees.Source(looping, "Program.cs")).ConfigurationDoneAsync();
+        StoppedEvent stop = await host.WaitForStoppedEvent();
+        int frame = (await host.TopFrameAsync(stop.ThreadId!.Value)).Id;
+
+        EvaluateResponse warm = await host.EvaluateAsync(frame, "Warm()");
+        Assert.True(warm.Result == "true", $"The tiering worker compiled nothing in the 2 s of an evaluation that called a method past its count ({warm.Result}): the evaluation held it partway; the engine's log:\n{host.EngineLog()}");
+        EvaluateResponse rare = await host.EvaluateAsync(frame, "MakeOptimizedRare()");
+        Assert.True(rare.Result == "2", $"The evaluation needing the type the tiering worker loaded was answered {rare.Result}");
+    }
+
+    /// <summary>The finalizer is held while an evaluation runs, before it runs any of the program's code: an evaluation that
+    /// leaves litter with finalizers and collects it finalizes none of it meanwhile, and the next, collecting again, ends,
+    /// where a finalizer let run and held at its first instruction of the program's, a place no collection may run, would
+    /// keep it waiting for good. Let go, the program finalizes the litter.</summary>
+    [Fact]
+    public async Task A_collection_in_an_evaluation_ends_while_the_finalizer_has_litter_waiting_and_finalizes_it_once_let_go()
+    {
+        const string looping = "LoopingConsoleApp";
+        await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
+        await host
+            .InitializeAsync()
+            .LaunchAsync(Debuggees.Program(looping), stopAtEntry: false, justMyCode: true, arguments: ["finalizes"])
+            .WaitForInitializedEvent();
+        await host.BreakpointsAsync(Debuggees.Line(looping, "Console.WriteLine(\"finalizes\");"), Debuggees.Source(looping, "Program.cs")).ConfigurationDoneAsync();
+        StoppedEvent stop = await host.WaitForStoppedEvent();
+        int frame = (await host.TopFrameAsync(stop.ThreadId!.Value)).Id;
+
+        EvaluateResponse first = await host.EvaluateAsync(frame, "Finalizing.Collect()");
+        Assert.True(first.Result == "0", $"An evaluation that collected litter with finalizers finalized {first.Result} of it: the finalizer ran during it");
+        EvaluateResponse second = await host.EvaluateAsync(frame, "Finalizing.Collect()");
+        Assert.True(second.Result == "0", $"The second collection, the finalizer having litter waiting, was answered {second.Result}");
+
+        await host.ContinueAsync();
+        await host.WaitForEvent<OutputEvent>(o => o.Output.Contains("finalized", StringComparison.Ordinal));
+    }
+
+    /// <summary>What has the debuggee's runtime promote a method straight to optimized code, and keeps its tiering worker for
+    /// the test's length, where it would end after 4 s with no work.</summary>
+    private static IReadOnlyDictionary<string, string> Tiering => new Dictionary<string, string>
+    {
+        ["DOTNET_TieredPGO"] = "0",
+        ["DOTNET_TC_BackgroundWorkerTimeoutMs"] = "600000",
+    };
 
     /// <summary>PassengerCases' "locks" case: the stop while another thread holds the lock, and the later thread's.</summary>
     private const string Held = "Console.WriteLine(\"the lock is held\");";

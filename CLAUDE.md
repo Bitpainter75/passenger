@@ -396,7 +396,7 @@ Projects in `src/`; `find_symbol` finds the rest from the names here. A pointer'
   (`DockerfileStages.Expanded`). A run Detach let go of (`ContainerRun.LetGo`) is the folder's: Stop
   passes it over, and leaving the folder asks whether to stop its containers or leave them running, those left the
   person's from then on (`containers.json`'s `Left`, written before the quit carries on, `ContainerLabels.LeaveToPersonAsync`, merged as a set, passed over by the clean-up); a Passenger nobody sees never asks.
-  The person's `docker` CLI and context only, never the Engine API or a Docker package; a service's name
+  The person's `docker` CLI and context only, never the Engine API or a Docker package (how it runs x86-64 images, `EngineEmulation`, reads Docker Desktop's Rosetta choice from its own settings file, the one file of Docker's Passenger reads); a service's name
   always after `--`; Compose's own model is the plan, Passenger's override in the state; downloaded tools
   SHA256-checked; Podman both ways. A container publish (`-t:PublishContainer`; several platforms need
   `RuntimeIdentifiers` too, NETSDK1047 otherwise, and containerd's image store) is judged by the SDK's "Pushed image"
@@ -685,11 +685,14 @@ a new name, and `just site-shots` retakes its images.
   `PixelPoint` says; `codesign` takes a dotted folder under `Contents/MacOS` for a bundle (so the web servers live in
   Resources); TMPDIR goes through the /var link, so build or restore a test's project by its real path (a restore by /var writes an assets file with no projectReferences) (two spellings restored at
   once collide).
-- **.NET's watcher on macOS passes over FSEvents' word that it dropped events** (dotnet/runtime#136577), so a folder is
-  watched only through `WatchedTree`, never a bare `FileSystemWatcher` (#607, #609); a file watched alone (settings.json,
-  vimrc) only through `WatchedFile`, a folder through `WatchedTree` (WatcherRulesTests refuses a `FileSystemWatcher` named
-  elsewhere), each read again on its watcher's error and, through `LookAgain`, as a window comes in front (settings.json,
-  vimrc, `ProjectTemplates.LookAgain`, the open folder's and Git's watchers through `MainWindow.AddLookingAgain`).
+- **.NET's watcher on macOS passes over FSEvents' word that it dropped events** (dotnet/runtime#136577), which a stream
+  read late gets under load, so `WatchedTree` reads macOS's events through a stream of Passenger's own (`MacFileEvents`,
+  a drop its overflow), and a folder is watched only through `WatchedTree`, never a bare `FileSystemWatcher` (#607, #609);
+  a file watched alone (settings.json, vimrc) only through `WatchedFile` (WatcherRulesTests refuses either named
+  elsewhere; a test deafens one through `Deaf`), each read again on its watcher's error and, through `LookAgain`, as a
+  window comes in front (settings.json, vimrc, `ProjectTemplates.LookAgain`, the open folder's and Git's watchers through
+  `MainWindow.AddLookingAgain`). FSEvents also falls minutes behind for every stream, saying nothing: `WatchLag`'s beat
+  has the watchers look for themselves meanwhile, and the folder's watcher takes the IDE's own saves as they land.
 - **macOS's "damaged" dialog** comes from reading or starting a Passenger.app whose seal no longer holds: a mounted disk
   image whose file was replaced (`just package-mac` ejects one first) or a bundle written into (#450). Tests never start
   a program inside an unsigned bundle, and a run's folder ends in `.noindex`, so Spotlight reads none of it.

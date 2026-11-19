@@ -51,7 +51,7 @@ public sealed class SqlConnectDialog : IdeWindow
         ok.Click += (_, _) => IdeErrors.Observe(ConnectAsync());
         StackPanel fields = new()
         {
-            Spacing = 10,
+            Spacing = Gaps.Wide,
             Children = { FormRows.Of("Server:", server), FormRows.Of("Name:", name), FormRows.Of("Sign in:", signIn), userRow, passwordRow, FormRows.Of(null, trust) },
         };
         Content = DialogFooter.Page(fields, DialogFooter.OkCancel(ok, () => Close(false), problem));

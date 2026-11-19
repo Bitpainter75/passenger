@@ -99,6 +99,10 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     /// after it and the caret between them where it takes arguments; off, its name alone.</summary>
     public bool CompletionParentheses { get; init; } = true;
 
+    /// <summary>In C#, the ';' that ends a statement formats the statement and the '}' that closes a block formats the block,
+    /// as Reformat Code lays them out, joined to the key's step of Undo; off, both stay as typed.</summary>
+    public bool FormatOnType { get; init; } = true;
+
     /// <summary>The XAML workspace: an Avalonia or WPF file opens beside its preview and, while its app runs, its Live Visual
     /// Tree, an element chosen in any of the three chosen in the others.</summary>
     public bool XamlWorkspace { get; init; }
@@ -225,6 +229,10 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     /// own, that window's place, or asked each time (Open Solution's This Window and New Window).</summary>
     public OpenProjectIn OpenProjectIn { get; init; } = OpenProjectIn.Ask;
 
+    /// <summary>"Confirm before closing": whether Passenger asks the person before it quits (Exit, the system's Quit, the last
+    /// window's close) or before any of its windows closes; never at first.</summary>
+    public ConfirmClosing ConfirmBeforeClosing { get; init; } = ConfirmClosing.Never;
+
     /// <summary>Check IDE updates: the person's window asks GitHub for Passenger's latest release as it starts and once
     /// a day, and an installed Passenger downloads a newer one to install as it restarts. Off, nothing is asked unless
     /// Help, Check for Updates is chosen, and nothing is downloaded at all.</summary>
@@ -286,9 +294,10 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     /// first on the PATH as the login shell finds it.</summary>
     public string? NodeInterpreter { get; init; }
 
-    /// <summary>The Chromium browser a Blazor app's WebAssembly half is debugged in, with arguments given every start of it,
-    /// as one command line; null for the one found (<see cref="Passenger.Core.ChromiumBrowsers"/>).</summary>
-    public string? DebugBrowser { get; init; }
+    /// <summary>The browser a web app's page opens in, and Debug drives to debug a Blazor app's WebAssembly half, with
+    /// arguments given every start of it, as one command line (<see cref="Run.PageBrowsers"/>); null for the system's default
+    /// browser, and for debugging the Chromium one found (<see cref="Passenger.Core.ChromiumBrowsers"/>).</summary>
+    public string? Browser { get; init; }
 
     /// <summary>The Godot a Godot project's game and editor run on, with arguments given every start of it, as one command
     /// line; null for the one found (<see cref="Passenger.Core.GodotExecutables"/>).</summary>
@@ -439,17 +448,31 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     public static IReadOnlyList<string> Sets { get; } = [nameof(AgentFolders), nameof(ThemeSources)];
 
     /// <summary>The settings naming a program Passenger runs, or a package of code it loads (the terminal's shell, the Node.js
-    /// the web servers run on, the browser and the Godot it debugs in, ESLint's and Prettier's packages): the person's alone to
-    /// change, which settings_set refuses an agent.</summary>
+    /// the web servers run on, the browser pages open and are debugged in, the Godot games run on, ESLint's and Prettier's
+    /// packages): the person's alone to change, which settings_set refuses an agent.</summary>
     public static IReadOnlySet<string> NamingPrograms { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
-        nameof(TerminalShell), nameof(NodeInterpreter), nameof(DebugBrowser), nameof(GodotExecutable), nameof(EslintPackage), nameof(PrettierPackage),
+        nameof(TerminalShell), nameof(NodeInterpreter), nameof(Browser), nameof(GodotExecutable), nameof(EslintPackage), nameof(PrettierPackage),
     };
 
+    /// <summary>The name <see cref="Browser"/> was kept under while it named the browser of debugging alone.</summary>
+    private const string FormerBrowser = "debugBrowser";
+
     /// <summary>A shortcut kept under an action's former id is kept under its id now, unless one is there already, as
-    /// <see cref="Clamped"/> reads them: written so, the former id leaves the file, and an action's shortcuts reset stay so.</summary>
+    /// <see cref="Clamped"/> reads them: written so, the former id leaves the file, and an action's shortcuts reset stay so.
+    /// The browser debugging named is the browser, unless one is named there already.</summary>
     public static void Renamed(JsonObject settings)
     {
+        if (settings.ContainsKey(FormerBrowser))
+        {
+            JsonNode? named = settings[FormerBrowser];
+            settings.Remove(FormerBrowser);
+            string browser = StateFile.Options.PropertyNamingPolicy!.ConvertName(nameof(Browser));
+            if (named is not null && settings[browser] is null)
+            {
+                settings[browser] = named;
+            }
+        }
         foreach (string property in new[] { nameof(Shortcuts), nameof(VSCodeShortcuts), nameof(IntelliJShortcuts) })
         {
             if (settings[StateFile.Options.PropertyNamingPolicy!.ConvertName(property)] is not JsonObject shortcuts)
@@ -669,6 +692,14 @@ public enum OpenProjectIn
     NewWindow,
     CurrentWindow,
     Ask,
+}
+
+/// <summary>The choices for "Confirm before closing", in the order Settings lists them.</summary>
+public enum ConfirmClosing
+{
+    Never,
+    WhenQuitting,
+    EveryWindow,
 }
 
 /// <summary>Where a diff opens, in the order Settings lists them.</summary>

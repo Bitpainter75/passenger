@@ -35,7 +35,7 @@ public sealed class SmallestWindowTests
             window.Start(LaunchOptions.Empty);
             Ui.Settle();
             Button[] tiles = [.. window.Welcome.GetVisualDescendants().OfType<Button>().Where(b => b.Classes.Contains(StyleClasses.WelcomeAction))];
-            Assert.Equal(4, tiles.Length);
+            Assert.Equal(5, tiles.Length);
             TextBox search = window.Welcome.GetVisualDescendants().OfType<TextBox>().Single(t => t.Classes.Contains(StyleClasses.WelcomeSearch));
             foreach (Button tile in tiles)
             {
@@ -123,6 +123,66 @@ public sealed class SmallestWindowTests
             window.Close();
             TestFolders.Delete(folder);
         }
+    }
+
+    /// <summary>At the smallest width, with a choice's count after the caret's place (1:20 (14 chars)) and Git's changes
+    /// beside it, the status bar's widgets and words all stand inside the window, nothing over another, the path and what
+    /// the bar says giving way first (LayoutFaults); where the last widgets ran past the window's edge.</summary>
+    [AvaloniaFact]
+    public void At_the_smallest_width_a_choices_count_keeps_the_status_bars_widgets_inside_the_window()
+    {
+        (string folder, string notes) = Changed("smallest-status-choice-");
+        MainWindow window = Ui.OpenFolder(folder, width: MainWindow.SmallestWidth, height: MainWindow.SmallestHeight, languageServer: false, autosaves: false);
+        try
+        {
+            window.OpenFile(notes);
+            Ui.Settle();
+            window.EditorArea.CodeEditor.Selections = Passenger.Text.SelectionSet.Single(new Passenger.Text.Selection(5, 19));
+            Ui.WaitFor(() => Named(window, "GitChangesButton").IsEffectivelyVisible, "Git's changed file in the status bar");
+            List<string> faults = LayoutFaults.Of(window, Named(window, "StatusBarFrame"), $"At {MainWindow.SmallestWidth} wide with 14 characters chosen, the status bar");
+            Assert.True(faults.Count == 0, string.Join("\n", faults));
+        }
+        finally
+        {
+            window.Close();
+            TestFolders.Delete(folder);
+        }
+    }
+
+    /// <summary>At the smallest width a diff in an editor tab, as narrow as the editors there, lays its own toolbar out
+    /// inside its room: the file's name and the count of differences give way, ending in an ellipsis, before its arrows and
+    /// Settings, nothing drawn over another (LayoutFaults); where the count was drawn under Settings.</summary>
+    [AvaloniaFact]
+    public void At_the_smallest_width_a_diffs_toolbar_gives_way_with_nothing_over_another()
+    {
+        (string folder, string notes) = Changed("smallest-diff-");
+        MainWindow window = Ui.OpenFolder(folder, width: MainWindow.SmallestWidth, height: MainWindow.SmallestHeight, languageServer: false, autosaves: false);
+        try
+        {
+            // In a tab, as narrow as the editors: the diff's place is what is held here.
+            window.ApplySettings(window.Settings with { OpenDiffsIn = DiffPlace.Tab });
+            Passenger.App.Vcs.IDiffHost diff = Ui.Landed(window.ShowDiffAsync(notes), "the file's diff") ?? throw new Xunit.Sdk.XunitException("No diff opened");
+            Ui.Settle();
+            DiffView view = OpenDiffs.ViewOf(diff);
+            List<string> faults = LayoutFaults.Of(window, view, $"At {MainWindow.SmallestWidth} wide, the diff");
+            Assert.True(faults.Count == 0, string.Join("\n", faults));
+        }
+        finally
+        {
+            window.Close();
+            TestFolders.Delete(folder);
+        }
+    }
+
+    /// <summary>A folder in Git whose Notes.txt is changed since its commit.</summary>
+    private static (string Folder, string Notes) Changed(string prefix)
+    {
+        string folder = TestFolders.Create(prefix);
+        string notes = Path.Combine(folder, "Notes.txt");
+        File.WriteAllText(notes, "find the words here\nand the words here again\n");
+        TestGit.Init(folder);
+        File.WriteAllText(notes, "find the words here\nand the words over there again\nline three\n");
+        return (folder, notes);
     }
 
     [AvaloniaFact]
@@ -367,11 +427,11 @@ public sealed class SmallestWindowTests
         }
     }
 
-    /// <summary>Under Cubicle at the smallest width, the left stripe, each window of its places named by a titled tab, folds
-    /// away and gives its room to the editors, where it kept 40 units holding nothing; a window dragged by its titled tab
-    /// shows it again as a place to drop on, and dropped there its icon keeps it shown.</summary>
+    /// <summary>Under Cubicle at the smallest width no stripe stands, titled tabs naming every window, so the editors take
+    /// the room a stripe would; a window dragged by its titled tab brings none back, and dropped on the left edge it docks
+    /// at the left as its tab.</summary>
     [AvaloniaFact]
-    public void Under_Cubicle_at_the_smallest_width_the_empty_left_stripe_folds_away_and_shows_while_a_window_is_dragged()
+    public void Under_Cubicle_at_the_smallest_width_no_stripe_stands_even_while_a_window_is_dragged_to_the_left_edge()
     {
         string folder = TestFolders.Create("smallest-stripe-");
         File.WriteAllText(Path.Combine(folder, "One.cs"), "class One { }\n");
@@ -382,9 +442,8 @@ public sealed class SmallestWindowTests
             window.OpenFile(Path.Combine(folder, "One.cs"));
             Ui.Settle();
             DockHost dock = window.DockHost;
-            Border left = StripeBars(window)[0];
-            Assert.True(dock.ColumnDefinitions[0].ActualWidth == 0 && !left.IsEffectivelyVisible && Placed(window, window.EditorArea).Left < 1,
-                $"Cubicle's left stripe, holding no icon, takes {dock.ColumnDefinitions[0].ActualWidth:0.#} units, the editors starting at {Placed(window, window.EditorArea).Left:0.#}");
+            Assert.True(dock.ColumnDefinitions[0].ActualWidth == 0 && !StripeBars(window).Any(b => b.IsEffectivelyVisible) && Placed(window, window.EditorArea).Left < 1,
+                $"Under Cubicle a stripe takes {dock.ColumnDefinitions[0].ActualWidth:0.#} units, the editors starting at {Placed(window, window.EditorArea).Left:0.#}");
 
             ToolWindow build = dock[ToolWindowIds.Build];
             Border tab = dock.GetVisualDescendants().OfType<Border>().FirstOrDefault(b => b.Classes.Contains(StyleClasses.Tab) && Equals(b.Tag, build.Id) && b.IsEffectivelyVisible)
@@ -396,14 +455,16 @@ public sealed class SmallestWindowTests
                 window.MouseMove(from + new Point(0, -20 * step), RawInputModifiers.LeftMouseButton);
             }
             Ui.Settle();
-            Assert.True(dock.ColumnDefinitions[0].ActualWidth == 40 && left.IsEffectivelyVisible,
-                $"With Build dragged, the left stripe takes {dock.ColumnDefinitions[0].ActualWidth:0.#} units: it is no place to drop it");
-            Point onStripe = new(Ui.Centre(left, window).X, Placed(window, left).Top + 60);
-            window.MouseMove(onStripe, RawInputModifiers.LeftMouseButton);
-            window.MouseUp(onStripe, MouseButton.Left);
+            Assert.True(dock.ColumnDefinitions[0].ActualWidth == 0 && !StripeBars(window).Any(b => b.IsEffectivelyVisible),
+                $"With Build dragged, a stripe takes {dock.ColumnDefinitions[0].ActualWidth:0.#} units under Cubicle");
+            Rect editors = Placed(window, window.EditorArea);
+            Point onEdge = new(editors.Left + 4, editors.Top + 60);
+            window.MouseMove(onEdge, RawInputModifiers.LeftMouseButton);
+            window.MouseUp(onEdge, MouseButton.Left);
             Ui.Settle();
-            Assert.True(build.Anchor == ToolAnchor.LeftTop && StripeIcon(window, ToolWindowIds.Build).IsEffectivelyVisible && dock.ColumnDefinitions[0].ActualWidth == 40,
-                $"Build dropped on the left stripe stands at {build.Anchor}, the stripe {dock.ColumnDefinitions[0].ActualWidth:0.#} wide");
+            Assert.True(build.Anchor is ToolAnchor.LeftTop or ToolAnchor.LeftBottom && dock.ColumnDefinitions[0].ActualWidth == 0
+                && !StripeBars(window).Any(b => b.IsEffectivelyVisible),
+                $"Build dropped on the left edge stands at {build.Anchor}, a stripe {dock.ColumnDefinitions[0].ActualWidth:0.#} wide");
         }
         finally
         {

@@ -38,10 +38,15 @@ public sealed partial class CodeEditor
         }
     }
 
+    /// <summary>How many times the editor has drawn its ground: each has the compositor draw the whole editor again, every
+    /// row's text over it.</summary>
+    public long GroundsDrawn { get; private set; }
+
     /// <summary>The editor's own drawing: the ground under the text and the gutter's. The rows draw themselves over it
     /// (<see cref="PrepareFrame"/>), so this is drawn again only for a change, never for a scroll.</summary>
     public override void Render(DrawingContext context)
     {
+        GroundsDrawn++;
         Size size = Bounds.Size;
         context.FillRectangle(palette.Background, new Rect(size));
         context.FillRectangle(palette.Gutter, new Rect(0, 0, GutterWidth, size.Height));
@@ -520,6 +525,10 @@ public sealed partial class CodeEditor
         }
         if (!runProperties.TryGetValue(kind, out TextRunProperties? props))
         {
+            if (TextLooks.TryGet(kind, out TextLook own))
+            {
+                return runProperties[kind] = OwnRun(own);
+            }
             IBrush brush = palette.Syntax(kind);
             SyntaxStyle? style = palette.Style(kind);
             int set = style is not null ? 0 : kind switch
@@ -540,6 +549,35 @@ public sealed partial class CodeEditor
             runProperties[kind] = props;
         }
         return props;
+    }
+
+    /// <summary>A look a highlighter gave (<see cref="TextLooks"/>): its colours the theme's tokens' or its own, the text's
+    /// where it gives none, its ground drawn behind the text.</summary>
+    private GenericTextRunProperties OwnRun(TextLook look)
+    {
+        IBrush fore = Brush(look.Fore) ?? palette.Text;
+        if (look.Opacity < 1 && fore is ISolidColorBrush solid)
+        {
+            fore = new ImmutableSolidColorBrush(solid.Color, solid.Opacity * look.Opacity);
+        }
+        TextDecorationCollection? lines = null;
+        if (look.Style.HasFlag(LookStyle.Underline))
+        {
+            (lines ??= []).AddRange(TextDecorations.Underline);
+        }
+        if (look.Style.HasFlag(LookStyle.Strike))
+        {
+            (lines ??= []).AddRange(TextDecorations.Strikethrough);
+        }
+        Typeface face = new(FontFamily, look.Style.HasFlag(LookStyle.Italic) ? FontStyle.Italic : FontStyle.Normal,
+            look.Style.HasFlag(LookStyle.Bold) ? FontWeight.Bold : FontWeight.Normal);
+        return new GenericTextRunProperties(face, FontSize, textDecorations: lines, foregroundBrush: fore, backgroundBrush: Brush(look.Back),
+            fontFeatures: ligatures ? null : NoLigatures);
+
+        IBrush? Brush(LookColour colour) =>
+            colour.Token is { } token ? Tokens.Find(this, token)?.ToImmutable()
+            : colour.Argb != 0 ? new ImmutableSolidColorBrush(Color.FromUInt32(colour.Argb))
+            : null;
     }
 
     /// <summary>The run properties made for each look: a brush, the theme's style or none, and the kind's own (plain, italic, bold).</summary>

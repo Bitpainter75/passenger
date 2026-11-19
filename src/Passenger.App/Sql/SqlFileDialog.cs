@@ -39,7 +39,7 @@ public sealed class SqlFileDialog : IdeWindow
             browse.Click += (_, _) => IdeErrors.Observe(BrowseAsync(reads));
             field = new DockPanel { Children = { browse, file } };
         }
-        StackPanel fields = new() { Spacing = 10, Children = { FormRows.Of("Database:", database), FormRows.Of(local is null ? "File on the server:" : "File:", field) } };
+        StackPanel fields = new() { Spacing = Gaps.Wide, Children = { FormRows.Of("Database:", database), FormRows.Of(local is null ? "File on the server:" : "File:", field) } };
         Content = DialogFooter.Headed(title, new TextBlock { Classes = { StyleClasses.Muted }, Text = about, TextWrapping = TextWrapping.Wrap, FontSize = 12 }, fields,
             DialogFooter.OkCancel(ok, () => Close(false)));
         Opened += (_, _) => (names ? database : file).Focus();

@@ -35,10 +35,9 @@ internal static class Evaluation
     {
         using ProjectCollection collection = new(asked.Properties.ToDictionary(p => p.Key, p => p.Value), loggers: null, ToolsetDefinitionLocations.Default);
         EvaluationContext context = EvaluationContext.Create(EvaluationContext.SharingPolicy.Shared);
-        ParallelOptions parallel = new() { MaxDegreeOfParallelism = Environment.ProcessorCount, CancellationToken = cancel };
         ConcurrentDictionary<string, (EvaluatedProject Outer, IReadOnlyList<string> Frameworks)> targeted = new(PathNames.Comparer);
-        // Load-balanced, so each worker takes the next project in the order asked: the active file's first.
-        Parallel.ForEach(Partitioner.Create(asked.Projects.ToArray(), loadBalance: true), parallel, path =>
+        // Each worker takes the next project in the order asked: the active file's first.
+        ApartScheduler.ForEach("Passenger evaluator", [.. asked.Projects], 0, cancel, path =>
         {
             (EvaluatedProject outer, IReadOnlyList<string> frameworks) = Outer(path, collection, context, asked.Of(path));
             evaluated(outer);
@@ -49,7 +48,7 @@ internal static class Evaluation
         });
         List<(EvaluatedProject Outer, IReadOnlyList<string> Frameworks)> inOrder =
             [.. asked.Projects.Distinct(PathNames.Comparer).Where(targeted.ContainsKey).Select(p => targeted[p])];
-        Parallel.ForEach(Partitioner.Create(inOrder.ToArray(), loadBalance: true), parallel,
+        ApartScheduler.ForEach("Passenger evaluator", inOrder, 0, cancel,
             t => evaluated(Frameworks(t.Outer, t.Frameworks, collection, context, asked.Of(t.Outer.Path))));
     }
 
@@ -131,7 +130,7 @@ internal static class Evaluation
             OutputType = NonEmpty(first.GetPropertyValue(MSBuildNames.OutputType)),
             TargetFrameworks = frameworks,
             IsTestProject = each.Any(p => p.GetPropertyValue("IsTestProject").Equals("true", StringComparison.OrdinalIgnoreCase)),
-            IsAspireHost = each.Any(p => p.GetPropertyValue("IsAspireHost").Equals("true", StringComparison.OrdinalIgnoreCase)),
+            IsAspireHost = each.Any(p => AspireHosts.Is(p.GetPropertyValue(AspireHosts.Property), p.GetItems("PackageReference").Select(i => i.EvaluatedInclude))),
             IsWeb = each.Any(p => WebSdks.Any(sdk => p.GetPropertyValue(sdk).Equals("true", StringComparison.OrdinalIgnoreCase))),
             Dependencies = [.. each.Select((p, i) => Dependencies(p, named[i]))],
             Symbols = [.. each.Select(DefinedSymbols.Of).OfType<FrameworkSymbols>()],
@@ -272,13 +271,15 @@ internal static class Evaluation
     }
 
     /// <summary>The project's files, every evaluation's, each once: of the file item types and those the project names as
-    /// such, but those it hides (Visible false), each a shared project brings in naming its items file.</summary>
+    /// such, but those it hides (Visible false), each a shared project brings in naming its items file, and each a NuGet
+    /// package's own build file names from that package's folder (<see cref="PackageLayout"/>) marked so.</summary>
     internal static List<EvaluatedItem> Items(IReadOnlyList<Project> evaluations)
     {
         List<EvaluatedItem> items = [];
         HashSet<(string, string)> seen = [];
         foreach (Project project in evaluations)
         {
+            string[] packageFolders = [.. PackageFolders(project)];
             IEnumerable<string> types = FileItemTypes.Concat(project.GetItems("AvailableItemName").Select(i => i.EvaluatedInclude)).Distinct(StringComparer.OrdinalIgnoreCase);
             foreach (string type in types)
             {
@@ -293,27 +294,39 @@ internal static class Evaluation
                     {
                         continue;
                     }
-                    string? shared = item.Xml?.ContainingProject?.FullPath is { } from && from.EndsWith(EvaluatedItem.SharedItemsExtension, StringComparison.OrdinalIgnoreCase)
-                        ? from : null;
-                    items.Add(new EvaluatedItem(type, full, NonEmpty(item.GetMetadataValue("Link")), NonEmpty(item.GetMetadataValue("DependentUpon")), shared));
+                    string? from = item.Xml?.ContainingProject?.FullPath;
+                    string? shared = from is not null && from.EndsWith(EvaluatedItem.SharedItemsExtension, StringComparison.OrdinalIgnoreCase) ? from : null;
+                    bool packaged = from is not null && packageFolders.Any(f => PackageLayout.VersionFolder(from, f) is { } package && PathNames.IsUnder(full, package.Folder));
+                    items.Add(new EvaluatedItem(type, full, NonEmpty(item.GetMetadataValue("Link")), NonEmpty(item.GetMetadataValue("DependentUpon")), shared, packaged));
                 }
             }
         }
         return items;
     }
 
+    /// <summary>The NuGet package folders a project's restore takes packages from (its root and fallback folders), full.</summary>
+    private static IEnumerable<string> PackageFolders(Project project) =>
+        new[] { project.GetPropertyValue(CarriedProperties.NuGetPackageRoot) }
+            .Concat(project.GetPropertyValue(CarriedProperties.NuGetPackageFolders).Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Where(f => f.Length > 0 && Path.IsPathFullyQualified(f)).Select(f => Path.TrimEndingDirectorySeparator(Path.GetFullPath(f)));
+
     /// <summary>Where imports never change but with their versions, which the imports kept say: the .NET install (the
-    /// SDK, its props and targets) and the NuGet package folders.</summary>
+    /// SDK, its props and targets), the workloads' packs and manifests in the user's own folder where it installs them for
+    /// each user (<see cref="WorkloadFolders"/>), and the NuGet package folders.</summary>
     internal static HashSet<string> OutsideRoots(Project project)
     {
         HashSet<string> roots = new(PathNames.Comparer);
-        foreach (string property in new[] { "NetCoreRoot", "NetCoreTargetingPackRoot", "MSBuildBinPath", MSBuildNames.ExtensionsPath, CarriedProperties.NuGetPackageRoot })
+        foreach (string property in new[] { "NetCoreRoot", "NetCoreTargetingPackRoot", "MSBuildBinPath", MSBuildNames.ExtensionsPath })
         {
             Add(project.GetPropertyValue(property));
         }
-        foreach (string folder in project.GetPropertyValue(CarriedProperties.NuGetPackageFolders).Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        roots.UnionWith(PackageFolders(project));
+        string root = project.GetPropertyValue("NetCoreRoot");
+        if (root.Length > 0 && Path.IsPathFullyQualified(root)
+            && WorkloadFolders.Of(root, project.GetPropertyValue("NETCoreSdkVersion"), WorkloadFolders.CliHome(Environment.GetEnvironmentVariable)).UserLocal is { } own)
         {
-            Add(folder);
+            Add(Path.Combine(own, WorkloadFolders.Packs));
+            Add(Path.Combine(own, WorkloadFolders.Manifests));
         }
         return roots;
 

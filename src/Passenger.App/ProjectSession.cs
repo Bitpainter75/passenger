@@ -114,6 +114,14 @@ public sealed class ProjectSession : IAsyncDisposable
         Aspire = new AspireController(this, setup.StateFolder);
         Aspire.Inspected = app => Reloaded(app);
         AspireFiles = new AspireFiles(this);
+        // A service an AppHost came to name, or ceased to: its files, configuration and folder beside the open one follow.
+        AspireFiles.ServicesChanged += (_, _) =>
+        {
+            CSharp?.AspireRolesChanged();
+            CSharp?.ConfigurationChanged();
+            FollowReach();
+            LendTrust();
+        };
         NodeFiles = new Web.NodeFiles(this);
         EditorConfigs = new Settings.FolderEditorConfigs(this);
         Builder = new ProcessRunner(setup.Views.Build, builds: true);
@@ -277,8 +285,8 @@ public sealed class ProjectSession : IAsyncDisposable
         // And the .http and .rest files the Endpoints window sends.
         session.Index.Walked += (_, _) => IdeErrors.Observe(session.LookForRequestsAsync(session.Index.Files));
         session.Index.Changed += (_, change) => session.RequestsCameOrWent(change.Came, change.Gone);
-        // And a Godot project's file come or gone, alone or with its folder, which the walk for games is made again for.
-        session.Index.Changed += (_, change) => session.GodotProjectsCameOrWent(change.Came, change.Gone);
+        // And the projects, programs and Godot projects come or gone, alone or with their folders, which the folder is read again for.
+        session.Index.Changed += (_, change) => session.ProjectsCameOrWent(change.Came, change.Gone);
         session.Index.Build(folder);
         session.Watcher = new FolderWatcher(folder, setup.Watching);
         session.Web = new Web.WebLanguages(folder, setup.Settings, setup.Engine)
@@ -306,18 +314,21 @@ public sealed class ProjectSession : IAsyncDisposable
     /// trusting began ended where it could be.</summary>
     public event EventHandler? TrustChanged;
 
-    /// <summary>The folders a trusted folder's solution reaches outside it, its projects' beside it: trusted with it while
+    /// <summary>The folders a trusted folder's solution and AppHosts reach outside it, the projects' beside it that its
+    /// solution names and that its AppHosts name as services by path (<see cref="AspireFiles.Named"/>): trusted with it while
     /// it is open (<see cref="WorkspaceTrust.Lend"/>), and an agent's to work in as the folder is (<see cref="Mcp.AgentReach"/>).
     /// None while the folder is not trusted.</summary>
     public IReadOnlyList<string> Reached => Trusted ? beside : [];
 
-    /// <summary>The folders of the solution's real projects outside the open folder, as last worked out (<see cref="FollowReach"/>).</summary>
+    /// <summary>The folders of the real projects the solution and AppHosts name outside the open folder, as last worked out
+    /// (<see cref="FollowReach"/>).</summary>
     private IReadOnlyList<string> beside = [];
 
-    /// <summary>The folders the solution reaches outside the open folder, worked out again as it is read: each project's own
-    /// folder where its project file is there, one no workspace may lend passed over (<see cref="WorkspaceTrust.Lends"/>).
-    /// A solution Passenger wrote for an agent's call reaches no further than before (<see cref="Mcp.AgentReach.WroteFor"/>),
-    /// until the person writes it or opens it, so an agent's own edit never widens its reach or the trust lent.</summary>
+    /// <summary>The folders the solution and the AppHosts in the open folder reach outside it, worked out again as either is
+    /// read: each project's own folder where its project file is there, one no workspace may lend passed over
+    /// (<see cref="WorkspaceTrust.Lends"/>). A solution or an AppHost's source Passenger wrote for an agent's call reaches no
+    /// further than before (<see cref="Mcp.AgentReach.WroteFor"/>), until the person writes it (or opens the solution), so an
+    /// agent's own edit never widens its reach or the trust lent.</summary>
     private void FollowReach()
     {
         if (Folder is not { } open || workspace is not { } now)
@@ -325,13 +336,45 @@ public sealed class ProjectSession : IAsyncDisposable
             beside = [];
             return;
         }
-        List<string> real = [.. now.Projects.Where(p => !PathNames.Within(p.Folder, open) && IsProjectFile(p.Path) && File.Exists(p.Path))
-            .Select(p => p.Folder).Where(f => WorkspaceTrust.Lends(f, open)).Distinct(PathNames.Comparer)];
+        bool agentsSolution = now.ReadFrom.Any(r => Mcp.AgentReach.WroteFor(PathNames.Canonical(r.Path)));
+        string[] solution = [.. now.Projects.Select(p => p.Path)];
+        NamedServices[] hosts = [.. OwnAppHosts(open)];
+        string[] persons = [.. agentsSolution ? [] : solution, .. hosts.SelectMany(h => h.Persons)];
+        string[] agents = [.. agentsSolution ? solution : [], .. hosts.SelectMany(h => h.Agents)];
         IReadOnlyList<string> before = beside;
-        beside = now.ReadFrom.Any(r => Mcp.AgentReach.WroteFor(PathNames.Canonical(r.Path))) ? [.. real.Where(f => before.Contains(f, PathNames.Comparer))] : real;
+        beside = [.. Folders(persons).Union(Folders(agents).Where(f => before.Contains(f, PathNames.Comparer)), PathNames.Comparer)];
+
+        IEnumerable<string> Folders(IEnumerable<string> projects) => projects.Where(p => IsProjectFile(p) && File.Exists(p)).Select(p => Path.GetDirectoryName(p)!)
+            .Where(f => !PathNames.Within(f, open) && WorkspaceTrust.Lends(f, open)).Distinct(PathNames.Comparer);
 
         // Any of MSBuild's project files (.csproj, .esproj, .sqlproj), never another file a solution names as one.
         static bool IsProjectFile(string path) => Path.GetExtension(path) is { Length: > 5 } extension && extension.EndsWith("proj", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>What the AppHosts in the open folder name as their services by path, as last read (<see cref="AspireFiles.Named"/>):
+    /// an AppHost lent beside the folder lends nothing further.</summary>
+    private IEnumerable<NamedServices> OwnAppHosts(string open) => AspireFiles.Named.Where(n => PathNames.Within(n.Key, open)).Select(n => n.Value);
+
+    /// <summary>Whether a project is the folder's or one it reaches beside it (<see cref="Reached"/>): one an Aspire AppHost's
+    /// orchestrator may have the IDE start.</summary>
+    public bool Reaches(string project) =>
+        Folder is { } open && PathNames.IsUnder(project, open) || Reached.Any(folder => PathNames.Within(project, folder));
+
+    /// <summary>Why a project outside the folder and what it reaches (<see cref="Reaches"/>) is not reached, in Refusals'
+    /// words: an AppHost in the folder naming it in a folder no workspace lends (<see cref="WorkspaceTrust.WhyNotLent"/>), or
+    /// only an agent's edit of one naming it; any other lies outside both.</summary>
+    public string WhyNotReached(string project)
+    {
+        string name = Path.GetFileNameWithoutExtension(project);
+        NamedServices[] hosts = Folder is { } open ? [.. OwnAppHosts(open)] : [];
+        if (Folder is null || !hosts.Any(h => h.All.Contains(project, PathNames.Comparer)))
+        {
+            return Refusals.NotReached(name);
+        }
+        string folder = Path.GetDirectoryName(project)!;
+        return WorkspaceTrust.WhyNotLent(folder, Folder) is { } unlent ? Refusals.NotLent(name, folder, unlent)
+            : hosts.Any(h => h.Persons.Contains(project, PathNames.Comparer)) ? Refusals.NotReached(name)
+            : Refusals.NamedByAgent(name);
     }
 
     /// <summary>A trusted folder's projects outside it (a solution's beside it) are trusted with it while it is open, so what
@@ -588,8 +631,8 @@ public sealed class ProjectSession : IAsyncDisposable
     }
 
     /// <summary>A program's configuration: its evaluated UserSecretsId, the folders from its own up to the folder open whose
-    /// compose files may run it, the folders of the AppHosts among <paramref name="all"/> that reference it, and the projects
-    /// whose code it runs.</summary>
+    /// compose files may run it, the folders of the AppHosts that run it as a service (<see cref="AspireFiles.AppHostsRunning"/>),
+    /// and the projects among <paramref name="all"/> whose code it runs.</summary>
     private ConfigurationProject ConfigurationOf(ProjectModel project, IReadOnlyList<ProjectModel> all)
     {
         List<string> composing = [];
@@ -601,7 +644,7 @@ public sealed class ProjectSession : IAsyncDisposable
                 break;
             }
         }
-        string[] hosts = [.. all.Where(p => p.IsAspireHost && p.ProjectReferences.Any(r => PathNames.Same(r, project.Path))).Select(p => Path.GetDirectoryName(p.Path)!)];
+        string[] hosts = [.. AspireFiles.AppHostsRunning(project.Path).Select(host => Path.GetDirectoryName(host)!)];
         return new ConfigurationProject(project.Path, project.Property(Passenger.Host.CarriedProperties.UserSecretsId) is { Length: > 0 } id ? id : null, composing, hosts,
             [.. project.CodeItRuns(all).Select(p => p.Path)]);
     }
@@ -824,24 +867,69 @@ public sealed class ProjectSession : IAsyncDisposable
         }
     }
 
-    /// <summary>Files come or gone since the walk, by their paths from the folder: a Godot project's file listed that is no
-    /// game the folder knows, or a known game's gone and not listed again, brings or takes a game the folder's walk finds,
-    /// so the folder is read again. Weighed against the games known, a file listed again with its folder is one of them.</summary>
-    private void GodotProjectsCameOrWent(IReadOnlyList<string> came, IReadOnlyList<string> gone)
+    /// <summary>Files come or gone since the walk, by their paths from the folder, weighed against what the folder's read found,
+    /// the one way projects, programs and Godot projects come or gone are followed: a solution's, an import's or a shared
+    /// project's file, a project or project.godot the read's walk would find anew, a known one's gone and not listed again,
+    /// or a C# file come that is a program now and was not (or the reverse) has the folder read again. One listed again (with
+    /// its folder, or replaced in place as Godot's editor's safe save does) is known, its text the evaluation's.</summary>
+    private void ProjectsCameOrWent(IReadOnlyList<string> came, IReadOnlyList<string> gone)
     {
-        if (IsEnded || Folder is not { } folder || (!came.Any(IsGodotProject) && !gone.Any(IsGodotProject)))
+        if (IsEnded || Folder is not { } folder || Workspace is not { } workspace || !came.Any(Weighed) && !gone.Any(Weighed))
         {
             return;
         }
-        List<string> games = [.. Workspace?.GodotGames ?? [], .. Projects.Select(p => p.NamedGodotFolder).OfType<string>()];
-        bool Known(string file) => games.Any(game => PathNames.Same(game, Path.GetDirectoryName(Path.Combine(folder, file))!));
-        HashSet<string> listed = [.. came.Where(IsGodotProject)];
-        if (listed.Any(file => !Known(file)) || gone.Any(file => IsGodotProject(file) && !listed.Contains(file) && Known(file)))
+        HashSet<string> listed = new(came, StringComparer.Ordinal);
+        HashSet<string> known = new(workspace.Projects.Select(p => p.Path), PathNames.Comparer);
+        string[] projectFolders = [.. workspace.Projects.Where(p => !p.IsProgram).Select(p => p.Folder)];
+        List<string> games = [.. workspace.GodotGames, .. Projects.Select(p => p.NamedGodotFolder).OfType<string>()];
+        if (came.Any(Comes) || gone.Any(file => !listed.Contains(file) && Goes(Path.Join(folder, file))))
+        {
+            ReadAgain();
+            return;
+        }
+        // Whether a C# file come is a program is in its head, read off the window's thread once its folder has stood still.
+        ProgramArrivals.Came(came.Where(Passenger.Host.ProgramFiles.IsProgram).Select(file => Path.Join(folder, file)));
+
+        bool Comes(string file)
+        {
+            string path = Path.Join(folder, file);
+            bool found = FolderWalk.Enters(folder, Path.GetDirectoryName(file.AsSpan()), built: true);
+            return FolderWatcher.IsReadFor(path) && !WorkspaceModel.IsProjectFile(path)
+                || found && WorkspaceModel.IsProject(path) && !known.Contains(path)
+                || found && IsGodotProject(path) && NewGame(Path.GetDirectoryName(path)!);
+        }
+        bool Goes(string path) => FolderWatcher.IsReadFor(path) ? !WorkspaceModel.IsProjectFile(path) || known.Contains(path)
+            : IsGodotProject(path) ? games.Any(game => PathNames.Same(game, Path.GetDirectoryName(path)!))
+            : Passenger.Host.ProgramFiles.IsProgram(path) && known.Contains(path);
+        // A folder the walk takes for no game of its own: a known one, one holding a project or under one, or under a game.
+        bool NewGame(string at) => !games.Any(game => PathNames.Within(at, game)) && !projectFolders.Any(project => PathNames.Within(at, project));
+
+        static bool IsGodotProject(string path) => Path.GetFileName(path.AsSpan()).Equals(GodotProject.FileName, StringComparison.Ordinal);
+        static bool Weighed(string file) => FolderWatcher.IsReadFor(file) || IsGodotProject(file) || Passenger.Host.ProgramFiles.IsProgram(file);
+    }
+
+    /// <summary>The C# files come, read for whether each is a program once their folders have stood still.</summary>
+    private StandingStill ProgramArrivals => programArrivals ??= new StandingStill(sources =>
+    {
+        if (!IsEnded && Workspace is { } workspace)
+        {
+            IdeErrors.Observe(ProgramsCameAsync(sources, workspace, reads));
+        }
+    });
+
+    private StandingStill? programArrivals;
+
+    /// <summary>The C# files come, each now a program and not one of the folder's, or the reverse: the folder is read again,
+    /// unless a read came since, whose walk found them; one gone since it came is passed over.</summary>
+    private async Task ProgramsCameAsync(IReadOnlyList<string> sources, WorkspaceModel workspace, int read)
+    {
+        IReadOnlyList<ProjectModel> projects = Projects;
+        bool changed = await BackgroundWork.Run(() => sources.Any(path => File.Exists(path)
+            && workspace.IsProgramNow(path, projects) != projects.Any(p => p.IsProgram && PathNames.Same(p.Path, path))));
+        if (changed && read == reads && !IsEnded)
         {
             ReadAgain();
         }
-
-        static bool IsGodotProject(string path) => Path.GetFileName(path.AsSpan()).Equals(GodotProject.FileName, StringComparison.Ordinal);
     }
 
     /// <summary>The folder's builds, rebuilds and cleans, in the window's Build console.</summary>
@@ -1922,10 +2010,12 @@ public sealed class ProjectSession : IAsyncDisposable
         return builds;
     }
 
-    /// <summary>What the folder's watcher saw, for the C# language server: told through its service, or kept for the one the
-    /// session makes while a server started ahead waits for it.</summary>
+    /// <summary>What the folder's watcher saw: the reads of C# files come in its folders put off again (<see cref="ProgramArrivals"/>),
+    /// and for the C# language server told through its service, or kept for the one the session makes while a server
+    /// started ahead waits for it.</summary>
     public void FilesChanged(FolderChanges changes)
     {
+        programArrivals?.Heard(changes.Paths);
         if (CSharp is { } csharp)
         {
             csharp.FilesChanged(changes);

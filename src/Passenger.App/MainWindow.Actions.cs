@@ -139,7 +139,6 @@ public partial class MainWindow
         };
         work.Told += (_, told) => announcer.Tell(told.Said, told.Succeeded ? Urgency.Polite : Urgency.Assertive);
         AddEditing();
-        Add(A.Open, "Open…", "IDE", context => IdeErrors.Observe(PickWorkspace()), menu: ("File", 0, 0));
         actions.Add(new IdeAction(A.RecentFiles, "Recent Files", "IDE", _ => ShowRecentFiles()) { Menus = [new("File", 0, 4), new("View", 2, 0)] });
         Add(A.Save, "Save", "IDE", context => IdeErrors.Observe(SaveExplicitly(all: false)), Refusals.NeedsUnsaved, ("File", 1, 0));
         Add(A.SaveAll, "Save All", "IDE", context => IdeErrors.Observe(SaveExplicitly(all: true)), _ => Editors.Documents.Any(d => d.IsModified) ? null : "Every file is saved", ("File", 1, 1));
@@ -293,7 +292,7 @@ public partial class MainWindow
         context.Focused is TextBox box && TextBoxEdits.ContainsKey(action) ? (box.IsReadOnly ? Refusals.TextReadOnly : null)
         : context.Focused is CodeEditor other && other != context.Editor
             ? (other.IsReadOnly && other.FindAncestorOfType<ToolWindows.OutputView>()?.TakesEdit(other, action) != true ? other.ReadOnlyWhy : null)
-        : context.File is { } shown && context.Editor.IsReadOnly ? Refusals.ReadOnly(shown.Name) : null;
+        : context.ReadOnlyWhy;
 
     private void Edit(string action, ActionContext context)
     {

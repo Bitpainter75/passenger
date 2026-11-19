@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Reflection;
 using System.Text;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
@@ -523,11 +522,11 @@ public sealed class FolderWatchTests : IDisposable
         Write("One/One.cs", "class One { }\n");
         Write("Two/Two.cs", "class Two { }\n");
         MainWindow window = Open(FolderWatching.Inotify);
-        IReadOnlyDictionary<string, FileSystemWatcher> watches = window.FolderWatcher!.Watches;
+        FolderWatcher watcher = window.FolderWatcher!;
 
         // What .NET's watcher raises on Linux when inotify_add_watch fails with ENOSPC, from each folder's own watcher.
-        RaiseError(watches[Path.Combine(folder, "One")], OutOfWatches());
-        RaiseError(watches[Path.Combine(folder, "Two")], OutOfWatches());
+        watcher.Fail(Path.Combine(folder, "One"), OutOfWatches());
+        watcher.Fail(Path.Combine(folder, "Two"), OutOfWatches());
         Ui.WaitFor(() => window.Status?.Contains("fs.inotify.max_user_watches", StringComparison.Ordinal) == true,
             "the status bar to say the inotify watches ran out");
         Ui.Settle();
@@ -562,14 +561,13 @@ public sealed class FolderWatchTests : IDisposable
         Ui.Settle();
         bool goneNamed = false;
         window.FolderWatcher!.Changed += (_, changes) => goneNamed |= changes.Paths.Any(p => Path.GetFileName(p) == "Gone.cs");
-        List<FileSystemWatcher> watchers = [.. window.FolderWatcher.Watches.Values];
-        watchers.ForEach(w => w.EnableRaisingEvents = false);
+        IDisposable deaf = window.FolderWatcher.Deaf();
 
         Write("One.cs", "class One { int changed; }\n");
         Write("Old/Old.cs", "class Old { int changed; }\n");
         File.Delete(Path.Combine(folder, "Old", "Gone.cs"));
         Write("Fresh/Fresh.cs", "class Fresh { }\n");
-        RaiseError(window.FolderWatcher.Watches[folder], new InternalBufferOverflowException("Too many changes at once; directory listing is required."));
+        window.FolderWatcher.Fail(folder, new InternalBufferOverflowException("Too many changes at once; directory listing is required."));
         Ui.WaitFor(() => window.EditorArea.Documents.All(d => d.Text.Snapshot.ToString().Contains("int changed;", StringComparison.Ordinal)),
             $"every open file to take the text on disk, where they hold [{string.Join(" | ", window.EditorArea.Documents.Select(d => d.Text.Snapshot.ToString().Trim()))}]");
         Assert.All(window.EditorArea.Documents, d => Assert.False(d.IsModified));
@@ -579,9 +577,46 @@ public sealed class FolderWatchTests : IDisposable
         Ui.WaitFor(() => goneNamed, "the file deleted meanwhile, which the watcher's record held, named among the changes handed over");
 
         // Started only now: a watcher started at once can still be told of the changes just made.
-        watchers.ForEach(w => w.EnableRaisingEvents = true);
+        deaf.Dispose();
         Write("Fresh/Later.cs", "class Later { }\n");
         Ui.WaitFor(() => window.FileIndex.Files.Contains(Path.Combine("Fresh", "Later.cs")), "a file made after in Go to File");
+        window.Close();
+    }
+
+    /// <summary>macOS's stream of the folder, its reading held up as a loaded system holds it while thousands of files change,
+    /// drops changes and says so: the watcher takes its word as an overflow and lists again what changed, so a commit, a file
+    /// made in a new folder and one deleted among the dropped changes reach Git's status and Go to File.</summary>
+    [AvaloniaFact]
+    public void Changes_macOS_drops_from_a_stream_read_late_are_found_as_its_word_of_the_drop_comes()
+    {
+        Assert.SkipUnless(FolderWatching.ReadsMacEvents, "Only macOS's stream of Passenger's own says when the system dropped its changes");
+        Write("One.cs", "class One { }\n");
+        Write("Old/Gone.cs", "class Gone { }\n");
+        TestGit.Init(folder);
+        Write("One.cs", "sealed class One { }\n");
+        string made = Path.Combine("Fresh", "Fresh.cs");
+        string deleted = Path.Combine("Old", "Gone.cs");
+        MainWindow window = Open(FolderWatching.WholeTree, languageServer: false);
+        Ui.WaitFor(() => window.FileIndex.Files.Contains(deleted) && window.Vcs.Changes.Any(c => c.Name == "One.cs"), "the folder's files in Go to File and the changed file in Git's status");
+        bool dropped = false;
+        window.FolderWatcher!.Changed += (_, changes) => dropped |= changes.Overflowed;
+        string churn = Path.Combine(folder, "Churn");
+        using (window.FolderWatcher.HoldReading())
+        {
+            Git("commit", "-q", "-am", "More");
+            File.Delete(Path.Combine(folder, deleted));
+            Write(made, "class Fresh { }\n");
+            Directory.CreateDirectory(churn);
+            for (int i = 0; i < 20_000; i++)
+            {
+                File.WriteAllText(Path.Combine(churn, $"{i}.txt"), "churn");
+            }
+        }
+        Ui.WaitFor(() => dropped, "macOS's word that it dropped the stream's changes, read late, to reach the watcher as an overflow");
+        Ui.WaitFor(() => window.Vcs.Changes.Count(c => c.Name is "Gone.cs" or "Fresh.cs") == 2 && !window.Vcs.Changes.Any(c => c.Name == "One.cs")
+                && window.FileIndex.Files.Contains(made) && !window.FileIndex.Files.Contains(deleted),
+            () => $"the commit, the file made and the one deleted among the dropped changes to be found, where Git's status lists "
+                + $"{string.Join(", ", window.Vcs.Changes.Select(c => $"{c.Name} ({c.Kind})"))} and Go to File {string.Join(", ", window.FileIndex.Files.Where(f => !f.StartsWith("Churn", StringComparison.Ordinal)))}");
         window.Close();
     }
 
@@ -603,14 +638,13 @@ public sealed class FolderWatchTests : IDisposable
         Ui.Hold(TimeSpan.FromSeconds(3.5), "the watcher's record of the folder to be older than what an overflow may have lost");
         bool lost = false;
         window.FolderWatcher!.Changed += (_, changes) => lost |= changes.Lost;
-        List<FileSystemWatcher> watchers = [.. window.FolderWatcher.Watches.Values];
-        watchers.ForEach(w => w.EnableRaisingEvents = false);
+        IDisposable deaf = window.FolderWatcher.Deaf();
 
         Write("One.cs", "class One { int changed; }\n");
         Write("Old/Old.cs", "class Old { int changed; }\n");
         File.Delete(Path.Combine(folder, "Old", "Gone.cs"));
         Write("Fresh/Fresh.cs", "class Fresh { }\n");
-        RaiseError(window.FolderWatcher.Watches[folder], new InternalBufferOverflowException("Too many changes at once; directory listing is required."));
+        window.FolderWatcher.Fail(folder, new InternalBufferOverflowException("Too many changes at once; directory listing is required."));
         Ui.WaitFor(() => window.EditorArea.Documents.All(d => d.Text.Snapshot.ToString().Contains("int changed;", StringComparison.Ordinal)),
             $"every open file to take the text on disk, where they hold [{string.Join(" | ", window.EditorArea.Documents.Select(d => d.Text.Snapshot.ToString().Trim()))}]");
         Ui.WaitFor(() => window.FileIndex.Files.Contains(Path.Combine("Fresh", "Fresh.cs")) && !window.FileIndex.Files.Contains(Path.Combine("Old", "Gone.cs")),
@@ -619,7 +653,7 @@ public sealed class FolderWatchTests : IDisposable
             $"the folder made meanwhile in the Explorer (it shows {string.Join(", ", window.ExplorerView.Tree.Rows.Select(r => r.Name))})");
         Assert.False(lost, "The folder's watcher read the whole folder again after the overflow rather than the folders whose entries changed");
 
-        watchers.ForEach(w => w.EnableRaisingEvents = true);
+        deaf.Dispose();
         Write("Fresh/Later.cs", "class Later { }\n");
         Ui.WaitFor(() => window.FileIndex.Files.Contains(Path.Combine("Fresh", "Later.cs")), "a file made after in the folder found in Go to File");
         window.Close();
@@ -640,8 +674,7 @@ public sealed class FolderWatchTests : IDisposable
         Ui.WaitFor(() => window.FileIndex.Files.Contains(Path.Combine("Old", "Gone.cs")), "the folder's files in Go to File");
         bool lost = false;
         window.FolderWatcher!.Changed += (_, changes) => lost |= changes.Lost;
-        List<FileSystemWatcher> watchers = [.. window.FolderWatcher.Watches.Values];
-        watchers.ForEach(w => w.EnableRaisingEvents = false);
+        IDisposable deaf = window.FolderWatcher.Deaf();
         try
         {
             File.Delete(Path.Combine(folder, "Old", "Gone.cs"));
@@ -656,7 +689,7 @@ public sealed class FolderWatchTests : IDisposable
         }
         finally
         {
-            watchers.ForEach(w => w.EnableRaisingEvents = true);
+            deaf.Dispose();
         }
         window.Close();
     }
@@ -677,8 +710,7 @@ public sealed class FolderWatchTests : IDisposable
         string deleted = Path.Combine("Old", "Gone.cs");
         MainWindow window = Open(eachFolder ? FolderWatching.Inotify : FolderWatching.WholeTree, languageServer: false);
         Ui.WaitFor(() => window.FileIndex.Files.Contains(deleted) && window.Vcs.Branch == "main", "the folder's files in Go to File and its branch read");
-        List<FileSystemWatcher> watchers = [.. window.FolderWatcher!.Watches.Values];
-        watchers.ForEach(w => w.EnableRaisingEvents = false);
+        IDisposable deaf = window.FolderWatcher!.Deaf();
         try
         {
             File.Delete(Path.Combine(folder, deleted));
@@ -695,11 +727,141 @@ public sealed class FolderWatchTests : IDisposable
         }
         finally
         {
-            watchers.ForEach(w => w.EnableRaisingEvents = true);
+            deaf.Dispose();
         }
         window.Close();
 
         bool Listed(Passenger.Vcs.ChangeKind kind, string relative) => window.Vcs.Changes.Any(c => c.Kind == kind && PathNames.Same(c.Path, Path.Combine(folder, relative)));
+    }
+
+    /// <summary>While macOS's watcher hands nothing over, as under a load of changes it falls minutes behind without a word,
+    /// a commit made in a terminal, a file made in a new folder, one deleted, one made a folder of its name and an open one
+    /// written in place are found without the window coming in front: the beat goes unheard, so the watchers look for
+    /// themselves until it is heard again, and Git's status, Go to File and the open file follow. The system's watchers,
+    /// the beat's too, hear nothing while the files change.</summary>
+    [AvaloniaFact]
+    public void Changes_made_while_the_systems_watcher_is_behind_are_found_as_it_lags()
+    {
+        Assert.SkipUnless(OperatingSystem.IsMacOS(), "Only macOS's watcher falls behind without a word; the others say when they lose changes");
+        Write("One.cs", "class One { }\n");
+        Write("Old/Gone.cs", "class Gone { }\n");
+        Write("Old/Turned.cs", "class Turned { }\n");
+        TestGit.Init(folder);
+        Write("One.cs", "sealed class One { }\n");
+        Write("Notes.txt", "notes\n");
+        string made = Path.Combine("Fresh", "Fresh.cs");
+        string deleted = Path.Combine("Old", "Gone.cs");
+        string turned = Path.Combine("Old", "Turned.cs", "Inner.cs");
+        MainWindow window = Open(FolderWatching.WholeTree, languageServer: false);
+        window.OpenFile(Path.Combine(folder, "Notes.txt"));
+        Ui.WaitFor(() => window.FileIndex.Files.Contains(deleted) && window.Vcs.Changes.Any(c => c.Name == "One.cs"), "the folder's files in Go to File and the changed file in Git's status");
+        WatchedFile beat = WatchLag.Canary ?? throw new InvalidOperationException("Nothing checks the system's watcher for lagging while a folder is watched");
+        IDisposable deafFolder = window.FolderWatcher!.Deaf();
+        IDisposable deafBeat = beat.Deaf();
+        try
+        {
+            Git("commit", "-q", "-am", "More");
+            File.Delete(Path.Combine(folder, deleted));
+            Write(made, "class Fresh { }\n");
+            File.Delete(Path.Combine(folder, "Old", "Turned.cs"));
+            Write(turned, "class Inner { }\n");
+            // In place, as an editor that writes over a file's own bytes saves it, which moves no folder's stamp.
+            using (FileStream notes = new(Path.Combine(folder, "Notes.txt"), FileMode.Open, FileAccess.Write))
+            {
+                notes.Write("lagged\n"u8);
+            }
+            Ui.WaitFor(() => window.Vcs.Changes.Count(c => c.Name is "Gone.cs" or "Fresh.cs") == 2 && !window.Vcs.Changes.Any(c => c.Name == "One.cs")
+                    && window.FileIndex.Files.Contains(made) && !window.FileIndex.Files.Contains(deleted) && window.FileIndex.Files.Contains(turned)
+                    && window.EditorArea.Active!.Text.Snapshot.ToString() == "lagged\n",
+                () => $"the commit, the file made, the one deleted, the one made a folder and the open one written in place while the system's watcher was behind to be found as it lagged, "
+                    + $"where Git's status lists {string.Join(", ", window.Vcs.Changes.Select(c => $"{c.Name} ({c.Kind})"))}, Go to File {string.Join(", ", window.FileIndex.Files)} "
+                    + $"and the open file holds [{window.EditorArea.Active!.Text.Snapshot.ToString().Trim()}]");
+            Assert.True(WatchLag.IsBehind, "The system's watcher was not taken for behind while its beat went unheard");
+        }
+        finally
+        {
+            deafFolder.Dispose();
+            deafBeat.Dispose();
+        }
+        window.Close();
+    }
+
+    /// <summary>A window opened while macOS's watcher is still behind from before, its beat having ended with the window
+    /// before it, finds a file made in a new folder as it opens: the system's watcher stays behind as the beat ends, and the
+    /// beat begun again goes on looking from when it fell behind. The window's own watcher hears nothing meanwhile, and Go
+    /// to File lists only what a watcher found.</summary>
+    [AvaloniaFact]
+    public void A_file_made_as_a_window_opens_while_the_systems_watcher_is_still_behind_is_found()
+    {
+        Assert.SkipUnless(OperatingSystem.IsMacOS(), "Only macOS's watcher falls behind without a word; the others say when they lose changes");
+        Write("One.cs", "class One { }\n");
+        string made = Path.Combine("Fresh", "Fresh.cs");
+        MainWindow before = Open(FolderWatching.WholeTree, languageServer: false);
+        WatchedFile beat = WatchLag.Canary ?? throw new InvalidOperationException("Nothing checks the system's watcher for lagging while a folder is watched");
+        using (beat.Deaf())
+        {
+            Ui.WaitFor(() => WatchLag.IsBehind, "the system's watcher taken for behind as its beat went unheard");
+            before.Close();
+        }
+        Assert.True(!WatchLag.IsBeating && WatchLag.IsBehind,
+            $"With its window closed the beat went on ({WatchLag.IsBeating}), or the system's watcher was taken for in time ({!WatchLag.IsBehind}) though nothing was heard in time since it fell behind");
+
+        MainWindow window = Open(FolderWatching.WholeTree, languageServer: false);
+        Ui.WaitFor(() => window.FileIndex.Files.Contains("One.cs"), "the folder's file in Go to File");
+        using (window.FolderWatcher!.Deaf())
+        {
+            Write(made, "class Fresh { }\n");
+            Ui.WaitFor(() => window.FileIndex.Files.Contains(made),
+                () => $"the file made as the window opened, while the system's watcher was still behind, in Go to File, which lists {string.Join(", ", window.FileIndex.Files)}");
+        }
+        window.Close();
+    }
+
+    /// <summary>The system's watcher's beat goes on only while it can matter: while a window the person sees is in front,
+    /// a write of its file and its change heard at each beat; never while that window is in the background, whose look as
+    /// it comes in front finds what went unheard meanwhile, nor for a window closed as it came in front.</summary>
+    [AvaloniaFact]
+    public void The_systems_watchers_beat_goes_on_only_while_a_window_the_person_sees_is_in_front()
+    {
+        Assert.SkipUnless(OperatingSystem.IsMacOS(), "Only macOS's watcher falls behind without a word, so only there is a beat written");
+        Write("One.cs", "class One { }\n");
+        string state = TestFolders.Create("watch-state-");
+        // Shown and closed at once: its coming in front, posted as it showed, lands after it closed.
+        int holds = WatchLag.Holds;
+        MainWindow brief = new() { Width = 1200, Height = 800, StateFolder = state, StartsLanguageServer = false, Unseen = false };
+        brief.Show();
+        brief.Close();
+        Ui.Settle();
+        Assert.True(WatchLag.Holds == holds, $"A window shown and closed at once still holds the beat ({WatchLag.Holds - holds} holds more), so it never ends once every window is in the background");
+        MainWindow window = new() { Width = 1200, Height = 800, StateFolder = state, StartsLanguageServer = false, Unseen = false };
+        try
+        {
+            window.Show();
+            window.OpenFolder(folder);
+            window.Activate();
+            Ui.Settle();
+            (long beats, long heard) = (WatchLag.Beats, WatchLag.HeardBeats);
+            long began = System.Diagnostics.Stopwatch.GetTimestamp();
+            Ui.WaitFor(() => WatchLag.Beats >= beats + 5, "five beats while the window the person sees is in front");
+            TimeSpan on = System.Diagnostics.Stopwatch.GetElapsedTime(began);
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"While on, the beat wrote its file {WatchLag.Beats - beats} times and heard {WatchLag.HeardBeats - heard} changes of it in {on.TotalSeconds:F1} s");
+
+            window.Hide();
+            Ui.WaitFor(() => !WatchLag.IsBeating, "the beat to end once the window went to the background");
+            long stopped = WatchLag.Beats;
+            Ui.Hold(TimeSpan.FromSeconds(5), "two beats' time with no window in front");
+            Assert.True(WatchLag.Beats == stopped, $"The beat wrote its file {WatchLag.Beats - stopped} times while no window was in front");
+
+            window.Show();
+            window.Activate();
+            Ui.WaitFor(() => WatchLag.IsBeating, "the beat to go on again once the window came back in front");
+        }
+        finally
+        {
+            window.Close();
+            TestFolders.Delete(state);
+        }
     }
 
     /// <summary>A branch switched from outside while the watcher of Git's folder heard nothing is read once that watcher's
@@ -715,20 +877,19 @@ public sealed class FolderWatchTests : IDisposable
         MainWindow window = Open(eachFolder ? FolderWatching.Inotify : FolderWatching.WholeTree, languageServer: false, opened: Path.Combine(folder, "src"));
         Ui.WaitFor(() => window.Vcs.Branch == "main", () => $"the branch read (it is {window.Vcs.Branch})");
         Passenger.App.Vcs.GitWatcher git = Assert.Single(window.Vcs.GitWatchers);
-        List<FileSystemWatcher> watchers = [.. git.Watches.Values];
-        watchers.ForEach(w => w.EnableRaisingEvents = false);
+        IDisposable deaf = git.Deaf();
         try
         {
             Git("switch", "-q", "-c", "switched");
             Ui.Settle();
             Assert.True(window.Vcs.Branch == "main", $"The branch switched while Git's watcher was deaf was read before its watch failed (it is {window.Vcs.Branch})");
 
-            RaiseError(git.Watches[git.Top], new IOException("The watch failed."));
+            git.Fail(git.Top, new IOException("The watch failed."));
             Ui.WaitFor(() => window.Vcs.Branch == "switched", () => $"the branch switched unheard to be read once the watch of Git's folder failed (it is {window.Vcs.Branch})");
         }
         finally
         {
-            watchers.ForEach(w => w.EnableRaisingEvents = true);
+            deaf.Dispose();
         }
         window.Close();
     }
@@ -747,22 +908,21 @@ public sealed class FolderWatchTests : IDisposable
         window.Perform(AppActions.ShowGit);
         Passenger.App.ToolWindows.BranchesPanel panel = window.GitBranches;
         Ui.WaitFor(() => panel.Branches.Any(b => b.Ref.Name == "main"), () => $"the Git window's branches (they are {Branches()})");
-        List<FileSystemWatcher> watchers = [.. git.Watches.Values];
-        watchers.ForEach(w => w.EnableRaisingEvents = false);
+        IDisposable deaf = git.Deaf();
         try
         {
             Git("branch", "team/one");
         }
         finally
         {
-            watchers.ForEach(w => w.EnableRaisingEvents = true);
+            deaf.Dispose();
         }
         window.Activate();
         Ui.WaitFor(() => panel.Branches.Any(b => b.Ref.Name == "team/one"), () => $"the branch made unheard among the branches once the window came in front (they are {Branches()})");
 
         Git("branch", "team/two");
         Ui.WaitFor(() => panel.Branches.Any(b => b.Ref.Name == "team/two"), () => $"a branch made from outside in the folder of branches made unheard to join the branches, "
-            + $"where they are {Branches()} and Git's watcher watches {string.Join(", ", git.Watches.Keys.Select(k => Path.GetRelativePath(git.Top, k)))}");
+            + $"where they are {Branches()} and Git's watcher watches {string.Join(", ", git.Watched.Select(k => Path.GetRelativePath(git.Top, k)))}");
         window.Close();
 
         string Branches() => string.Join(", ", panel.Branches.Select(b => b.Ref.Name));
@@ -786,18 +946,18 @@ public sealed class FolderWatchTests : IDisposable
         Assert.True(Ui.Idle(Waiting.Apart(() => Waiting.Until(() => watcher.RecordSize.Entries > entries, TimeSpan.FromSeconds(10))), "the record to take in a file made"),
             "The folder's watcher took a file made into its record only once the window's thread ran, so a batch's hand-over looked at the disk there");
         Ui.PumpUntil(() => window.FileIndex.Files.Contains("Brief.cs"), "the file made in Go to File");
-        List<FileSystemWatcher> watchers = [.. watcher.Watches.Values];
+        IDisposable? deaf = null;
         try
         {
-            watchers.ForEach(w => w.EnableRaisingEvents = false);
+            deaf = watcher.Deaf();
             File.Delete(Path.Combine(folder, "Brief.cs"));
-            RaiseError(watcher.Watches[folder], new InternalBufferOverflowException("Too many changes at once; directory listing is required."));
+            watcher.Fail(folder, new InternalBufferOverflowException("Too many changes at once; directory listing is required."));
             Ui.PumpUntil(() => !window.FileIndex.Files.Contains("Brief.cs"),
                 $"Go to File to let go of the file deleted unheard, which it still lists among {string.Join(", ", window.FileIndex.Files)}", TimeSpan.FromSeconds(30));
         }
         finally
         {
-            watchers.ForEach(w => w.EnableRaisingEvents = true);
+            deaf?.Dispose();
         }
         window.Close();
     }
@@ -816,13 +976,13 @@ public sealed class FolderWatchTests : IDisposable
         Ui.Hold(TimeSpan.FromSeconds(3.5), "the watcher's record of the folder to be older than what an overflow may have lost");
         FolderWatcher watcher = window.FolderWatcher!;
         Ui.PumpUntil(() => window.FileIndex.Files.Contains("Brief.cs"), "the file in Go to File");
-        List<FileSystemWatcher> watchers = [.. watcher.Watches.Values];
+        IDisposable? deaf = null;
         int said = 0;
         watcher.WhileNextHandOver(() =>
         {
-            watchers.ForEach(w => w.EnableRaisingEvents = false);
+            deaf = watcher.Deaf();
             File.Delete(Path.Combine(folder, "Brief.cs"));
-            RaiseError(watcher.Watches[folder], new InternalBufferOverflowException("Too many changes at once; directory listing is required."));
+            watcher.Fail(folder, new InternalBufferOverflowException("Too many changes at once; directory listing is required."));
             Volatile.Write(ref said, 1);
         });
         try
@@ -834,7 +994,7 @@ public sealed class FolderWatchTests : IDisposable
         }
         finally
         {
-            watchers.ForEach(w => w.EnableRaisingEvents = true);
+            deaf?.Dispose();
         }
         window.Close();
     }
@@ -969,13 +1129,9 @@ public sealed class FolderWatchTests : IDisposable
     private static IOException OutOfWatches() =>
         new("The configured user limit (8192) on the number of inotify watches has been reached, or the operating system failed to allocate a required resource.", 28);
 
-    /// <summary>A watcher's error raised as the system's watcher raises it, which no kernel but Linux's gives for this.</summary>
-    internal static void RaiseError(FileSystemWatcher watcher, Exception error) =>
-        typeof(FileSystemWatcher).GetMethod("OnError", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(watcher, [new ErrorEventArgs(error)]);
-
     /// <summary>The folders watched, from the open folder, with forward slashes.</summary>
     private string[] Watched(MainWindow window) =>
-        [.. window.FolderWatcher!.Watches.Keys.Select(p => Path.GetRelativePath(folder, p).Replace('\\', '/')).Order(StringComparer.Ordinal)];
+        [.. window.FolderWatcher!.Watched.Select(p => Path.GetRelativePath(folder, p).Replace('\\', '/')).Order(StringComparer.Ordinal)];
 
     private void Git(params string[] arguments) => TestGit.Run(folder, arguments);
 
@@ -1042,6 +1198,116 @@ public sealed class FolderWatchTests : IDisposable
             () => $"Tool.csproj and hello.cs, written with their folders, to have run configurations; there are {string.Join(", ", window.Configurations.Select(c => c.Name))}");
         window.Close();
     }
+
+    /// <summary>A project and a program brought into a folder with no solution with their folders whole, as a copy, a clone or
+    /// an unzip lands them (which the system may tell as each folder alone, never the files in it), are the folder's, each
+    /// with its run configuration; the project's folder deleted and the program's moved out (as to the Trash), both are
+    /// gone. Watched the system's way and as on Linux, each folder on its own.</summary>
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_project_and_a_program_moved_in_with_their_folders_whole_are_found_and_gone_with_their_folders(bool asOnLinux)
+    {
+        Write("App/App.csproj", Project);
+        MainWindow window = Open(asOnLinux ? FolderWatching.Inotify : FolderWatching.Platform, languageServer: false);
+        Assert.Equal(["App"], window.Configurations.Select(c => c.Name));
+        string elsewhere = PathNames.Canonical(TestFolders.Create("elsewhere-"));
+        try
+        {
+            TestFolders.Write(elsewhere, "Tool/Tool.csproj", Project);
+            TestFolders.Write(elsewhere, "Tool/Program.cs", "Console.WriteLine(\"tool\");\n");
+            TestFolders.Write(elsewhere, "scripts/hello.cs", "#:property PublishAot=false\nConsole.WriteLine(\"hello\");\n");
+            Directory.Move(Path.Combine(elsewhere, "Tool"), Path.Combine(folder, "Tool"));
+            Directory.Move(Path.Combine(elsewhere, "scripts"), Path.Combine(folder, "scripts"));
+            Ui.WaitFor(() => Projects(window) is ["App", "Tool", "hello"] && Configurations(window) is ["App", "Tool", "hello"],
+                () => $"Tool and hello.cs, moved in with their folders, the folder's with their run configurations; its projects are {string.Join(", ", Projects(window))} "
+                    + $"and its run configurations {string.Join(", ", Configurations(window))}");
+
+            Directory.Delete(Path.Combine(folder, "Tool"), recursive: true);
+            Directory.Move(Path.Combine(folder, "scripts"), Path.Combine(elsewhere, "scripts"));
+            Ui.WaitFor(() => Projects(window) is ["App"] && Configurations(window) is ["App"],
+                () => $"Tool and hello.cs gone with their folders, and their run configurations; the folder's projects are {string.Join(", ", Projects(window))} "
+                    + $"and its run configurations {string.Join(", ", Configurations(window))}");
+        }
+        finally
+        {
+            window.Close();
+            TestFolders.Delete(elsewhere);
+        }
+
+        static IReadOnlyList<string> Projects(MainWindow window) => [.. window.Projects.Select(p => p.Name).Order(StringComparer.Ordinal)];
+        static IReadOnlyList<string> Configurations(MainWindow window) => [.. window.Configurations.Select(c => c.Name).Order(StringComparer.Ordinal)];
+    }
+
+    /// <summary>A program brought into a folder with no solution with its folder whole, nothing else coming with it, is the
+    /// folder's with its run configuration, its head read for its directive; its folder moved out, it is gone. Watched the
+    /// system's way and as on Linux.</summary>
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_program_moved_in_with_its_folder_alone_is_found_and_gone_with_it(bool asOnLinux)
+    {
+        Write("App/App.csproj", Project);
+        MainWindow window = Open(asOnLinux ? FolderWatching.Inotify : FolderWatching.Platform, languageServer: false);
+        Assert.Equal(["App"], Names(window.Projects));
+        string elsewhere = PathNames.Canonical(TestFolders.Create("elsewhere-"));
+        try
+        {
+            TestFolders.Write(elsewhere, "scripts/hello.cs", "#:property PublishAot=false\nConsole.WriteLine(\"hello\");\n");
+            TestFolders.Write(elsewhere, "scripts/notes.cs", "// Not a program: no directive, and the folder has a project.\n");
+            Directory.Move(Path.Combine(elsewhere, "scripts"), Path.Combine(folder, "scripts"));
+            Ui.WaitFor(() => Names(window.Projects) is ["App", "hello"] && Names(window.Configurations) is ["App", "hello"],
+                () => $"hello.cs, moved in with its folder, the folder's with its run configuration; its projects are {string.Join(", ", Names(window.Projects))} "
+                    + $"and its run configurations {string.Join(", ", Names(window.Configurations))}");
+
+            Directory.Move(Path.Combine(folder, "scripts"), Path.Combine(elsewhere, "gone"));
+            Ui.WaitFor(() => Names(window.Projects) is ["App"] && Names(window.Configurations) is ["App"],
+                () => $"hello.cs gone with its folder, and its run configuration; the folder's projects are {string.Join(", ", Names(window.Projects))} "
+                    + $"and its run configurations {string.Join(", ", Names(window.Configurations))}");
+        }
+        finally
+        {
+            window.Close();
+            TestFolders.Delete(elsewhere);
+        }
+    }
+
+    /// <summary>A project's folder replaced by another of the same name between the folder watcher hearing of it and handing it
+    /// over, as a checkout or a sync swapping it whole lands in one batch, which names the folder alone: the project the new
+    /// folder holds is the folder's with its run configuration, and the one gone with the old folder is not. Watched the
+    /// system's way and as on Linux.</summary>
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_project_folder_replaced_under_its_name_within_one_batch_brings_the_project_it_holds(bool asOnLinux)
+    {
+        Write("App/App.csproj", Project);
+        Write("Tool/Tool.csproj", Project);
+        Write("Tool/Program.cs", "Console.WriteLine(\"tool\");\n");
+        MainWindow window = Open(asOnLinux ? FolderWatching.Inotify : FolderWatching.Platform, languageServer: false);
+        Assert.Equal(["App", "Tool"], Names(window.Projects));
+        string elsewhere = PathNames.Canonical(TestFolders.Create("elsewhere-"));
+        try
+        {
+            TestFolders.Write(elsewhere, "Tool/Gadget.csproj", Project);
+            TestFolders.Write(elsewhere, "Tool/Program.cs", "Console.WriteLine(\"gadget\");\n");
+            string tool = Path.Combine(folder, "Tool");
+            window.FolderWatcher!.WhileNextHandOver(() => Directory.Move(Path.Combine(elsewhere, "Tool"), tool));
+            Directory.Move(tool, Path.Combine(elsewhere, "Old"));
+            Ui.WaitFor(() => Names(window.Projects) is ["App", "Gadget"] && Names(window.Configurations) is ["App", "Gadget"],
+                () => $"Gadget, in the Tool folder that took the old one's place, the folder's with its run configuration and Tool gone; its projects are "
+                    + $"{string.Join(", ", Names(window.Projects))} and its run configurations {string.Join(", ", Names(window.Configurations))}");
+        }
+        finally
+        {
+            window.Close();
+            TestFolders.Delete(elsewhere);
+        }
+    }
+
+    private static IReadOnlyList<string> Names(IEnumerable<ProjectModel> projects) => [.. projects.Select(p => p.Name).Order(StringComparer.Ordinal)];
+
+    private static IReadOnlyList<string> Names(IEnumerable<Passenger.App.Run.RunConfiguration> configurations) => [.. configurations.Select(c => c.Name).Order(StringComparer.Ordinal)];
 
     [AvaloniaFact]
     public void A_folders_sln_and_slnx_listing_different_projects_give_the_explorer_and_the_language_server_the_same_one()

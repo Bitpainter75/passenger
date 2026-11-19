@@ -12,6 +12,7 @@ using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Styling;
 using System.Buffers.Binary;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Avalonia.Markup.Xaml.Styling;
@@ -19,6 +20,7 @@ using Avalonia.Themes.Fluent;
 using Avalonia.VisualTree;
 using Passenger.App;
 using Passenger.App.Settings;
+using Passenger.Editor;
 
 namespace Passenger.Tests;
 
@@ -72,6 +74,147 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         {
             window.Close();
         }
+    }
+
+    /// <summary>A menu item's submenu chevron is every chevron's, under each look: the IDE's own shape, as tall as a
+    /// widget's, its middle on its item's middle.</summary>
+    [AvaloniaFact]
+    public void A_submenus_chevron_is_every_chevrons_shape_and_size_on_its_items_middle()
+    {
+        MainWindow window = Open(1200, 800);
+        try
+        {
+            window.OpenFile(project.PathOf("Notes.txt"));
+            Ui.Settle();
+            UnderEachLook(window, () =>
+            {
+                PathIcon widget = Named<Button>(window, "BranchButton").GetVisualDescendants().OfType<PathIcon>().Single(i => i.Classes.Contains(StyleClasses.Chevron));
+                window.EditorArea.CodeEditor.Focus();
+                Ui.Run(window, AppActions.ShowContextMenu);
+                Ui.WaitFor(() => window.OpenContextMenu is not null, "the editor's menu");
+                Ui.Settle();
+                MenuItem[] parents = [.. window.OpenContextMenu!.Items.OfType<MenuItem>().Where(i => i.ItemCount > 0)];
+                Assert.NotEmpty(parents);
+                foreach (MenuItem parent in parents)
+                {
+                    Avalonia.Controls.Shapes.Path chevron = parent.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Single(p => p.Name == "PART_ChevronPath");
+                    Rect at = Placed(window, chevron);
+                    Rect row = Placed(window, parent);
+                    Assert.True(ReferenceEquals(chevron.Data, window.FindResource(IconKeys.ChevronRight)), $"{Header(parent)}'s chevron is a shape of its own, not the IDE's chevron");
+                    Assert.True(Math.Abs(at.Height - widget.Bounds.Height) <= 0.5,
+                        $"{Header(parent)}'s chevron is {at.Height:0.#} tall, where every other chevron (the branch widget's) is {widget.Bounds.Height:0.#}");
+                    Assert.True(Math.Abs(at.Center.Y - row.Center.Y) <= 0.5,
+                        $"{Header(parent)}'s chevron's middle is at {at.Center.Y:0.#}, off its item's middle at {row.Center.Y:0.#}");
+                }
+                window.OpenContextMenu.Close();
+                Ui.Settle();
+            });
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    /// <summary>A right-click menu opens with its frame's corner at the pointer, however it is made, under each look: the
+    /// editor's, the Explorer's, an editor tab's and the console's, each opened for the first time, and the editor's by the
+    /// window's far corner, where it opens up and to the left with its far corner there, its shadow round it either way.</summary>
+    [AvaloniaFact]
+    public void A_right_click_menu_opens_with_its_frames_corner_at_the_pointer()
+    {
+        MainWindow window = Open(1200, 800);
+        try
+        {
+            window.OpenFile(project.PathOf("Notes.txt"));
+            Assert.True(window.Perform(AppActions.ShowBuild), "The Build window did not show");
+            Ui.Settle();
+            UnderEachLook(window, () =>
+            {
+                Passenger.Editor.CodeEditor editor = window.EditorArea.CodeEditor;
+                AtPointer(editor, new Point(120, 40), () => window.OpenContextMenu, "The editor");
+                AtPointer(editor, new Point(editor.Bounds.Width - 20, editor.Bounds.Height - 20), () => window.OpenContextMenu, "The editor, by the window's far corner,", far: true);
+                ListBox rows = window.ExplorerView.Rows();
+                AtPointer(rows.ContainerFromIndex(1)!, new Point(60, ListRow.Height / 2), () => window.ExplorerView.OpenMenu, "The Explorer's row");
+                Control tab = window.EditorArea.ActiveGroup.GetVisualDescendants().OfType<TextBlock>()
+                    .First(t => t.Text == "Notes.txt" && t.Classes.Contains(StyleClasses.TabName)).FindAncestorOfType<Border>()!;
+                AtPointer(tab, new Point(12, tab.Bounds.Height / 2), () => tab.ContextMenu is { IsOpen: true } open ? open : null, "The editor tab");
+                Passenger.App.ToolWindows.OutputView console = window.BottomPanel.Build;
+                AtPointer(console.Editor, new Point(60, 12), () => console.Menu, "The Build console");
+            });
+        }
+        finally
+        {
+            window.Close();
+        }
+
+        void AtPointer(Control control, Point at, Func<ContextMenu?> open, string what, bool far = false)
+        {
+            Point pointer = control.TranslatePoint(at, window)!.Value;
+            Ui.RightClick(control, at);
+            ContextMenu menu = open() ?? throw new Xunit.Sdk.XunitException($"{what} opened no menu on a right click");
+            Rect drawn = Placed(window, menu.GetVisualDescendants().OfType<Border>().First(b => b.BoxShadow.Count > 0));
+            Point corner = far ? drawn.BottomRight : drawn.TopLeft;
+            Assert.True(Math.Abs(corner.X - pointer.X) <= 1.5 && Math.Abs(corner.Y - pointer.Y) <= 1.5,
+                $"{what}'s menu opened with its frame at {drawn}, its {(far ? "far" : "near")} corner off the pointer at {pointer}, by the room round it for its shadow");
+            menu.Close();
+            Ui.Settle();
+        }
+    }
+
+    /// <summary>A widget's menu opens beside the widget that opened it and never over it, wherever the widget stands, by
+    /// the window's edges too, where the menu opens the other way: every tool window's Options, and the toolbar's and the
+    /// status bar's widgets.</summary>
+    [AvaloniaFact]
+    public void A_widgets_menu_never_covers_the_widget_that_opened_it()
+    {
+        MainWindow window = Open(1200, 800);
+        try
+        {
+            window.OpenFile(project.PathOf("Notes.txt"));
+            Ui.Settle();
+            List<string> covered = [];
+            void Beside(Button widget, string what, Action close)
+            {
+                Ui.Click(widget);
+                Ui.WaitFor(() => OpenFrame(window) is not null, $"{what}'s menu");
+                Rect drawn = Placed(window, OpenFrame(window)!);
+                Rect at = Placed(window, widget);
+                if (drawn.Intersects(at))
+                {
+                    covered.Add($"{what}'s menu at {drawn} over it at {at}");
+                }
+                close();
+                Ui.Settle();
+            }
+            Passenger.App.Docking.DockHost dock = window.DockHost;
+            foreach (Passenger.App.Docking.ToolWindow tool in dock.Windows.ToList())
+            {
+                dock.Show(tool.Id);
+                Ui.Settle();
+                Button options = tool.Content.GetVisualAncestors().OfType<DockPanel>().First(p => p.Classes.Contains(StyleClasses.ToolPane))
+                    .GetVisualDescendants().OfType<Border>().First(b => b.Classes.Contains(StyleClasses.ToolHeader))
+                    .GetVisualDescendants().OfType<Button>().First(b => ToolTip.GetTip(b) as string == "Options");
+                Beside(options, $"{tool.Title}'s Options", () => dock.OpenOptions?.Hide());
+            }
+            foreach (string name in (string[])["MenuButton", "ProjectButton", "BranchButton", "RunConfigButton", "GitBranchButton", "LineSeparatorButton", "EncodingButton"])
+            {
+                Button widget = Named<Button>(window, name);
+                if (widget.IsEffectivelyVisible && widget.IsHitTestVisible)
+                {
+                    Beside(widget, name, () => Ui.Press(window, "ESCAPE"));
+                }
+            }
+            Assert.True(covered.Count == 0, $"A menu covers the widget that opened it, so a second click there lands on the menu: {string.Join("; ", covered)}");
+        }
+        finally
+        {
+            window.Close();
+        }
+
+        // The frame of the menu open over the window: a context menu's, or a menu flyout's (Options, the main menu).
+        static Border? OpenFrame(MainWindow window) =>
+            (window.OpenContextMenu is { IsOpen: true } menu ? menu : window.GetVisualDescendants().OfType<MenuFlyoutPresenter>().FirstOrDefault(p => p.IsEffectivelyVisible) as Control)
+                ?.GetVisualDescendants().OfType<Border>().FirstOrDefault(b => b.BoxShadow.Count > 0);
     }
 
     [Gate]
@@ -376,6 +519,7 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         Popup("Go to File", () => window.Perform(AppActions.GoToFile));
         Popup("Go to Symbol", () => window.Perform(AppActions.GoToSymbol));
         Popup("Recent Files", () => window.ShowRecentFiles());
+        Popup("Switcher", () => window.Perform(AppActions.Switcher));
         Popup("Recent Locations", () => window.Perform(AppActions.RecentLocations));
         Popup("Find in Files", () => window.ShowFindInFiles(false));
         Popup("Stash Changes", () => window.Perform(AppActions.Stash));
@@ -398,11 +542,14 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         }
     }
 
-    /// <summary>A popup's frame as every popup's is: a width of the popups' scale (<see cref="PopupFrame"/>) and its rows
-    /// <see cref="ListRow.Height"/> tall; a popup that lives elsewhere (the debugger's hover card) is held to it here too.</summary>
+    /// <summary>A popup's frame as every popup's is: a width of the popups' scale (<see cref="PopupFrame"/>), its rows
+    /// <see cref="ListRow.Height"/> tall, and no word cut nor anything drawn over another in it (LayoutFaults); a popup
+    /// that lives elsewhere (the debugger's hover card) is held to it here too.</summary>
     internal static void HoldsToPopupRules(string what, Border frame)
     {
         Assert.True(frame.Classes.Contains(StyleClasses.Popup), $"{what} is not framed as the popups are (Border.popup)");
+        List<string> faults = LayoutFaults.Of((Visual?)TopLevel.GetTopLevel(frame) ?? frame, frame, what);
+        Assert.True(faults.Count == 0, string.Join("\n", faults));
         Assert.True(PopupFrame.Widths.Any(w => Math.Abs(frame.Bounds.Width - w) < 0.5),
             $"{what} is {frame.Bounds.Width:0.#} px wide, not one of the popups' widths ({string.Join(", ", PopupFrame.Widths)})");
         foreach (ListBoxItem row in frame.GetVisualDescendants().OfType<ListBoxItem>().Where(r => r.IsEffectivelyVisible))
@@ -1037,6 +1184,21 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         }
     }
 
+    /// <summary>Words the window shows that trail off end in the one ellipsis, "…", however they are written: a status,
+    /// a console's line, a note. An agent's words (Mcp/) and code shown as code (GDScript's varargs, a YAML document's end)
+    /// are not the window's words; three dots inside words ("do...while") are not their end.</summary>
+    [Fact]
+    public void No_words_the_window_shows_trail_off_in_three_dots()
+    {
+        Regex trailing = new(@"[A-Za-z ]\.\.\.(?:\\n)?""");
+        string[] found = [.. from file in UiFiles()
+            where !file.Path.Contains("/Mcp/", StringComparison.Ordinal)
+            from line in file.Text.Split('\n').Select((text, i) => (Text: text, Number: i + 1))
+            where !line.Text.TrimStart().StartsWith("//", StringComparison.Ordinal) && trailing.IsMatch(line.Text)
+            select $"{file.Path}:{line.Number}: {line.Text.Trim()}"];
+        Assert.True(found.Length == 0, $"Words that trail off in three dots, where every one ends in the one ellipsis, '…':\n{string.Join("\n", found)}");
+    }
+
     /// <summary>A label that asks more before it acts ends in one ellipsis everywhere, "…": every action's title, as the
     /// menus, Find Action and the keymap list it and as a menu opened where it runs words it, macOS's application menu, a
     /// row's menu in the Explorer, and every button and menu item the tool windows show.</summary>
@@ -1196,6 +1358,290 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         Ui.Settle();
     }
 
+    /// <summary>At the window's least width every tool window, shown in turn where its layout docks it, cuts no word and
+    /// draws nothing over anything, in it or round it (the toolbar, the stripes, the status bar), at display scales 1 and
+    /// 2, dark and light, under each look; each finding is fixed where it comes from, never in the one window.</summary>
+    [AvaloniaFact]
+    public void At_the_least_width_every_tool_window_cuts_no_word_and_lays_nothing_over_anything()
+    {
+        MainWindow window = Open(MainWindow.SmallestWidth, MainWindow.SmallestHeight + 268);
+        List<string> found = [];
+        try
+        {
+            window.OpenFile(project.PathOf("Program.cs"));
+            Ui.Settle();
+            UnderEachLook(window, () =>
+            {
+                foreach (ThemeChoice variant in (ThemeChoice[])[ThemeChoice.Dark, ThemeChoice.Light])
+                {
+                    window.ApplySettings(window.Settings with { Theme = variant });
+                    foreach (double scale in (double[])[1, 2])
+                    {
+                        window.SetRenderScaling(scale);
+                        Ui.Settle();
+                        foreach (Passenger.App.Docking.ToolWindow tool in window.DockHost.Windows.ToList())
+                        {
+                            window.DockHost.Show(tool.Id);
+                            Ui.Settle();
+                            found.AddRange(LayoutFaults.Of(window, window, $"Under {window.Settings.Look?.Name ?? CarriedThemes.Own}, {variant}, at scale {scale}, with {tool.Title} shown, the window"));
+                        }
+                    }
+                }
+            });
+        }
+        finally
+        {
+            window.SetRenderScaling(1);
+            window.ApplySettings(new AppSettings());
+            window.Close();
+        }
+        Assert.True(found.Count == 0, $"At the window's least width:\n{string.Join("\n", found.Distinct().Take(60))}");
+    }
+
+    /// <summary>The layout faults' check finds what it is for, so its silence means something: words wider than their room
+    /// with no ellipsis, laid past a row narrower than them, past their part's room or past the window's edge by a row
+    /// wider than it; a fixed-width field past a scroller that scrolls no way sideways, a field squeezed to too little
+    /// room to type in, and two buttons in one cell, are each found; words ending in an ellipsis, and a field's own
+    /// options inside it, are not.</summary>
+    [AvaloniaFact]
+    public void The_layout_faults_check_finds_words_cut_and_controls_drawn_over_each_other()
+    {
+        TextBlock cut = new() { Text = "Words far wider than their room", Width = 60 };
+        TextBlock trimmed = new() { Text = "Words far wider than their room", Width = 60, TextTrimming = TextTrimming.CharacterEllipsis };
+        Border held = new()
+        {
+            Width = 60, HorizontalAlignment = HorizontalAlignment.Left,
+            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { new TextBlock { Text = "Words wider than their row" } } },
+        };
+        ShrinkingRow parts = new()
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Children =
+            {
+                new Border
+                {
+                    Width = 60,
+                    Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { new StackPanel { Orientation = Orientation.Horizontal, Children = { new TextBlock { Text = "Words wider than their part" } } } } },
+                },
+            },
+        };
+        ScrollViewer narrow = new() { Width = 120, HorizontalAlignment = HorizontalAlignment.Left, Content = new ComboBox { Width = 200, HorizontalAlignment = HorizontalAlignment.Left } };
+        TextBox squeezed = new() { Width = 40, MinWidth = 0, HorizontalAlignment = HorizontalAlignment.Left };
+        StackPanel wider = new()
+        {
+            Orientation = Orientation.Horizontal, Width = 800, HorizontalAlignment = HorizontalAlignment.Left,
+            Children = { new TextBlock { Text = "Words past the window", Margin = new Thickness(500, 0, 0, 0) } },
+        };
+        Grid laidOver = new() { Children = { new Button { Content = "First" }, new Button { Content = "Second" } } };
+        Window window = new() { Width = 400, Height = 300, Content = new StackPanel { Children = { cut, trimmed, held, parts, narrow, squeezed, wider, laidOver } } };
+        window.Show();
+        try
+        {
+            Ui.Settle();
+            List<string> found = LayoutFaults.Of(window, window, "The test window");
+            Assert.True(found.Count(f => f.Contains("cuts", StringComparison.Ordinal)) == 1 && found.Count(f => f.Contains("past the side", StringComparison.Ordinal)) == 2
+                && found.Any(f => f.Contains("their part", StringComparison.Ordinal)) && found.Count(f => f.Contains("past the edge", StringComparison.Ordinal)) == 1
+                && found.Count(f => f.Contains("to type in", StringComparison.Ordinal)) == 1 && found.Count(f => f.Contains("past the window's edge", StringComparison.Ordinal)) == 1
+                && found.Any(f => f.Contains("one over the other", StringComparison.Ordinal)),
+                $"The check found {found.Count} faults where one cut word, words laid past their row, words laid past their part's room, a field past its scroller's edge and two buttons laid over each other stand:\n{string.Join("\n", found)}");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    /// <summary>A row of parts lays itself out again as a part grows, however the row was measured: a status widget's counts
+    /// (Git's incoming and outgoing), then a widget's name (a run configuration's), growing in a full ShrinkingRow, whose
+    /// last widget gives way for them, in one measured with no bound, and in a tool window's bar (ToolFlow) alike, are each
+    /// given the room they now ask, the name shown whole and no word drawn past its room (LayoutFaults), where a
+    /// ShrinkingRow held the counts' widget to its old width, unheard, and drew them past it.</summary>
+    [AvaloniaFact]
+    public void A_row_lays_itself_out_again_as_a_part_grows_whether_full_or_measured_with_no_bound()
+    {
+        List<(string What, Panel Row, TextBlock Name, TextBlock Count, Control? Last)> rows = [];
+        StackPanel shown = new() { Spacing = Gaps.Wide };
+        foreach (string what in (string[])["A full row", "A row measured with no bound", "A tool window's bar", "A tool window's bar measured with no bound"])
+        {
+            bool flows = what.StartsWith("A tool window's bar", StringComparison.Ordinal);
+            bool bounded = !what.EndsWith("no bound", StringComparison.Ordinal);
+            TextBlock name = new() { Text = "Debug", VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+            Button widget = new()
+            {
+                Classes = { StyleClasses.Widget }, MinWidth = 52,
+                Content = new DockPanel { Children = { new PathIcon { Classes = { StyleClasses.Chevron }, Data = Icon(IconKeys.ChevronDown), [DockPanel.DockProperty] = Dock.Right }, name } },
+            };
+            TextBlock count = new() { Text = "9", Classes = { StyleClasses.Status } };
+            Button counts = new()
+            {
+                Classes = { StyleClasses.StatusItem },
+                // As the status bar's widgets, which never give way.
+                [ShrinkingRow.KeepsWidthProperty] = true,
+                Content = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal, Spacing = Gaps.Normal,
+                    Children = { Counted(new TextBlock { Text = "2", Classes = { StyleClasses.Status } }), Counted(count) },
+                },
+            };
+            Button? last = flows ? null : new()
+            {
+                Classes = { StyleClasses.Widget }, MinWidth = 76,
+                Content = new TextBlock { Text = "feature/a-branch-whose-name-is-long-enough-to-give-way-for-the-others", TextTrimming = TextTrimming.CharacterEllipsis },
+            };
+            Panel row = flows ? new Passenger.App.ToolWindows.ToolFlow { Children = { widget, counts } } : new ShrinkingRow { Children = { widget, counts, last! } };
+            rows.Add((what, row, name, count, last));
+            shown.Children.Add(bounded ? new Border { HorizontalAlignment = HorizontalAlignment.Left, Child = row } : new StackPanel { Orientation = Orientation.Horizontal, Children = { row } });
+        }
+        Window window = new() { Width = 900, Height = 400, Content = shown };
+        window.Show();
+        try
+        {
+            Ui.Settle();
+            // The full row held 40 px short of what its parts ask, so its last widget has given way; the bar given room to grow in.
+            foreach (Panel row in rows.Select(r => r.Row).Where(r => r.Parent is Border))
+            {
+                double asked = row.Children.Sum(c => c.DesiredSize.Width) + ((row as Passenger.App.ToolWindows.ToolFlow)?.Spacing ?? 0) * (row.Children.Count - 1);
+                ((Border)row.Parent!).Width = asked + (row is ShrinkingRow ? -40 : 160);
+            }
+            Ui.Settle();
+            // The counts grow first, alone: a name growing is heard by chance where its ellipsis moves its width.
+            List<string> wrong = [];
+            double[] before = [.. rows.Select(r => r.Last?.Bounds.Width ?? 0)];
+            foreach ((_, _, _, TextBlock count, _) in rows)
+            {
+                count.Text = "1000";
+            }
+            Ui.Settle();
+            Grew("its counts");
+            before = [.. rows.Select(r => r.Last?.Bounds.Width ?? 0)];
+            foreach ((_, _, TextBlock name, _, _) in rows)
+            {
+                name.Text = "Debug with every test";
+            }
+            Ui.Settle();
+            Grew("its widget's name");
+            foreach ((string what, _, TextBlock name, _, _) in rows.Where(r => r.Name.TextLayout.TextLines.Any(l => l.HasCollapsed)))
+            {
+                wrong.Add($"{what} cuts the widget's grown name to {name.Bounds.Width:0.#} px of its {name.TextLayout.WidthIncludingTrailingWhitespace:0.#}, where the row gives it the room it now asks");
+            }
+            Assert.True(wrong.Count == 0, string.Join("\n", wrong));
+
+            // What growing did to each row: the full row's last widget gave way for it, and no word stands past its room.
+            void Grew(string what)
+            {
+                for (int i = 0; i < rows.Count; i++)
+                {
+                    (string row, Panel panel, _, _, Control? last) = rows[i];
+                    if (last is not null && panel.Parent is Border && last.Bounds.Width > before[i] - 1)
+                    {
+                        wrong.Add($"{row}, {what} grown, left its last widget {last.Bounds.Width:0.#} px wide, as before, where it gives way for them");
+                    }
+                    wrong.AddRange(LayoutFaults.Of(window, panel, $"{row}, {what} grown,"));
+                }
+            }
+        }
+        finally
+        {
+            window.Close();
+        }
+
+        // A count after its icon, as the status bar's Git counts stand.
+        static StackPanel Counted(TextBlock count) => new()
+        {
+            Orientation = Orientation.Horizontal, Spacing = Gaps.Tight,
+            Children = { new PathIcon { Width = 11, Height = 11, Data = Icon(IconKeys.ArrowDown) }, count },
+        };
+
+        static Geometry Icon(string key) => (Geometry)Application.Current!.FindResource(key)!;
+    }
+
+    /// <summary>A field's placeholder too long for it ends in an ellipsis, where the field's scroller, which only follows
+    /// its caret, would have cut it mid-letter; and the layout check finds a word cut inside a scroller the person can't
+    /// scroll to it: a placeholder laid out wider than its field, as every one was, words wider than a scroller that
+    /// scrolls no way sideways, and words wider than a menu's scroller, which has no sideways bar. A field's own typed
+    /// text, which its caret scrolls to, and words in a scroller with its bar, are not cuts.</summary>
+    [AvaloniaFact]
+    public void A_fields_long_placeholder_ends_in_an_ellipsis_and_the_check_finds_one_cut_inside_its_scroller()
+    {
+        const string Long = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+        TextBox field = new() { Width = 160, PlaceholderText = Long, HorizontalAlignment = HorizontalAlignment.Left };
+        TextBox typed = new() { Width = 160, Text = Long, HorizontalAlignment = HorizontalAlignment.Left };
+        TextBox scrolledPlaceholder = new() { Width = 160, PlaceholderText = Long, HorizontalAlignment = HorizontalAlignment.Left };
+        // The field's scroller scrolling sideways while its placeholder shows, as every field's did.
+        scrolledPlaceholder.Styles.Add(new Style(x => x.OfType<TextBox>().Class(":empty").Template().OfType<ScrollViewer>().Name("PART_ScrollViewer"))
+        {
+            Setters = { new Setter(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Hidden) },
+        });
+        ScrollViewer barred = new()
+        {
+            Width = 160, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalAlignment = HorizontalAlignment.Left,
+            Content = new TextBlock { Text = "Words in a scroller with its bar, wider than it" },
+        };
+        ScrollViewer unscrolled = new()
+        {
+            Width = 160, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalAlignment = HorizontalAlignment.Left,
+            Content = new TextBlock { Text = "Words in a scroller that scrolls no way sideways", Width = 400, HorizontalAlignment = HorizontalAlignment.Left },
+        };
+        ScrollViewer menus = new()
+        {
+            Width = 160, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalAlignment = HorizontalAlignment.Left,
+            Theme = (ControlTheme)Application.Current!.FindResource("FluentMenuScrollViewer")!,
+            Content = new TextBlock { Text = "Words in a menu's scroller, which has no sideways bar" },
+        };
+        Window window = new() { Width = 400, Height = 400, Content = new StackPanel { Spacing = 8, Children = { field, typed, scrolledPlaceholder, barred, unscrolled, menus } } };
+        window.Show();
+        try
+        {
+            Ui.Settle();
+            TextBlock placeholder = field.GetVisualDescendants().OfType<TextBlock>().First(t => t.Name == "PART_Placeholder");
+            Assert.True(placeholder.TextLayout.TextLines.Any(l => l.HasCollapsed) && placeholder.Bounds.Width <= field.Bounds.Width,
+                $"A field {field.Bounds.Width:0} px wide lays its placeholder out {placeholder.Bounds.Width:0} px wide, untrimmed: it is cut mid-letter at the field's edge, where words with no room end in an ellipsis");
+            List<string> found = LayoutFaults.Of(window, window, "The test window");
+            string[] cut = [.. found.Where(f => f.Contains("scroller", StringComparison.Ordinal))];
+            Assert.True(cut.Length == 3 && cut.Any(f => f.Contains(Long, StringComparison.Ordinal)) && cut.Any(f => f.Contains("scrolls no way", StringComparison.Ordinal))
+                && cut.Any(f => f.Contains("no sideways bar", StringComparison.Ordinal)) && found.Count == cut.Length,
+                $"The check found {found.Count} faults where a placeholder cut inside its field's scroller, words cut by a scroller that scrolls no way sideways and words cut by a menu's scroller stand, and nothing else:\n{string.Join("\n", found)}");
+
+            // Typed into, the field scrolls again to keep its caret, at the end of the words, in view.
+            Ui.WaitFor(() => field.Focus() && field.IsFocused, "the field to take the keys");
+            window.KeyTextInput(Long);
+            Ui.Settle();
+            ScrollViewer scroller = field.GetVisualDescendants().OfType<ScrollViewer>().First(s => s.Name == "PART_ScrollViewer");
+            Assert.True(field.Text == Long && scroller.Extent.Width > scroller.Viewport.Width && scroller.Offset.X >= scroller.Extent.Width - scroller.Viewport.Width - 1,
+                $"Typed into, a field {scroller.Viewport.Width:0} px wide holding words {scroller.Extent.Width:0} px wide stands scrolled {scroller.Offset.X:0} px: its caret at their end is out of sight");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    /// <summary>A row of a list of what runs (RunRows) narrower than the parts at its right gives them way from the last,
+    /// their words ending in an ellipsis, where they ran past the list's edge, which scrolls no way sideways.</summary>
+    [AvaloniaFact]
+    public void A_narrow_run_row_gives_way_at_its_right_rather_than_cutting_its_words()
+    {
+        Passenger.App.ToolWindows.RunRow drawn = new(0, "master")
+        {
+            State = Passenger.App.ToolWindows.RunState.Stopped, Health = "healthy", Links = [new("58370→5200", null), new("58371→4433/udp", null)], Trailing = "exited(2)",
+        };
+        ListBox list = new() { Width = 150, ItemsSource = new System.Collections.ObjectModel.ObservableCollection<Passenger.App.ToolWindows.RunItem<Passenger.App.ToolWindows.RunRow>> { new("master", drawn) } };
+        Passenger.App.ToolWindows.RunRows.Use<Passenger.App.ToolWindows.RunRow>(list, row => row, _ => { }, _ => { }, "port");
+        Window window = new() { Width = 400, Height = 200, Content = list };
+        window.Show();
+        try
+        {
+            Ui.Settle();
+            Assert.True(list.GetVisualDescendants().OfType<Passenger.App.ToolWindows.RunRowView>().Any(), "The list draws no run row");
+            List<string> found = LayoutFaults.Of(window, window, "A run row 150 px wide");
+            Assert.True(found.Count == 0, string.Join("\n", found));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
     /// <summary>The tool window a view is shown in, its header and all.</summary>
     private static Visual PaneOf(Visual view) =>
         view.GetVisualAncestors().OfType<DockPanel>().FirstOrDefault(p => p.Classes.Contains(StyleClasses.ToolPane))
@@ -1206,33 +1652,8 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
     /// it.</summary>
     internal static void FitsItsRoom(Visual window, Visual part, string what)
     {
-        Control[] drawn = [.. part.GetVisualDescendants().OfType<Control>().Where(c => (c is TextBlock { Text.Length: > 0 } or Button or ComboBox or TextBox)
-            && c.IsEffectivelyVisible && c.FindAncestorOfType<Passenger.Editor.CodeEditor>() is null && c.FindAncestorOfType<ScrollBar>() is null)];
-        foreach (TextBlock text in drawn.OfType<TextBlock>().Where(t => t.Bounds.Width >= 1))
-        {
-            double room = text.Bounds.Width - text.Padding.Left - text.Padding.Right;
-            Assert.True(text.TextLayout.Width <= room + 0.5,
-                $"{what} cuts '{text.Text}' to {room:0.#} px of its {text.TextLayout.Width:0.#}, where words with no room end in an ellipsis");
-        }
-        Rect[] seen = [.. drawn.Select(c => Visible(window, c))];
-        for (int i = 0; i < drawn.Length; i++)
-        {
-            for (int j = i + 1; j < drawn.Length; j++)
-            {
-                Rect both = seen[i].Intersect(seen[j]);
-                // A field's own options stand inside it, as Find's do, its text kept clear of them by its padding.
-                bool inField = (drawn[i] is TextBox && seen[i].Contains(seen[j])) || (drawn[j] is TextBox && seen[j].Contains(seen[i]));
-                Assert.True(both.Width <= 1 || both.Height <= 1 || inField || drawn[i].IsVisualAncestorOf(drawn[j]) || drawn[j].IsVisualAncestorOf(drawn[i]),
-                    $"{what} draws {Named(drawn[i])} and {Named(drawn[j])} one over the other, across {both.Width:0.#} by {both.Height:0.#} px");
-            }
-        }
-
-        static string Named(Control control) => control switch
-        {
-            TextBlock text => $"'{text.Text}'",
-            ContentControl { Content: string words } => $"'{words}'",
-            _ => $"the {control.GetType().Name} {ToolTip.GetTip(control) ?? control.Name}".TrimEnd(),
-        };
+        List<string> found = LayoutFaults.Of(window, part, what);
+        Assert.True(found.Count == 0, string.Join("\n", found));
     }
 
     /// <summary>A greyed button shows its tooltip under the pointer, which says why it is greyed: Live Templates' Delete,
@@ -1305,11 +1726,92 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         }
     }
 
+    /// <summary>Every control of a diff a person presses that shows no words of its own says what it does under the pointer
+    /// and to a screen reader (<see cref="ToolButtons.Tip"/>): the arrow of each change that rolls it back, the box that
+    /// takes it into the commit, the toolbar's and Find's. In the Commit window's diff, the pointer resting on the first
+    /// change's arrow and its box shows their tips; a bare icon button put among them is found by the rule.</summary>
+    [AvaloniaFact]
+    public void Every_icon_control_in_a_diff_says_what_it_does_under_the_pointer_and_to_a_screen_reader()
+    {
+        string folder = TestFolders.Create("diff-tips-");
+        string notes = Path.Combine(Passenger.Core.PathNames.Canonical(folder), "Notes.txt");
+        TestFolders.Prepare(() =>
+        {
+            File.WriteAllText(notes, "one\ntwo\nthree\nfour\nfive\n");
+            TestGit.Init(folder);
+            File.WriteAllText(notes, "ONE\ntwo\nthree\nfour\nFIVE\n");
+        }, folder);
+        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
+        try
+        {
+            // Open, so its diff can roll its changes back.
+            window.OpenFile(notes);
+            window.Perform(AppActions.ShowCommit);
+            Ui.Landed(() => window.CommitView.Rows.OfType<Passenger.App.ToolWindows.CommitRow>().Any(), "the changed file");
+            Passenger.App.Vcs.IDiffHost host = Ui.Landed(window.ShowDiffAsync(notes), "the diff")!;
+            Passenger.App.Vcs.DiffView view = OpenDiffs.ViewOf(host);
+            view.ShowFind(replace: false);
+            Ui.Settle();
+            Button[] icons = [.. view.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible && b.TemplatedParent is null && !Worded(b))];
+            Assert.True(icons.Length >= 8, $"Only {icons.Length} controls of no words were found in the diff: {string.Join(", ", icons.Select(b => ToolTip.GetTip(b)))}");
+            List<string> untold = Untold(view);
+            Assert.True(untold.Count == 0, $"{untold.Count} controls of the diff say nothing of what they do: give each ToolButtons.Tip:\n{string.Join("\n", untold)}");
+
+            Button arrow = icons.Single(b => ToolTip.GetTip(b) as string == "Roll back change 1 to HEAD");
+            CheckBox box = icons.OfType<CheckBox>().Single(b => ToolTip.GetTip(b) as string == "Include change 1 in commit");
+            Assert.Equal("Roll back change 1 to HEAD", Avalonia.Automation.Peers.ControlAutomationPeer.CreatePeerForElement(arrow).GetName());
+            Assert.Equal("Include change 1 in commit", Avalonia.Automation.Peers.ControlAutomationPeer.CreatePeerForElement(box).GetName());
+            TopLevel top = TopLevel.GetTopLevel(view)!;
+            Rest(top, arrow, "Roll back change 1 to HEAD");
+            Rest(top, box, "Include change 1 in commit");
+
+            Button bare = new() { Content = new PathIcon() };
+            Panel boxes = (Panel)box.GetVisualParent()!;
+            boxes.Children.Add(bare);
+            Ui.Settle();
+            try
+            {
+                Assert.True(Untold(view).Count == 1, "The rule finds no bare icon button put among the diff's");
+            }
+            finally
+            {
+                boxes.Children.Remove(bare);
+            }
+            host.Close();
+        }
+        finally
+        {
+            window.Close();
+            TestFolders.Delete(folder);
+        }
+    }
+
+    /// <summary>Each control a person presses under <paramref name="within"/> that shows no words of its own (an icon, a bare
+    /// check box) and lacks a tip or the name a screen reader says, which <see cref="ToolButtons.Tip"/> gives both.</summary>
+    internal static List<string> Untold(Visual within)
+    {
+        List<string> untold = [];
+        foreach (Button button in within.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible && b.TemplatedParent is null && !Worded(b)))
+        {
+            string? tip = ToolTip.GetTip(button) as string;
+            string? name = Avalonia.Automation.Peers.ControlAutomationPeer.CreatePeerForElement(button).GetName();
+            if (string.IsNullOrWhiteSpace(tip) || string.IsNullOrWhiteSpace(name))
+            {
+                untold.Add($"{button.GetType().Name} {button.Name} in {button.GetVisualParent()?.GetType().Name}: tip \"{tip}\", name \"{name}\"");
+            }
+        }
+        return untold;
+    }
+
+    /// <summary>Whether a button shows words of its own, which name it.</summary>
+    private static bool Worded(Button button) =>
+        button.Content is string { Length: > 0 } || button.GetVisualDescendants().OfType<TextBlock>().Any(t => !string.IsNullOrWhiteSpace(t.Text));
+
     /// <summary>Rests the pointer on a control and waits for the tooltip it opens to say what is given.</summary>
     private static void Rest(TopLevel top, Control control, string tip)
     {
         top.MouseMove(control.TranslatePoint(new Point(control.Bounds.Width / 2, control.Bounds.Height / 2), top)!.Value);
-        Ui.WaitFor(() => Shown(top) == tip, () => $"\"{tip}\" shown with the pointer resting on the greyed {control.GetType().Name}, where it shows {Shown(top) ?? "no tooltip"}",
+        Ui.WaitFor(() => Shown(top) == tip, () => $"\"{tip}\" shown with the pointer resting on the {(control.IsEffectivelyEnabled ? string.Empty : "greyed ")}{control.GetType().Name}, where it shows {Shown(top) ?? "no tooltip"}",
             TimeSpan.FromSeconds(5));
 
         static string? Shown(TopLevel top) => top.GetVisualDescendants().OfType<ToolTip>().FirstOrDefault(t => t.IsEffectivelyVisible)?.Content as string;
@@ -2000,6 +2502,168 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
             + $"(Tokens.axaml and every built-in theme's file, Dark and Light) or a radius resource, and read that:\n{string.Join("\n", found)}");
     }
 
+    /// <summary>No margin, padding, spacing or border is given a number of its own outside the theme files: each is a step
+    /// of the one scale (Gaps) or a line of Hairlines, so like things stand alike in every window, and Theme/'s styles
+    /// write only the steps' numbers. A number that is content's own drawing, not the window's spacing, is allowed below,
+    /// saying why.</summary>
+    [Fact]
+    public void No_margin_padding_spacing_or_border_is_a_number_of_its_own_but_a_step_of_the_one_scale()
+    {
+        Regex number = new(@"(?<![\w.])\d+(?:\.\d+)?(?![\w.])");
+        Regex thickness = new(@"new Thickness\(|\bThickness\s+\w+\s*(?:=>|=)\s*new\(|\b(?:Margin|Padding|BorderThickness)\s*=\s*new\(|Thickness\.Parse\(");
+        Regex spacing = new(@"\b(?:Spacing|ItemSpacing|LineSpacing|RowSpacing|ColumnSpacing)\s*=\s*");
+        Regex named = new(@"const double (\w*(?:Gap|Gutter|Inset|Pad|Padding|Margin|Spacing|Indent)\w*)\s*=\s*([^;]+);");
+        Regex attribute = new(@"\b(?:Margin|Padding|BorderThickness|Spacing|ItemSpacing|LineSpacing|RowSpacing|ColumnSpacing)=""([^""{][^""]*)""");
+        Regex setter = new(@"Property=""(Margin|Padding|Spacing|ItemSpacing|LineSpacing|RowSpacing|ColumnSpacing)""\s+Value=""([^""{][^""]*)""");
+        Regex selector = new(@"<Style Selector=""([^""]*)""");
+        double[] steps = [.. typeof(Gaps).GetFields().Where(f => f.IsLiteral).Select(f => (double)f.GetRawConstantValue()!)];
+        // Halving (a mark centred in its column) names no room of its own.
+        bool HasNumber(string written) => number.Matches(Regex.Replace(written, @"/\s*2(?![\d.])", "/ half"))
+            .Any(m => double.Parse(m.Value, System.Globalization.CultureInfo.InvariantCulture) != 0);
+        List<string> found = [];
+        foreach ((string path, string text) in UiFiles(theme: true))
+        {
+            if (path.Contains("/Theme/", StringComparison.Ordinal))
+            {
+                if (path.EndsWith(".axaml", StringComparison.Ordinal))
+                {
+                    string[] themeLines = text.Split('\n');
+                    string styled = string.Empty;
+                    for (int i = 0; i < themeLines.Length; i++)
+                    {
+                        if (selector.Match(themeLines[i]) is { Success: true } style)
+                        {
+                            styled = style.Groups[1].Value;
+                        }
+                        // A rendered Markdown document's own type and spacing, as its page draws it.
+                        if (styled.Contains(".md", StringComparison.Ordinal) || styled.Contains("MarkdownBlocks", StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+                        foreach (Match match in setter.Matches(themeLines[i]))
+                        {
+                            if (!number.Matches(match.Groups[2].Value).Select(m => Math.Abs(double.Parse(m.Value, System.Globalization.CultureInfo.InvariantCulture)))
+                                .Any(n => n != 0 && !steps.Contains(n)))
+                            {
+                                continue;
+                            }
+                            found.Add($"{path}:{i + 1}: {match.Value} (each number one of Gaps' steps: {string.Join(", ", steps.Distinct())})");
+                        }
+                    }
+                }
+                continue;
+            }
+            List<(int At, string What)> own = [];
+            if (path.EndsWith(".axaml", StringComparison.Ordinal))
+            {
+                foreach (Match match in attribute.Matches(text))
+                {
+                    if (HasNumber(match.Groups[1].Value))
+                    {
+                        own.Add((match.Index, match.Value));
+                    }
+                }
+                foreach (Match match in setter.Matches(text))
+                {
+                    if (HasNumber(match.Groups[2].Value))
+                    {
+                        own.Add((match.Index, match.Value));
+                    }
+                }
+            }
+            else
+            {
+                string code = string.Join('\n', text.Split('\n').Select(l => l.TrimStart().StartsWith("//", StringComparison.Ordinal) ? string.Empty : l));
+                foreach (Match match in thickness.Matches(code))
+                {
+                    string written = Bracketed(code, match.Index + match.Length - 1);
+                    if (HasNumber(written))
+                    {
+                        own.Add((match.Index, match.Value + written + ")"));
+                    }
+                }
+                foreach (Match match in spacing.Matches(code))
+                {
+                    string written = Expression(code, match.Index + match.Length);
+                    if (HasNumber(written))
+                    {
+                        own.Add((match.Index, match.Value + written));
+                    }
+                }
+                foreach (Match match in named.Matches(code))
+                {
+                    if (HasNumber(match.Groups[2].Value))
+                    {
+                        own.Add((match.Index, match.Value));
+                    }
+                }
+            }
+            foreach ((int at, string what) in own.Where(o => !ContentsSpacing(path, o.What)).OrderBy(o => o.At))
+            {
+                found.Add($"{path}:{LineOf(text, at)}: {what}");
+            }
+        }
+        Assert.True(found.Count == 0, $"{found.Count} margins, paddings, spacings or borders are given numbers of their own, so they stand otherwise than their "
+            + $"like elsewhere: give each a step of Gaps (Gaps.Normal, new Thickness(Gaps.Wide, 0)) or a line of Hairlines, through the shared piece it "
+            + $"belongs to where there is one:\n{string.Join("\n", found)}");
+    }
+
+    /// <summary>The text between the bracket at <paramref name="open"/> and the one closing it.</summary>
+    private static string Bracketed(string text, int open)
+    {
+        int depth = 0;
+        for (int i = open; i < text.Length; i++)
+        {
+            depth += text[i] switch { '(' => 1, ')' => -1, _ => 0 };
+            if (depth == 0)
+            {
+                return text[(open + 1)..i];
+            }
+        }
+        return text[(open + 1)..];
+    }
+
+    /// <summary>The expression starting at <paramref name="start"/>, up to the comma, semicolon or bracket that ends it.</summary>
+    private static string Expression(string text, int start)
+    {
+        int depth = 0;
+        for (int i = start; i < text.Length; i++)
+        {
+            switch (text[i])
+            {
+                case '(' or '[' or '{':
+                    depth++;
+                    break;
+                case ')' or ']' or '}' when depth == 0:
+                    return text[start..i];
+                case ')' or ']' or '}':
+                    depth--;
+                    break;
+                case ',' or ';' when depth == 0:
+                    return text[start..i];
+            }
+        }
+        return text[start..];
+    }
+
+    /// <summary>A number that is content's own drawing, not the window's spacing, so no step of the scale stands for it.</summary>
+    private static bool ContentsSpacing(string path, string what) => path switch
+    {
+        // The code editor's own rows and gutter, drawn to the code's metrics.
+        _ when path.StartsWith("src/Passenger.Editor/", StringComparison.Ordinal) => true,
+        // The terminal's cells, round which it draws to the program's grid.
+        _ when path.StartsWith("src/Passenger.Terminal/", StringComparison.Ordinal) => true,
+        // The longest pause between a trace's events, a time, not a space.
+        _ when path.EndsWith("Profiler/Snapshot.cs", StringComparison.Ordinal) && what.Contains("LongestGap", StringComparison.Ordinal) => true,
+        // A flame graph's bars and a frame chart's columns, drawn to the trace's own scale.
+        _ when path.EndsWith("Profiling/FlameGraph.cs", StringComparison.Ordinal) || path.EndsWith("Profiling/FrameChart.cs", StringComparison.Ordinal) => true,
+        // The Aspire graph's nodes and edges, laid out as a drawing of the resources.
+        _ when path.EndsWith("Aspire/AspireGraph.cs", StringComparison.Ordinal) => true,
+        // The room a popup's shadow is drawn in round its frame, as far as the shadow's blur reaches.
+        _ when path.EndsWith("App/PopupHost.cs", StringComparison.Ordinal) && what.EndsWith("(32, 24, 32, 40)", StringComparison.Ordinal) => true,
+        _ => false,
+    };
+
     /// <summary>Every theme key and icon the code names (TokenKeys and IconKeys, a literal still shaped like one in C#, a
     /// resource in XAML) is one the app's resources give, dark and light: a misspelt or missing one finds nothing, drawn as
     /// nothing (Transparent, no icon) with no error. A literal of that shape naming something else (a project's assembly, a
@@ -2181,10 +2845,11 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
             + $"SettingsDialog.PlaceOfPage and the dialog's constant for it, one of {string.Join(", ", pages)}:\n{string.Join("\n", found)}");
     }
 
-    /// <summary>No editor of a Settings row, nothing it holds and no note under it is given a width of its own: each narrows
-    /// with the page by its most width, one of the row's (OptionRow.EditorWidth, a number box's OptionRow.NumberWidth), a
-    /// field and what follows it through NarrowingField, a drop-down at the form's width the theme gives. The theme
-    /// explorer is passed over: it lays itself under the theme picker's row at the widths that row took.</summary>
+    /// <summary>No editor of a Settings row, nothing it holds and no note under it is given a width of its own, a field by
+    /// a style either: each narrows with the page by its most width, one of the row's (OptionRow.EditorWidth, a number
+    /// box's OptionRow.NumberWidth), a field and what follows it through NarrowingField, a drop-down at the form's most the
+    /// theme gives (FormDropDown). The theme explorer is passed over: it lays itself under the theme picker's row at the
+    /// widths that row took.</summary>
     [AvaloniaFact]
     public void No_settings_editor_or_note_is_given_a_width_of_its_own_each_narrowing_by_the_rows_most()
     {
@@ -2210,12 +2875,13 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
                     foreach (Control part in row.Note is null ? parts : parts.Append(row.Note))
                     {
                         string what = $"{page}, {row.Label.Text}: a {part.GetType().Name}";
-                        if (double.IsFinite(part.Width) && Avalonia.Diagnostics.AvaloniaObjectExtensions.GetDiagnostic(part, Layoutable.WidthProperty).Priority
-                            == Avalonia.Data.BindingPriority.LocalValue)
+                        // A field held to a width by a style (as every form's drop-down was) stands past a page narrower than it.
+                        if (double.IsFinite(part.Width) && (part is ComboBox or TextBox or NumericUpDown
+                            || Avalonia.Diagnostics.AvaloniaObjectExtensions.GetDiagnostic(part, Layoutable.WidthProperty).Priority == Avalonia.Data.BindingPriority.LocalValue))
                         {
                             held.Add($"{what} given a Width of {part.Width:0}");
                         }
-                        if (double.IsFinite(part.MaxWidth) && !mosts.Contains(part.MaxWidth))
+                        if (double.IsFinite(part.MaxWidth) && !mosts.Contains(part.MaxWidth) && !(part is FormDropDown && part.MaxWidth == dropDown))
                         {
                             held.Add($"{what} given a MaxWidth of {part.MaxWidth:0}");
                         }
@@ -2312,6 +2978,41 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
             $"The rule found {anywhere.Count} lists declared and few taking ListKeys, so it no longer reads how lists are written");
         Assert.True(found.Count == 0, $"{found.Count} lists hear their keys or double click by a handler of their own, which the rows' own Enter and Space go "
             + $"ahead of, or which does other than Enter does: give each its acts through ListKeys.Act (TreeKeys.Attach for a tree):\n{string.Join("\n", found)}");
+    }
+
+    /// <summary>A peer of Passenger's tells a screen reader of a change only through PeerChanges.Tell, which tells a pattern's
+    /// property only while the peer gives that pattern, as macOS's bridge asks the pattern as it hears the change and a
+    /// refusal there ends Passenger: a RaisePropertyChangedEvent written anywhere else fails here, naming its line, as does a
+    /// pattern's property of Avalonia's that PeerChanges cannot tell the pattern of.</summary>
+    [Fact]
+    public void Every_peers_change_is_told_through_PeerChanges_which_tells_a_patterns_only_while_the_peer_gives_it()
+    {
+        List<string> found = [];
+        int told = 0;
+        foreach ((string path, string text) in UiFiles().Where(f => f.Path.EndsWith(".cs", StringComparison.Ordinal)))
+        {
+            told += Regex.Count(text, @"\bPeerChanges\.Tell\(");
+            if (!path.EndsWith("/PeerChanges.cs", StringComparison.Ordinal))
+            {
+                found.AddRange(Regex.Matches(text, @"\bRaisePropertyChangedEvent\b").Select(m => $"{path}:{LineOf(text, m.Index)}"));
+            }
+        }
+        List<string> unknown = [];
+        foreach (Type identifiers in typeof(AutomationProperty).Assembly.GetExportedTypes().Where(t => t.Namespace == "Avalonia.Automation" && t.Name.EndsWith("PatternIdentifiers", StringComparison.Ordinal)))
+        {
+            string provider = $"Avalonia.Automation.Provider.I{identifiers.Name[..^"PatternIdentifiers".Length]}Provider";
+            foreach (PropertyInfo property in identifiers.GetProperties(BindingFlags.Public | BindingFlags.Static).Where(p => p.PropertyType == typeof(AutomationProperty)))
+            {
+                if (PeerChanges.PatternOf((AutomationProperty)property.GetValue(null)!)?.FullName != provider)
+                {
+                    unknown.Add($"{identifiers.Name}.{property.Name}");
+                }
+            }
+        }
+        Assert.True(told >= 3, $"The rule found {told} changes told through PeerChanges, so it no longer reads how peers tell one");
+        Assert.True(found.Count == 0, $"{found.Count} changes are told to a reader past PeerChanges.Tell, which may tell a pattern's change while the peer "
+            + $"refuses the pattern, so macOS's bridge asks it and ends Passenger:\n{string.Join("\n", found)}");
+        Assert.True(unknown.Count == 0, $"PeerChanges tells these properties as of no pattern, so a change of one is told while the peer may refuse its pattern: {string.Join(", ", unknown)}");
     }
 
     /// <summary>A row a list reuses draws its icons with RowIcon, one control where a PathIcon is five that the list styles
@@ -2434,6 +3135,36 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
             .Where(l => byHand.IsMatch(l.Text)).Select(l => $"{l.Path}:{l.Line}")];
         Assert.True(found.Length == 0, $"{found.Length} OK or Cancel buttons are made by hand, so their order and keys drift from every other dialog's: "
             + $"make each with DialogFooter (Default, Cancel, OkCancel, or Popup in a popup):\n{string.Join("\n", found)}");
+    }
+
+    /// <summary>A form's drop-down is a FormDropDown, which narrows with its room up to the form's most, so none stands past
+    /// a form narrower than it: the form's class given to a drop-down by hand, which held it to a width of its own, fails
+    /// here, naming its line.</summary>
+    [Fact]
+    public void Every_forms_drop_down_is_a_FormDropDown_narrowing_with_its_room()
+    {
+        Regex byHand = new(@"\bStyleClasses\.Form\b");
+        string[] found = [.. UiFiles().Where(f => !f.Path.EndsWith("/FormDropDown.cs", StringComparison.Ordinal))
+            .SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line)))
+            .Where(l => byHand.IsMatch(l.Text)).Select(l => $"{l.Path}:{l.Line}")];
+        Assert.True(found.Length == 0, $"{found.Length} drop-downs are given a form's class by hand, so they keep no form's width: make each a FormDropDown:\n{string.Join("\n", found)}");
+    }
+
+    /// <summary>A button that copies words for the person to paste elsewhere, then says Copied, is a CopyButton (Copy
+    /// Command beside a refusal, each agent's setup in Settings), so every one copies and says so one way: a button worded
+    /// Copy, Copy and a name, or Copied by hand fails here, naming its line.</summary>
+    [Fact]
+    public void Every_button_that_copies_then_says_Copied_is_a_CopyButton()
+    {
+        Regex byHand = new(@"\bContent\s*=\s*[^;,}]*""Cop(?:y(?: [A-Z]\w*)?|ied)""");
+        string[] found = [.. UiFiles().Where(f => !f.Path.EndsWith("/CopyButton.cs", StringComparison.Ordinal))
+            .SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line)))
+            .Where(l => byHand.IsMatch(l.Text)).Select(l => $"{l.Path}:{l.Line}")];
+        Assert.True(found.Length == 0, $"{found.Length} buttons copy and say so by hand, so their words and clipboard drift from every other copy's: "
+            + $"make each a CopyButton:\n{string.Join("\n", found)}");
+        Assert.Matches(byHand, "        other.Content = other == copy ? \"Copied\" : \"Copy\";");
+        Assert.Matches(byHand, "    Button copyCommand = new() { Content = \"Copy Command\", IsVisible = false };");
+        Assert.DoesNotMatch(byHand, "        Button copy = new() { Content = \"Copy and Close\" };");
     }
 
     /// <summary>A tool window's two panes, and an editor and its file's own pane (a preview), are a PaneSplit, so a side
@@ -2716,7 +3447,9 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         // The ground of a web page setting none of its own: a browser's white, in every look.
         (_, "Brushes.White") when path.EndsWith("Editors/HtmlPreview.cs", StringComparison.Ordinal) => true,
         // A colour the program in the terminal names: xterm's 24-bit colours, its 256-colour cube and grey ramp.
-        (_, "Color.FromRgb" or "new SolidColorBrush(Color.") when path.EndsWith("TerminalView.cs", StringComparison.Ordinal) => true,
+        (_, "new SolidColorBrush(Color.") when path.EndsWith("TerminalView.cs", StringComparison.Ordinal) => true,
+        // A colour a highlighter's look names of its own: a program's 24-bit or 256-colour text in a console.
+        (_, "Color.FromUInt32") when path.EndsWith("Editor/CodeEditor.Render.cs", StringComparison.Ordinal) => true,
         _ => false,
     };
 
@@ -2927,7 +3660,7 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
     }
 
     /// <summary>A widget's menu opens against it, its frame's edge meeting the widget's and one of its sides in line with
-    /// the widget's, wherever the room for its shadow put the menu's popup (MenuShadow).</summary>
+    /// the widget's, wherever the room for its shadow puts the menu's popup (Passenger.MenuShadowRoom).</summary>
     private static void DropsFrom(Control widget, ContextMenu menu, string what)
     {
         Border frame = menu.GetVisualDescendants().OfType<Border>().First(b => b.BoxShadow.Count > 0);

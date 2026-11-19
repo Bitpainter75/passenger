@@ -124,11 +124,12 @@ public partial class ManagedDebugger
         _launch = launch;
         _initialThreadId = launch.InitialThreadId;
         _launchOutput = Task.WhenAll(Forward(launch.Output, isError: false), Forward(launch.Error, isError: true));
-        // Not held: it waits for the program to end.
-        Task<int?> launchExit = Core.BackgroundWork.Unheld(launch.WaitForExit);
+        // On a thread of its own: it waits for the program to end.
+        Task<int?> launchExit = Core.BackgroundWork.UnheldThread(launch.WaitForExit);
         _launchExit = launchExit;
         // Told as the program goes, not when the runtime's word of it is handled, which mscordbi may lose tearing down.
-        Core.UnawaitedWork.Observe(EndedLaunchAsync(launchExit));
+        _launchFiles = Core.RuntimeFiles.Of(launch.ProcessId, launchInfo.Env?.GetValueOrDefault("TMPDIR"));
+        Core.UnawaitedWork.Observe(EndedLaunchAsync(launchExit, _launchFiles));
         int processId = launch.ProcessId;
 
         _logger?.Invoke($"Process created suspended with PID: {processId}");
@@ -1241,6 +1242,12 @@ public partial class ManagedDebugger
             {
                 _logger?.Invoke("The process had not exited 5 s after Terminate");
             }
+            // Before the adapter goes, which may be at once: its runtime left its socket, ended as it was.
+            if (_launchExit is { } ended && _launchFiles is { } left)
+            {
+                await ended.WaitAsync(TimeSpan.FromSeconds(5)).Ended().ConfigureAwait(false);
+                left.Remove();
+            }
         }
         await EndAsync().ConfigureAwait(false);
     }
@@ -1305,7 +1312,7 @@ public partial class ManagedDebugger
         List<ThrownException> chain = StoredChain(currentException, thread);
         try
         {
-            // No code runs to read it once an evaluation has timed out, until the program runs on.
+            // No code runs to read it once an evaluation past its time was stopped or is held unfinished, until the program runs on.
             string? why = EvalStatus.ImplicitOff;
             // Every Message first, as what the person reads; the stack trace, the costliest to make, last.
             foreach (ThrownException each in chain)

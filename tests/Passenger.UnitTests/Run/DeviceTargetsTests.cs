@@ -105,6 +105,25 @@ public class DeviceTargetsTests
         Assert.Null(DeviceTargets.Find(chosen with { Platform = TargetPlatform.Ios }, restarted));
     }
 
+    /// <summary>A run on an Android emulator lists Android's targets again on its way: this machine and the iOS simulators
+    /// stay listed where they stood, Android's put in place of its own, and a platform the listing lacked comes after.</summary>
+    [Fact]
+    public void A_listing_of_one_platform_replaces_that_platforms_targets_alone()
+    {
+        DeviceTarget here = DeviceTargets.Here(TargetPlatform.MacCatalyst);
+        DeviceTarget pixel = new(TargetPlatform.Android, "pixel", "Pixel 9", TargetKind.Emulator, false) { Avd = "pixel" };
+        DeviceTarget galaxy = new(TargetPlatform.Android, "R5CT1234", "Galaxy S24", TargetKind.Device, true);
+        DeviceTarget iphone = new(TargetPlatform.Ios, "A1B2", "iPhone 17", TargetKind.Simulator, false);
+        DeviceTarget ipad = new(TargetPlatform.Ios, "C3D4", "iPad Air", TargetKind.Simulator, false);
+        DeviceTarget started = pixel with { Id = "emulator-5554", Running = true };
+
+        Assert.Equal([here, started, iphone, ipad], DeviceTargets.Relisted([here, pixel, galaxy, iphone, ipad], TargetPlatform.Android, [started]));
+        Assert.Equal([here, iphone, ipad], DeviceTargets.Relisted([here, pixel, galaxy, iphone, ipad], TargetPlatform.Android, []));
+        Assert.Equal([here, pixel, iphone with { Running = true }], DeviceTargets.Relisted([here, pixel, iphone, ipad], TargetPlatform.Ios, [iphone with { Running = true }]));
+        Assert.Equal([here, started], DeviceTargets.Relisted([here], TargetPlatform.Android, [started]));
+        Assert.Equal([started], DeviceTargets.Relisted([], TargetPlatform.Android, [started]));
+    }
+
     [Fact]
     public void Run_starts_the_app_afresh_and_writes_its_processes_log_until_it_ends()
     {
@@ -295,6 +314,41 @@ public class DeviceTargetsTests
         Assert.Equal(KeptTarget.Of(here), DeviceTargets.Unchosen(maui, TargetPlatform.MacCatalyst));
         Assert.Equal("net11.0-maccatalyst", DeviceTargets.FrameworkFor(maui, here.Platform));
         Assert.Null(DeviceTargets.Unchosen(["net11.0-android", "net11.0-ios"], TargetPlatform.MacCatalyst));
+    }
+
+    [Fact]
+    public void A_heads_framework_of_no_platform_carrying_avalonias_desktop_is_this_machine_and_runs_here_with_nothing_chosen()
+    {
+        ProjectModel App(string[] frameworks, params (string Framework, string[] Packages)[] dependencies) => new("/src/Shop/Shop.csproj", "Shop", "Exe", frameworks, [], [], true)
+        {
+            Evaluated = new EvaluatedProject
+            {
+                Path = "/src/Shop/Shop.csproj",
+                Dependencies = [.. dependencies.Select(d => new FrameworkDependencies(d.Framework, [.. d.Packages.Select(p => new PackageDependency(p, "1.0", false))], []))],
+            },
+        };
+        string[] avalonia = ["Microsoft.Maui.Controls", "Avalonia.Controls.Maui", "Avalonia.Controls.Maui.Desktop"];
+        ProjectModel maui = App(["net11.0", "net11.0-android"], ("net11.0", avalonia), ("net11.0-android", ["Microsoft.Maui.Controls", "Avalonia.Controls.Maui"]));
+
+        Assert.Equal("net11.0", DeviceTargets.DesktopHead(maui));
+        DeviceTarget here = DeviceTargets.Here(TargetPlatform.Desktop);
+        Assert.Equal("Desktop (this machine)", here.Shown);
+        Assert.Equal(TargetKind.ThisMachine, here.Kind);
+        Assert.Equal(KeptTarget.Of(here), DeviceTargets.UnchosenDesktop(maui));
+        Assert.Equal("net11.0", DeviceTargets.FrameworkFor(maui, TargetPlatform.Desktop));
+        Assert.Equal("net11.0", DeviceTargets.DesktopHead(App(["net11.0-android", "net11.0"], ("net11.0", ["Avalonia.Desktop"]))));
+        // The head is the framework carrying the packages, not the first of no platform.
+        ProjectModel later = App(["net10.0", "net11.0", "net11.0-android"], ("net10.0", []), ("net11.0", ["Avalonia.Desktop"]));
+        Assert.Equal("net11.0", DeviceTargets.FrameworkFor(later, TargetPlatform.Desktop));
+        // A framework of no platform kept for tests or a library is no head, nor is a desktop app with no device head.
+        ProjectModel tested = App(["net11.0", "net11.0-android"], ("net11.0", ["Microsoft.Maui.Controls"]));
+        Assert.Null(DeviceTargets.DesktopHead(tested));
+        Assert.Null(DeviceTargets.UnchosenDesktop(tested));
+        Assert.Null(DeviceTargets.FrameworkFor(tested, TargetPlatform.Desktop));
+        Assert.Null(DeviceTargets.DesktopHead(App(["net11.0"], ("net11.0", ["Avalonia.Desktop"]))));
+        Assert.Null(DeviceTargets.DesktopHead(App(["net48", "net11.0-android"], ("net48", ["Avalonia.Desktop"]))));
+        Assert.Null(DeviceTargets.DesktopHead(App(["netstandard2.0", "net11.0-android"], ("netstandard2.0", ["Avalonia.Desktop"]))));
+        Assert.Equal("net11.0-android", DeviceTargets.FrameworkFor(maui, TargetPlatform.Android));
     }
 
     [Fact]

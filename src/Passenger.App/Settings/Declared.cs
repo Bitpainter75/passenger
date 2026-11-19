@@ -72,6 +72,12 @@ public static class Declared
 
     public static readonly ChoiceSetting<OpenProjectIn> OpenProjectIn = new(s => s.OpenProjectIn, (s, v) => s with { OpenProjectIn = v }, D.OpenProjectChoices);
 
+    public static readonly ChoiceSetting<ConfirmClosing> ConfirmBeforeClosing = new(s => s.ConfirmBeforeClosing, (s, v) => s with { ConfirmBeforeClosing = v },
+        [(ConfirmClosing.Never, "Never"), (ConfirmClosing.WhenQuitting, "When quitting"), (ConfirmClosing.EveryWindow, "Every window")],
+        new(D.SystemPage, "Confirm before closing", "confirm ask prompt question before closing close quit exit window are you sure accidental",
+            $"Whether Passenger asks you before it quits ({(OperatingSystem.IsMacOS() ? "Quit Passenger" : "File | Exit")} or closing its last "
+            + "window) or before any of its windows closes. The question's Don't ask again sets this back to Never."));
+
     public static readonly ToggleSetting SaveOnDeactivation = new(s => s.SaveOnDeactivation, (s, v) => s with { SaveOnDeactivation = v },
         new(D.SystemPage, "Save when leaving the IDE", "autosave files switching to a different application or the built-in terminal focus frame deactivation"));
 
@@ -146,6 +152,12 @@ public static class Declared
         new(D.EditorPage, "Add parentheses to a method chosen from completion", "completion parentheses brackets call method invocation arguments autocomplete",
             "A C# method chosen by Enter, Tab or a click is written as a call, the caret between its parentheses where it takes "
             + "arguments. Where the code asks for the method itself, as an event's handler or a delegate, it stays a name."));
+
+    public static readonly ToggleSetting FormatOnType = new(s => s.FormatOnType, (s, v) => s with { FormatOnType = v },
+        new(D.EditorPage, "Format a statement on ';' and a block on '}'", "format on type as you type typing semicolon brace statement block reformat layout auto c#",
+            "In C#, the ';' that ends a statement lays the statement out, and the '}' that closes a block lays out the block, as "
+            + "Reformat Code does; one Undo takes the key and its layout back together. A ';' in a for loop's header, a string or "
+            + "a comment stays as typed."));
 
     public static readonly ToggleSetting XamlWorkspace = new(s => s.XamlWorkspace, (s, v) => s with { XamlWorkspace = v },
         new(D.EditorPage, "Open XAML files in the XAML workspace",
@@ -432,11 +444,13 @@ public static class Declared
     public static readonly ProgramSetting TerminalShell = new(s => s.TerminalShell, (s, v) => s with { TerminalShell = v },
         () => Passenger.Terminal.TerminalSession.DefaultShell().App, new(D.TerminalPage, "Shell path", "shell zsh bash powershell program"));
 
-    public static readonly ProgramSetting DebugBrowser = new(s => s.DebugBrowser, (s, v) => s with { DebugBrowser = v },
-        () => Core.ChromiumBrowsers.Find(null) is { } found ? found.Program : "Not found",
-        new(D.RunPage, Debugging.BrowserDebugging.BrowserRow, "browser chrome edge chromium brave blazor webassembly wasm debug debugger page",
-            "The Chromium browser Debug opens a Blazor app's page in, to debug its WebAssembly components, on a profile of Passenger's own, with any arguments "
-            + "to give each start after it. Empty, it is the first of Chrome, Edge, Chromium and Brave found where they install, else on the PATH."));
+    public static readonly ProgramSetting Browser = new(s => s.Browser, (s, v) => s with { Browser = v },
+        () => Run.PageBrowsers.SystemDefault,
+        new(D.RunPage, Run.PageBrowsers.Row, "browser browsers chrome edge firefox safari chromium brave open page url launch web app blazor webassembly wasm debug debugger",
+            "The browser a web app's page opens in once it listens, as its launch profile's launchBrowser asks: a program (on macOS an app bundle too) "
+            + "with any arguments to give it before the page's address; a run configuration may name its own. Debug drives it, on a profile of "
+            + "Passenger's own, to debug a Blazor app's WebAssembly components, which takes a Chromium browser. Empty, pages open in the system's "
+            + "default browser, and Debug drives the first of Chrome, Edge, Chromium and Brave found where they install, else on the PATH."));
 
     public static readonly ProgramSetting GodotExecutable = new(s => s.GodotExecutable, (s, v) => s with { GodotExecutable = v },
         () => Run.GodotLaunch.Found(null) is { Exists: true } found ? found.Executable : "Not found",

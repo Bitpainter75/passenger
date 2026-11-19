@@ -21,18 +21,15 @@ using Xunit.v3;
 
 namespace Passenger.Tests;
 
-/// <summary>The real app on the headless platform, drawing with Skia so text measures as it does on
-/// a desktop.</summary>
+/// <summary>The real app on the headless platform a Passenger nobody sees draws on (<see cref="Passenger.App.HeadlessPlatform"/>):
+/// drawing with Skia so text measures as it does on a desktop, with the system's hotkeys.</summary>
 public static class TestApp
 {
     /// <summary>The application's menu as the test's app ended its setup, where macOS's platform takes it before any
     /// window is made, showing Avalonia's own About in place of none.</summary>
     public static NativeMenu? ApplicationMenuAtSetup { get; private set; }
 
-    public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<Passenger.App.App>()
-        .UseSkia()
-        .UseHarfBuzz()
-        .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
+    public static AppBuilder BuildAvaloniaApp() => Passenger.App.HeadlessPlatform.UseHeadlessPlatform(AppBuilder.Configure<Passenger.App.App>())
         .AfterSetup(built => ApplicationMenuAtSetup = NativeMenu.GetMenu(built.Instance!));
 }
 
@@ -53,6 +50,33 @@ public sealed class TestRun : IAsyncDisposable
 
     /// <summary>The run's folder, named for the test process.</summary>
     public static string Root { get; } = Path.Combine(Path.GetTempPath(), Prefix + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + Unindexed);
+
+    /// <summary>The temporary folder the run started with: the person's own.</summary>
+    public static string PersonsTemporary { get; } = Path.GetTempPath();
+
+    private const string TemporaryPrefix = "prun-";
+
+    /// <summary>The temporary folder (TMPDIR) the run's programs are given on macOS and Linux: each .NET program's runtime
+    /// makes its diagnostic socket and its debugger's pipes there, which one killed leaves, so the run's go with the run and
+    /// never stay in <see cref="PersonsTemporary"/>. Named short, as a socket's path holds 103 bytes; the person's own where
+    /// no folder is short enough, and on Windows, whose pipes go with their process.</summary>
+    public static string Temporary { get; } = RunTemporary();
+
+    /// <summary>In the person's temporary folder, else the system's (macOS's per-user one is too long), the first where the
+    /// longest socket name made there fits a socket's path: a stand-in diagnostics router's, for a 7-digit id and a 10-digit
+    /// start.</summary>
+    private static string RunTemporary()
+    {
+        const int Longest = 52;
+        string own = TemporaryPrefix + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return OperatingSystem.IsWindows() ? PersonsTemporary
+            : TemporaryBases().Select(under => Path.Combine(under, own)).FirstOrDefault(folder => folder.Length + 1 + Longest <= 103) ?? PersonsTemporary;
+    }
+
+    /// <summary>Where a run's folders are made: the person's temporary folder, then, on macOS and Linux, the system's, as its
+    /// real path names it.</summary>
+    private static IEnumerable<string> TemporaryBases() =>
+        OperatingSystem.IsWindows() ? [PersonsTemporary] : [PersonsTemporary, OperatingSystem.IsMacOS() ? "/private/tmp" : "/tmp"];
 
     /// <summary>The IDE's state folder for the whole run.</summary>
     public static string Settings => Path.Combine(Root, "settings");
@@ -108,16 +132,32 @@ public sealed class TestRun : IAsyncDisposable
         Passenger.Core.InFlight.Watched = true;
         // Every folder a test opens is trusted, but one it holds to the person's answer (WorkspaceTrust.Ask).
         Passenger.Core.WorkspaceTrust.TrustEverything();
-        foreach (string left in Directory.EnumerateDirectories(Path.GetTempPath(), Prefix + "*"))
+        foreach (string left in TemporaryBases().Select(Path.TrimEndingDirectorySeparator).Distinct(StringComparer.Ordinal).SelectMany(under => Directory.EnumerateDirectories(under, "p*")))
         {
             // A run still going has its process; one killed has none, and only an id reused since keeps its folder.
-            if (int.TryParse(Path.GetFileName(left)[Prefix.Length..].Replace(Unindexed, string.Empty, StringComparison.Ordinal), out int id)
-                && (id == Environment.ProcessId || !Processes.IsRunning(id)))
+            string name = Path.GetFileName(left);
+            string? number = name.StartsWith(Prefix, StringComparison.Ordinal) ? name[Prefix.Length..].Replace(Unindexed, string.Empty, StringComparison.Ordinal)
+                : name.StartsWith(TemporaryPrefix, StringComparison.Ordinal) ? name[TemporaryPrefix.Length..]
+                : null;
+            if (int.TryParse(number, out int id) && (id == Environment.ProcessId || !Processes.IsRunning(id)))
             {
                 TestFolders.Delete(left);
             }
         }
         Directory.CreateDirectory(Settings);
+        if (Temporary != PersonsTemporary)
+        {
+            UserTemporary.Own(Temporary);
+            // This process's own socket and pipes, which its runtime made in the person's folder as it started, are reached from the run's.
+            foreach (string own in RuntimeFiles.Of(Environment.ProcessId)?.Paths ?? [])
+            {
+                if (File.Exists(own))
+                {
+                    File.CreateSymbolicLink(Path.Combine(Temporary, Path.GetFileName(own)), own);
+                }
+            }
+            Environment.SetEnvironmentVariable("TMPDIR", Temporary);
+        }
         // Nor the person's Godot user folders: every Godot a window starts keeps its settings, logs and user:// in the run's.
         PersonsGodot.Begin();
         Environment.SetEnvironmentVariable(Passenger.App.Godot.GodotUserFolders.HomeVariable, Path.Combine(Root, "godot"));
@@ -149,7 +189,7 @@ public sealed class TestRun : IAsyncDisposable
         File.WriteAllText(Path.Combine(Root, "zsh", ".zshrc"), string.Empty);
         NuGetHome();
         // No test reaches GitHub: a Passenger that checks for updates without a stand-in asks where nothing listens.
-        Environment.SetEnvironmentVariable(Passenger.App.Updates.ReleaseFeed.Variable, "http://127.0.0.1:9/repos/Zaneris/passenger/releases/latest");
+        Environment.SetEnvironmentVariable(Passenger.App.Updates.ReleaseFeed.Variable, "http://127.0.0.1:9/repos/Zaneris/passenger/releases");
         // Nor any host a browser Passenger starts asks of its own accord (its updates, its services): they go where nothing listens.
         Environment.SetEnvironmentVariable(Passenger.App.Debugging.BrowserRun.ProxyVariable, "127.0.0.1:9");
         // Nor Microsoft's .NET release metadata: Install .NET SDK without a stand-in asks where nothing listens.
@@ -188,7 +228,7 @@ public sealed class TestRun : IAsyncDisposable
         Environment.SetEnvironmentVariable("npm_config_audit", "false");
         Environment.SetEnvironmentVariable("npm_config_fund", "false");
         // Nor the person's colour choices: what a test runs writes in colour on a terminal alone, as with none of them set.
-        foreach (string colour in (string[])["NO_COLOR", "FORCE_COLOR", "CLICOLOR_FORCE", "DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION"])
+        foreach (string colour in (string[])["NO_COLOR", "FORCE_COLOR", "CLICOLOR_FORCE", RuntimeVariables.AnsiColorRedirection])
         {
             OwnEnvironment.Set(colour, null);
         }
@@ -357,8 +397,9 @@ public sealed class TestRun : IAsyncDisposable
     /// tries each once.</summary>
     private static void End(bool waiting)
     {
-        // The windows' agent sockets are in a folder named for the run's state, outside it.
-        foreach (string folder in (string[])[Root, Passenger.App.Mcp.McpHost.SocketFolder, AspireCli.Home])
+        // The windows' agent sockets and the language servers' temporary folders are in folders named for the run's state, outside it.
+        foreach (string folder in (string[])[Root, .. Temporary == PersonsTemporary ? (string[])[] : [Temporary], Passenger.App.Mcp.McpHost.SocketFolder, AspireCli.Home,
+            .. UserTemporary.Of(Passenger.App.CSharp.CSharpService.ServerCache, Passenger.Lsp.RoslynServerFolder.TemporariesKind) is var servers && Directory.Exists(servers) ? [servers] : (string[])[]])
         {
             try
             {
@@ -780,7 +821,7 @@ public static class TestFolders
     /// <summary>Many files of a test's folder written as <see cref="Write"/> writes each, several at once: Windows scans a
     /// file as it is made, which a test of a thousand files written one after another waits out a thousand times.</summary>
     public static void WriteAll(string folder, IEnumerable<(string Relative, string Text)> files) =>
-        Parallel.ForEach(files, file => Write(folder, file.Relative, file.Text));
+        ApartScheduler.ForEach("test writer", [.. files], 0, TestContext.Current.CancellationToken, file => Write(folder, file.Relative, file.Text));
 
     public static void Begin(string test) => Made[test] = [];
 
@@ -933,6 +974,10 @@ public static class Ui
             Settle();
         }
     }
+
+    /// <summary>A key held with the system's command key (<see cref="Keystroke.Command"/>: Cmd on a Mac, Ctrl elsewhere), as
+    /// <see cref="Press"/> takes it: a text box's Select All is <c>Command("A")</c>, on the headless platform as on the screen.</summary>
+    public static string Command(string key) => new Keystroke(Keystroke.Parse(key).Key, Keystroke.Command).Notation();
 
     private static void Stroke(TopLevel window, Keystroke stroke)
     {
@@ -1427,13 +1472,13 @@ public static class Ui
         Settle();
     }
 
-    /// <summary>The pointer brought to rest over a control (its centre, or a point in it) as a person's mouse brings it,
-    /// once the control is drawn and is what the pointer finds there, as <see cref="Click(Control, Point?, RawInputModifiers, bool)"/>
-    /// aims; then lets what it ran land.</summary>
-    public static void Hover(Control control, Point? at = null)
+    /// <summary>The pointer brought to rest over a control (its centre, or a point in it) as a person's mouse brings it, with
+    /// modifiers held when given, once the control is drawn and is what the pointer finds there, as
+    /// <see cref="Click(Control, Point?, RawInputModifiers, bool)"/> aims; then lets what it ran land.</summary>
+    public static void Hover(Control control, Point? at = null, RawInputModifiers modifiers = RawInputModifiers.None)
     {
         (TopLevel top, Point point) = Aim(control, at);
-        top.MouseMove(point);
+        top.MouseMove(point, modifiers);
         Settle();
     }
 
@@ -2700,10 +2745,11 @@ public static class TestGpgKeys
     public static async Task<string> MakeAsync(string passphrase, string? gpg = null, string user = "Passenger Tests <tests@passenger.invalid>")
     {
         gpg ??= Gpg!;
+        string log = AgentLogged(gpg);
         Passenger.Core.ChildResult made = await Passenger.Core.ChildProcesses.RunAsync(Of(gpg,
             ["--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--quick-gen-key", user, "ed25519", "sign", "never"]),
             passphrase + "\n", Limit.Scaled());
-        Assert.True(made.Succeeded, $"gpg made no key to sign with, exiting {made.ExitCode}: {made.Error}");
+        Assert.True(made.Succeeded, $"gpg made no key to sign with, exiting {made.ExitCode}: {made.Error}{AgentSaid(log)}");
         Passenger.Core.ChildResult listed = await Passenger.Core.ChildProcesses.RunAsync(Of(gpg, ["--list-secret-keys", "--with-colons", $"={user}"]),
             limit: Limit.Scaled());
         string id = listed.Output.Split('\n').Select(l => l.Split(':')).First(f => f[0] == "sec")[4];
@@ -2723,6 +2769,30 @@ public static class TestGpgKeys
         if ((File.Exists(beside) ? beside : Passenger.Core.Programs.OnPath(OperatingSystem.IsWindows() ? "gpgconf.exe" : "gpgconf")) is { } gpgconf)
         {
             await Passenger.Core.ChildProcesses.RunAsync(Of(gpgconf, ["--kill", "gpg-agent"]), limit: Limit.Scaled());
+        }
+    }
+
+    /// <summary>The run's gpg-agent, as <paramref name="program"/> starts it next, logging what it does to a file in the run's
+    /// GnuPG home, named in the form the program reads a path; that file, which a failed key's making quotes.</summary>
+    internal static string AgentLogged(string program)
+    {
+        string home = Environment.GetEnvironmentVariable("GNUPGHOME")!;
+        string log = Path.Combine(home, "gpg-agent.log");
+        string named = Passenger.Vcs.MsysGpg.Is(program, File.Exists) ? Passenger.Vcs.MsysGpg.Posix(log) : log;
+        File.WriteAllText(Path.Combine(home, "gpg-agent.conf"), $"log-file {named}\nverbose\n");
+        return log;
+    }
+
+    /// <summary>What the run's gpg-agent logged, to follow a failure's words.</summary>
+    internal static string AgentSaid(string log)
+    {
+        try
+        {
+            return $"\nThe run's gpg-agent logged:\n{File.ReadAllText(log)}";
+        }
+        catch (Exception unread) when (unread is IOException or UnauthorizedAccessException)
+        {
+            return $"\nThe run's gpg-agent's log was not read: {unread.Message}";
         }
     }
 
@@ -2759,9 +2829,10 @@ public static class TestX509Keys
         string certificate = Path.Combine(folder, "x509.pem");
         await File.WriteAllTextAsync(parameters, "Key-Type: RSA\nKey-Length: 2048\nKey-Usage: sign\nSerial: random\nName-DN: CN=Passenger Tests,O=Passenger\n"
             + "Name-Email: tests@passenger.invalid\n");
+        string log = TestGpgKeys.AgentLogged(Gpgsm!);
         Passenger.Core.ChildResult made = await Passenger.Core.ChildProcesses.RunAsync(TestGpgKeys.Of(Gpgsm!,
             ["--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--armor", "--output", certificate, "--gen-key", parameters]), passphrase + "\n", Limit.Scaled());
-        Assert.True(made.Succeeded, $"gpgsm made no certificate to sign with, exiting {made.ExitCode}: {made.Error}");
+        Assert.True(made.Succeeded, $"gpgsm made no certificate to sign with, exiting {made.ExitCode}: {made.Error}{TestGpgKeys.AgentSaid(log)}");
         Passenger.Core.ChildResult imported = await Passenger.Core.ChildProcesses.RunAsync(TestGpgKeys.Of(Gpgsm!, ["--batch", "--import", certificate]),
             limit: Limit.Scaled());
         Assert.True(imported.Succeeded, $"gpgsm did not import the test's certificate, exiting {imported.ExitCode}: {imported.Error}");
@@ -3029,7 +3100,8 @@ public static partial class Processes
     }
 
     /// <summary>The folder a process works in on Windows, which Windows lets nobody delete while it does, read from its
-    /// parameters in its memory (CurrentDirectory at 0x38); null elsewhere, or where its memory does not read.</summary>
+    /// parameters in its memory (CurrentDirectory at 0x38), a 32-bit program's from its own 32-bit ones (at 0x24, as adb's
+    /// is); null elsewhere, or where its memory does not read.</summary>
     public static string? WindowsWorkingFolder(int id)
     {
         if (!OperatingSystem.IsWindows())
@@ -3040,6 +3112,12 @@ public static partial class Processes
         {
             using System.Diagnostics.Process process = System.Diagnostics.Process.GetProcessById(id);
             IntPtr handle = process.Handle;
+            long[] wow64 = new long[1];
+            if (NtQueryInformationProcess(handle, 26, wow64, sizeof(long), out _) == 0 && wow64[0] != 0)
+            {
+                return ReadMemory(handle, wow64[0] + 0x10, 4) is { } at32 && ReadMemory(handle, BitConverter.ToUInt32(at32) + 0x24, 8) is { } folder32
+                    && ReadMemory(handle, BitConverter.ToUInt32(folder32, 4), BitConverter.ToUInt16(folder32, 0)) is { } name32 ? System.Text.Encoding.Unicode.GetString(name32) : null;
+            }
             long[] basic = new long[6];
             if (NtQueryInformationProcess(handle, 0, basic, basic.Length * sizeof(long), out _) != 0 || ReadMemory(handle, basic[1] + 0x20, 8) is not { } at
                 || ReadMemory(handle, BitConverter.ToInt64(at) + 0x38, 16) is not { } folder)

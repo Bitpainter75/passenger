@@ -9,11 +9,17 @@ namespace Passenger.App;
 [IdentifierHome]
 public static class AppActions
 {
-    public const string Open = "app.open";
+    /// <summary>A solution or project to open as the workspace: Rider's Open Solution (RiderOpenSolution), Ctrl+Shift+O in
+    /// every keymap but VS Code's on Windows, which gives it Ctrl+K, Ctrl+O.</summary>
+    public const string OpenSolution = "app.openSolution";
 
-    /// <summary>A folder to open: the system's panel takes files or folders, not both, so Open takes the solution or
-    /// project files and this the folder. Rider's keymaps have no keys for it.</summary>
+    /// <summary>A folder to open: the system's panel takes files or folders, not both. Rider's keymaps have no keys for
+    /// it.</summary>
     public const string OpenFolder = "app.openFolder";
+
+    /// <summary>A file to open in the editor, never as the workspace: IntelliJ's Open (OpenFile), which Rider's Visual Studio
+    /// and VS Code keymaps give Ctrl+O (Cmd+O on the Mac) and IntelliJ IDEA's none.</summary>
+    public const string OpenFile = "app.openFile";
 
     /// <summary>Rider's New Solution (RiderNewSolution), which its keymaps give no keys.</summary>
     public const string NewSolution = "app.newSolution";
@@ -46,6 +52,11 @@ public static class AppActions
     public const string CloseTab = "app.closeTab";
     public const string NextTab = "app.nextTab";
     public const string PreviousTab = "app.previousTab";
+
+    // Rider's Switcher: Ctrl+Tab, and Ctrl+Shift+Tab going the other way, in $default's and Mac OS X 10.5+'s own lists,
+    // which every keymap here takes; Control on the Mac too.
+    public const string Switcher = "app.switcher";
+    public const string SwitcherBackward = "app.switcherBackward";
     public const string GoToFile = "app.goToFile";
     public const string GoToLine = "app.goToLine";
     public const string GoToSymbol = "app.goToSymbol";
@@ -132,6 +143,10 @@ public static class AppActions
     // The .NET SDK installed into the person's own folder, and put on their shell's PATH: no key of Rider's.
     public const string InstallDotnetSdk = "app.dotnet.install";
     public const string AddDotnetToPath = "app.dotnet.addToPath";
+
+    // The passenger-ide command on macOS, linked in ~/.local/bin and taken away again: no keys of Rider's.
+    public const string AddCommand = "app.command.add";
+    public const string RemoveCommand = "app.command.remove";
 
     // What a mobile project needs: the .NET workloads it lacks, and the Android SDK and JDK through the Android workload's installer: no keys of Rider's.
     public const string InstallWorkloads = "app.dotnet.installWorkloads";
@@ -246,6 +261,7 @@ public static class AppActions
         ["app.aspire.attach"] = ServiceAttach,
         ["app.aspire.runWithoutDebugger"] = ServiceRun,
         ["app.aspire.profile"] = ServiceProfile,
+        ["app.open"] = OpenSolution,
     };
 
     /// <summary>An action's id now, for one it had before (<see cref="Formerly"/>), else the id itself.</summary>
@@ -691,7 +707,10 @@ public static class AppActions
         // A chord no keymap here takes and a game is unlikely to want, as the game hears it while it has the keys.
         Keymap keymap = Base(preset).Bind(GameKeys, "control F11")
             .Bind(NextRegion, OperatingSystem.IsMacOS() ? "control meta BACK_QUOTE" : "control alt BACK_QUOTE")
-            .Bind(PreviousRegion, OperatingSystem.IsMacOS() ? "control meta shift BACK_QUOTE" : "control alt shift BACK_QUOTE");
+            .Bind(PreviousRegion, OperatingSystem.IsMacOS() ? "control meta shift BACK_QUOTE" : "control alt shift BACK_QUOTE")
+            // The Switcher's keys are the same in every keymap of Rider's (Switcher).
+            .Bind(Switcher, "control TAB")
+            .Bind(SwitcherBackward, "control shift TAB");
         foreach ((string action, string[] shortcuts) in overrides)
         {
             List<Shortcut> keys = [];
@@ -732,7 +751,8 @@ public static class AppActions
         if (OperatingSystem.IsMacOS())
         {
             return keymap
-                .Bind(Open, "meta O")
+                .Bind(OpenSolution, "control shift O")
+                .Bind(OpenFile, "meta O")
                 .Bind(NewProject, "meta shift N")
                 .Bind(NewItem, "meta N", "alt INSERT")
                 .Bind(Save, "meta S")
@@ -863,7 +883,8 @@ public static class AppActions
                 .Bind(PreviousProjectWindow, "meta shift alt BACK_QUOTE");
         }
         return keymap
-            .Bind(Open, "control O")
+            .Bind(OpenSolution, "control shift O")
+            .Bind(OpenFile, "control O")
             .Bind(NewProject, "control shift N")
             .Bind(NewItem, "control N")
             .Bind(Save, "control S")
@@ -1002,7 +1023,8 @@ public static class AppActions
         if (OperatingSystem.IsMacOS())
         {
             return keymap
-                .Bind(Open, "meta O")
+                .Bind(OpenSolution, "control shift O")
+                .Bind(OpenFile, "meta O")
                 // VS Code's Ctrl+W, Switch Window; Cmd+Q is the application menu's Quit, as in the Visual Studio keymap.
                 .Bind(NextProjectWindow, "control W")
                 .Bind(PreviousProjectWindow, "meta alt shift BACK_QUOTE")
@@ -1118,7 +1140,8 @@ public static class AppActions
                 .Bind(RecentChanges, "alt shift C");
         }
         return keymap
-            .Bind(Open, "control O")
+            .Bind(OpenSolution, "control K , control O")
+            .Bind(OpenFile, "control O")
             // VS Code's Ctrl+W closes the editor here, its Switch Window macOS's Ctrl+W; Next Project Window has no key.
             .Bind(Save, "control S")
             .Bind(SaveAll, "control K , S")
@@ -1244,7 +1267,7 @@ public static class AppActions
         {
             // Cmd+Q, Exit's here, is the application menu's Quit, as in the other keymaps.
             return keymap
-                .Bind(Open, "control shift O")
+                .Bind(OpenSolution, "control shift O")
                 .Bind(NextProjectWindow, "meta alt BACK_QUOTE")
                 .Bind(PreviousProjectWindow, "meta alt shift BACK_QUOTE")
                 .Bind(SaveAll, "meta S")
@@ -1362,7 +1385,7 @@ public static class AppActions
                 .Bind(RecentChanges, "alt shift C");
         }
         return keymap
-            .Bind(Open, "control shift O")
+            .Bind(OpenSolution, "control shift O")
             .Bind(NextProjectWindow, "control alt CLOSE_BRACKET")
             .Bind(PreviousProjectWindow, "control alt OPEN_BRACKET")
             .Bind(SaveAll, "control S")

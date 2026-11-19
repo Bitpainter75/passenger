@@ -86,7 +86,7 @@ public sealed class CodeAssist
         CSharpAssist csharp = new(context, popups, completion, parameterInfo, navigation, actions, xaml);
         GDScriptAssist gdscript = new(context, completion, parameterInfo, navigation, actions);
         parameterInfo.Own = gdscript;
-        context.Languages = new LanguageAssists(new HttpAssist(context, navigation), new MSBuildAssist(context, popups, completion), xaml,
+        context.Languages = new LanguageAssists(new LinkAssist(context), new HttpAssist(context, navigation), new MSBuildAssist(context, popups, completion), xaml,
             new ComposeAssist(context, popups, completion, navigation, actions), new SettingsAssist(context, completion, navigation),
             new CssClassAssist(context, completion, navigation), gdscript, new WebAssist(context, popups, completion, parameterInfo, actions),
             new GodotShaderAssist(context, completion, navigation, csharp), new GodotAssist(context, popups, completion, navigation, actions, csharp),
@@ -115,6 +115,15 @@ public sealed class CodeAssist
                 }
             };
             editor.HoverEnded += (_, _) => quickInfo.PointerLeft();
+            editor.ClickReach = (action, offset, cancel) => editor == Editor && action == AppActions.GoToDeclaration ? DeclaredFromAsync(offset, cancel) : NoReach;
+            editor.FormatsTyped = typed => editor == Editor && context.Languages.CSharp.FormatsTyped(typed);
+            editor.LeftBlock += (_, closer) =>
+            {
+                if (editor == Editor)
+                {
+                    context.Languages.CSharp.FormatLeft(closer);
+                }
+            };
             editor.Typed += (_, text) =>
             {
                 if (editor == Editor)
@@ -145,6 +154,24 @@ public sealed class CodeAssist
             CloseAll();
             popups.FollowLayer();
         };
+    }
+
+    /// <summary>A diff's side that is an open file's own text answers the pointer resting on it as the file's editor does,
+    /// with the card of what is there, while <paramref name="worked"/> says its diff is the one worked in; on
+    /// <paramref name="layer"/>, over the diff's own window, else over the editors. A side of another version is never
+    /// given: no language server has read it, so it shows no card.</summary>
+    public void HoverIn(CodeEditor side, OpenDocument file, Func<bool> worked, Canvas? layer)
+    {
+        side.Hovered += (_, e) =>
+        {
+            if (worked() && !quickInfo.ValuesInUse && e.Annotation is null && e.Hint is null)
+            {
+                IdeErrors.Observe(quickInfo.ShowIn(side, file, layer, e.Offset, e.Point));
+            }
+        };
+        side.HoverEnded += (_, _) => quickInfo.PointerLeft();
+        side.Typed += (_, _) => quickInfo.LetGo(side, null);
+        side.DetachedFromVisualTree += (_, _) => quickInfo.LetGo(side, layer);
     }
 
     /// <summary>A place to go: a file and a line and column (from zero).</summary>
@@ -193,6 +220,19 @@ public sealed class CodeAssist
     {
         add => context.Browsed += value;
         remove => context.Browsed -= value;
+    }
+
+    /// <summary>A link to follow, an address written in a file's comment or string: what it opens, its target.</summary>
+    public event EventHandler<object>? FollowLink
+    {
+        add => context.Followed += value;
+        remove => context.Followed -= value;
+    }
+
+    /// <summary>The keys that follow a link (Go to Declaration's), as a tip shows them; null with none.</summary>
+    public Func<string?> FollowKeys
+    {
+        set => context.FollowKeys = value;
     }
 
     /// <summary>A sound a card's Play asks for.</summary>
@@ -462,6 +502,13 @@ public sealed class CodeAssist
         set => completion.CallsMethods = value;
     }
 
+    /// <summary>Whether C# is formatted as it is typed, at a statement's ';' and a block's '}', as Settings leaves it.</summary>
+    public bool FormatOnType
+    {
+        get => context.Languages.CSharp.FormatsOnType;
+        set => context.Languages.CSharp.FormatsOnType = value;
+    }
+
     /// <summary>The XAML code style as Settings leaves it, which a file's .editorconfig overrides.</summary>
     public XamlFormatSettings XamlFormat
     {
@@ -514,7 +561,7 @@ public sealed class CodeAssist
         registry.Add(new IdeAction(AppActions.QuickFix, "Show Context Actions", "Code", context => IdeErrors.Observe(actions.ShowFixes(AppActions.QuickFix)))
         {
             WhyNot = context => (actions.OwnFixes(context.File, context.Editor.Selections.Primary.Caret).Count > 0 ? null : WhyNot(context, server: true, xaml: true))
-                ?? (context.File is { } shown && context.Editor.IsReadOnly ? Refusals.ReadOnly(shown.Name) : null),
+                ?? context.ReadOnlyWhy,
             Menus = [new("Code", 0, 1)],
         });
         // Generate: the server's actions that write code for the type (constructors, equality, members, overrides).
@@ -525,7 +572,7 @@ public sealed class CodeAssist
         registry.Add(new IdeAction(AppActions.Reformat, "Reformat Code", "Code", context => IdeErrors.Observe(actions.Reformat()))
         {
             WhyNot = context => (context.File is { } file && (web.PrettierReformats(file) || Godot.GodotScriptTypes.IsScript(file.Path) || Passenger.App.Bdd.FeatureChecks.IsFeature(file.Path))
-                ? null : WhyNot(context, server: true, markup: true)) ?? (context.File is { } shown && context.Editor.IsReadOnly ? Refusals.ReadOnly(shown.Name) : null),
+                ? null : WhyNot(context, server: true, markup: true)) ?? context.ReadOnlyWhy,
             Menus = [new("Code", 1, 0)],
         });
         web.AddLintingActions(registry);
@@ -540,7 +587,7 @@ public sealed class CodeAssist
         registry.Add(new IdeAction(AppActions.OrderScriptParts, "Order Script's Parts", "Code", context => IdeErrors.Observe(OrderScriptParts()))
         {
             WhyNot = context => context.File is not { } file ? Refusals.NoFile : !Godot.GodotScriptTypes.IsScript(file.Path) ? "The file is not a GDScript"
-                : context.Editor.IsReadOnly ? Refusals.ReadOnly(file.Name) : null,
+                : context.ReadOnlyWhy,
             Menus = [new("Code", 1, 3)],
         });
         Code(AppActions.RefactorThis, "Refactor This…", context => IdeErrors.Observe(actions.ShowFixes(AppActions.RefactorThis, a => a.Kind?.StartsWith("refactor", StringComparison.Ordinal) == true, "Refactor This")),
@@ -578,7 +625,7 @@ public sealed class CodeAssist
             Menus = [new("Refactor", 4, 1)],
         });
         Code(AppActions.GoToDeclaration, "Go to Declaration", context => IdeErrors.Observe(navigation.GoToDefinition(Caret)), new("Navigate", 2, 0), xaml: true, msbuild: true, http: true,
-            godot: true, shader: true, gherkin: true);
+            godot: true, shader: true, gherkin: true, link: true);
         Code(AppActions.DerivedSymbols, "Derived Symbols", context => IdeErrors.Observe(navigation.GoToDerivedSymbols(Caret)), new("Navigate", 2, 1));
         Code(AppActions.GoToImplementation, "Go to Implementation", context => IdeErrors.Observe(navigation.GoToImplementation(Caret)), new("Navigate", 2, 2));
         Code(AppActions.GoToTypeDeclaration, "Go to Type Declaration", context => IdeErrors.Observe(navigation.GoToTypeDeclaration(Caret)), new("Navigate", 2, 3));
@@ -603,21 +650,36 @@ public sealed class CodeAssist
 
         // One that edits the file shown (writes) greys on a read-only one, a file the language server serves too.
         void Code(string id, string title, Action<ActionContext> run, MenuPlace menu, bool server = true, bool syntax = false, bool xaml = false, bool markup = false, bool msbuild = false,
-            bool http = false, bool godot = false, bool shader = false, bool gdscript = false, bool gherkin = false, bool writes = false) =>
+            bool http = false, bool godot = false, bool shader = false, bool gdscript = false, bool gherkin = false, bool writes = false, bool link = false) =>
             registry.Add(new IdeAction(id, title, "Code", run)
             {
                 // .http requests, Godot scenes' paths, shaders' names and features' steps are read with no language server.
                 WhyNot = action => (http && this.context.Languages.Http.IsHttpFile(action.File) || godot && IsGodotScene(action.File)
                     || shader && action.File is { } file && Godot.GodotShaderMarks.IsShader(file.Path)
                     || gherkin && action.File is { } feature && Passenger.App.Bdd.FeatureChecks.IsFeature(feature.Path) ? null
-                    : gdscript && CodeActions.IsGDScript(action.File) ? (action.Editor.IsReadOnly ? Refusals.ReadOnly(action.File!.Name) : null)
-                    : WhyNot(action, server, syntax, xaml, markup, msbuild))
-                    ?? (writes && action.File is { } shown && action.Editor.IsReadOnly ? Refusals.ReadOnly(shown.Name) : null),
+                    : gdscript && CodeActions.IsGDScript(action.File) ? action.ReadOnlyWhy
+                    : WhyNot(action, server, syntax, xaml, markup, msbuild) is { } why && !(link && action.File is not null && action.Editor.LinkOn(action.Editor.Selections.Primary.Caret) is not null) ? why : null)
+                    ?? (writes ? action.ReadOnlyWhy : null),
                 Menus = [menu],
             });
     }
 
     private int Caret => Editor.Selections.Primary.Caret;
+
+    private static readonly Task<TextRange?> NoReach = Task.FromResult<TextRange?>(null);
+
+    /// <summary>What Go to Declaration would go from at an offset of the file shown, as its editor draws it: the name or link
+    /// the file's language declares somewhere (<see cref="LanguageAssists.DeclaresAsync"/>), else a link there, which it
+    /// follows; null where it goes nowhere, or the pointer moved on before the language answered.</summary>
+    private async Task<TextRange?> DeclaredFromAsync(int offset, CancellationToken cancel)
+    {
+        if (context.Editors.Active is not { } shown || !ReferenceEquals(shown.Text, Editor.Document))
+        {
+            return null;
+        }
+        bool declares = await context.Languages.DeclaresAsync(shown, offset);
+        return !cancel.IsCancellationRequested && (declares || Editor.LinkOn(offset) is not null) ? Editor.TokenAt(offset) : null;
+    }
 
     /// <summary>Order Script's Parts on the GDScript shown, as one command of Undo, said in the status bar.</summary>
     private async Task OrderScriptParts()
@@ -645,7 +707,7 @@ public sealed class CodeAssist
     /// <summary>Why Rename cannot run at the editor's caret, a file shown read-only included; null when it can.</summary>
     public string? WhyNotRename(ActionContext context) =>
         (IsGodotScene(context.File) || context.File is { } file && Passenger.App.Bdd.FeatureChecks.IsFeature(file.Path) ? null : WhyNot(context, server: true, xaml: true))
-            ?? (context.File is { } shown && context.Editor.IsReadOnly ? Refusals.ReadOnly(shown.Name) : null);
+            ?? context.ReadOnlyWhy;
 
     /// <summary>Whether a file is a text scene or resource of a Godot project, which Passenger reads itself.</summary>
     private bool IsGodotScene(OpenDocument? file) =>
@@ -656,8 +718,7 @@ public sealed class CodeAssist
     private string? WhyNotXaml(ActionContext action) =>
         action.File is null ? Refusals.NoFile
         : context.XamlOf(action.File) is not { } markup || (markup.Loaded.IsCompleted && !markup.IsLoaded) ? "The file is not XAML of an Avalonia or WPF project"
-        : action.Editor.IsReadOnly ? Refusals.ReadOnly(action.File.Name)
-        : null;
+        : action.ReadOnlyWhy;
 
     /// <summary>Why an action cannot run: no file; for one that asks the server, none for the file (a source generator's
     /// code copied, which it has not); for one that edits by the file's syntax, a file not C# or one that cannot be edited.
@@ -665,11 +726,11 @@ public sealed class CodeAssist
     /// answer those they say they do.</summary>
     private string? WhyNot(ActionContext action, bool server, bool syntax = false, bool xaml = false, bool markup = false, bool msbuild = false) =>
         action.File is null ? Refusals.NoFile
-        : markup && XamlService.IsXaml(action.File.Path) ? (action.Editor.IsReadOnly ? Refusals.ReadOnly(action.File.Name) : null)
+        : markup && XamlService.IsXaml(action.File.Path) ? action.ReadOnlyWhy
         : xaml && context.XamlOf(action.File) is { } markupFile && (markupFile.IsLoaded || !markupFile.Loaded.IsCompleted) ? null
         : msbuild && context.MSBuildOf(action.File) is not null ? null
         : syntax && action.File.Syntax is null ? "The file is not C#"
-        : syntax && action.Editor.IsReadOnly ? Refusals.ReadOnly(action.File.Name)
+        : syntax && action.ReadOnlyWhy is { } readOnly ? readOnly
         : !server || context.Current is not null ? null
         : context.CSharp is null ? Refusals.NoCSharp
         : GeneratedCode.IsCopy(action.File.Path) ? Refusals.Generated(action.File.Name)

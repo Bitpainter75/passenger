@@ -62,6 +62,44 @@ public sealed class AspireStandInTests(StandInAppHost project) : IClassFixture<S
         static bool Found(MainWindow window, string file) => window.Configurations.Any(c => c.Aspire && PathNames.Same(c.Project, file));
     }
 
+    /// <summary>A single-file AppHost brought in with its folder by another program is read only once that folder has stood
+    /// still: moved out again before then it is never read, which on Windows would refuse that move, and brought in to stay
+    /// it is found once the folder has stood still.</summary>
+    [AvaloniaFact]
+    public void A_single_file_AppHost_that_came_with_its_folder_is_read_only_once_the_folder_has_stood_still()
+    {
+        project.Reset();
+        string sdk = $"#:sdk Aspire.AppHost.Sdk@{AspireApp.TemplatesVersion}\nvar builder = DistributedApplication.CreateBuilder(args);\nbuilder.Build().Run();\n";
+        string elsewhere = TestFolders.Create("elsewhere-");
+        TestFolders.Write(elsewhere, "Moving/apphost.cs", sdk);
+        string inside = Path.Combine(project.Folder, "Moving");
+        string appHost = PathNames.Canonical(Path.Combine(inside, "apphost.cs"));
+        string relative = Path.Combine("Moving", "apphost.cs");
+        MainWindow window = project.Open(null, languageServer: false);
+        try
+        {
+            using (window.Session.AspireFiles.HoldArrivals())
+            {
+                Directory.Move(Path.Combine(elsewhere, "Moving"), inside);
+                Ui.WaitFor(() => window.FileIndex.Files.Contains(relative), "the folder moved in in Go to File");
+                Assert.False(Found(window, appHost), "The single-file AppHost that came was read before its folder stood still");
+                Directory.Move(inside, Path.Combine(elsewhere, "Moved"));
+                Ui.WaitFor(() => !window.FileIndex.Files.Contains(relative), "the folder moved out gone from Go to File");
+            }
+            Ui.Settle();
+            Assert.False(Found(window, appHost), "A single-file AppHost moved out before its folder stood still was found all the same");
+
+            Directory.Move(Path.Combine(elsewhere, "Moved"), inside);
+            Ui.WaitFor(() => Found(window, appHost), "the single-file AppHost brought in to stay, once its folder stood still");
+        }
+        finally
+        {
+            window.Close();
+        }
+
+        static bool Found(MainWindow window, string file) => window.Configurations.Any(c => c.Aspire && PathNames.Same(c.Project, file));
+    }
+
     /// <summary>An AppHost whose launch profile serves HTTPS, with no trusted development certificate, has the person
     /// asked once before it starts (dev-certs is <see cref="DevCerts"/>' stand-in, which trusts nothing on this
     /// machine): Stop closes the question and starts nothing; Run over HTTP has it serve HTTP where it would have
@@ -599,7 +637,7 @@ public sealed class AspireStandInTests(StandInAppHost project) : IClassFixture<S
         };
         // As the AppHost sends arguments one of which it marks sensitive: both lists marked sensitive, the marks numbers.
         backend.PushResource(WithArguments(service, ["--api-key", "arg-never-shown", "--port", "5310", "positional-never-shown"], [0, 0, 0, 0, 1], marked: true));
-        backend.PushResource(new Resource { Name = "cache", DisplayName = "cache", Uid = "cache", ResourceType = "Container", State = "Starting" });
+        backend.PushResource(new Resource { Name = "cache", DisplayName = "cache", Uid = "cache", ResourceType = "Container", ResourceTypeDisplayName = "Redis Insight", State = "Starting" });
         MainWindow window = OpenRunning(backend);
         try
         {
@@ -619,6 +657,9 @@ public sealed class AspireStandInTests(StandInAppHost project) : IClassFixture<S
             Ui.WaitFor(() => details.Resource?.Name == "apiservice", "the API's details");
             string[] shown = [.. details.GetVisualDescendants().OfType<SelectableTextBlock>().Select(text => text.Text ?? string.Empty)];
             Assert.Contains("hello-shown", shown);
+            // A type in the AppHost's words for people where it gives them (the cache's), else by its type's name (the API's).
+            Assert.Contains("Project", shown);
+            Assert.Contains(Row(window, "cache").GetVisualDescendants().OfType<TextBlock>(), text => text.IsEffectivelyVisible && text.Text == "Redis Insight");
             Assert.Contains(Passenger.App.Containers.ContainerSecrets.Masked, shown);
             Assert.DoesNotContain(shown, text => text.Contains("never-shown", StringComparison.Ordinal));
             Assert.Contains(shown, text => text.StartsWith("postgres://app:", StringComparison.Ordinal) && text.EndsWith("@db/shop", StringComparison.Ordinal));
@@ -869,6 +910,79 @@ public sealed class AspireStandInTests(StandInAppHost project) : IClassFixture<S
             window.Close();
             Ui.Await(Complete(backend.DisposeAsync().AsTask()), "the stand-in resource service to stop");
         }
+    }
+
+    /// <summary>A service an Aspire 17 AppHost adds by a path outside the open folder (AddDotnetProject, which no ProjectReference
+    /// backs) is lent the folder's trust as a solution's project beside it is, while the window holds it: its start, as DCP asks,
+    /// runs it. One the AppHost names in a folder holding the open folder is lent nothing: its start is refused, the status and the
+    /// AppHost's console saying why. The window is open on the AppHost's own folder, the stand-in's folder holding it.</summary>
+    [AvaloniaFact]
+    public void A_service_an_AppHost_adds_by_path_beside_the_open_folder_starts_lent_its_trust_and_one_above_it_is_refused_saying_why()
+    {
+        project.Reset();
+        string beside = PathNames.Canonical(TestFolders.Create("aspire-beside-"));
+        string service = PathNames.Canonical(TestFolders.Write(beside, "Beside.Api/Beside.Api.csproj", TestProjects.Console()));
+        TestFolders.Write(beside, "Beside.Api/Program.cs", "System.Console.WriteLine(\"The service beside is up\");\nSystem.Threading.Thread.Sleep(System.Threading.Timeout.Infinite);\n");
+        ChildResult built = Ui.Await(ChildProcesses.RunAsync(ChildProcesses.DotnetCommand(["build", service, "-nologo", "-v:q"]), limit: TimeSpan.FromMinutes(3).Scaled()),
+            "the service beside's build", TimeSpan.FromMinutes(3));
+        Assert.True(built.Succeeded, $"The service beside did not build: {built.Output}{built.Error}");
+        string serviceFolder = Path.GetDirectoryName(service)!;
+        string appHost = PathNames.Canonical(project.PathOf(StandInAppHost.Name));
+        string above = PathNames.Canonical(project.Write("Above.Api.csproj", TestProjects.Console()));
+        project.Write($"{StandInAppHost.Name}/Services.cs", $$"""
+            // The services an Aspire 17 AppHost adds by path, as its builder's calls name them.
+            internal static class StandInServices
+            {
+                internal static void Add(StandInBuilder builder)
+                {
+                    builder.AddDotnetProject("beside", "{{PathNames.Route(service, appHost)}}");
+                    builder.AddDotnetProject("above", "../Above.Api.csproj");
+                }
+            }
+
+            internal sealed class StandInBuilder
+            {
+                internal StandInBuilder AddDotnetProject(string name, string path) => this;
+            }
+
+            """);
+        // Trusted only as the open folder lends it, in a process that trusts every other folder.
+        using IDisposable asked = WorkspaceTrust.Ask(serviceFolder);
+        AspireInteractionHost backend = Ui.Await(AspireInteractionHost.StartAsync(project.KeyFile), "the stand-in resource service");
+        project.Serve(backend);
+        MainWindow window = Ui.OpenFolder(appHost, languageServer: false, autosaves: false);
+        System.Net.WebSockets.ClientWebSocket? subscribed = null;
+        try
+        {
+            Ui.WaitFor(() => window.Session.Reached.Contains(serviceFolder, PathNames.Comparer),
+                () => $"the folder of the service the AppHost names beside the open folder to be reached; it reaches {string.Join(", ", window.Session.Reached)}");
+            Assert.True(WorkspaceTrust.Trusts(service), "The service the AppHost names beside the open folder was not lent its trust");
+            Assert.DoesNotContain(PathNames.Canonical(project.Folder), window.Session.Reached);
+            Ui.WaitFor(() => window.Configurations.Any(configuration => configuration.Name == StandInAppHost.Configuration), "the stand-in AppHost's Aspire configuration");
+            Assert.True(window.SelectConfiguration(StandInAppHost.Configuration));
+            Ui.Launched(window, window.RunAsync(), "the stand-in AppHost to come up");
+            Ui.WaitFor(() => backend.Connected.Task.IsCompleted, $"the window to connect to the stand-in AppHost's resource service ({window.Status})");
+
+            (subscribed, System.Net.HttpStatusCode refused) = project.AskToStartApi("above", projectPath: above);
+            Assert.False((int)refused is >= 200 and < 300, "The IDE started a service in a folder holding the open folder, which it lends no trust");
+            string why = Refusals.NotLent("Above.Api", PathNames.Canonical(project.Folder), Unlent.HoldsOpen);
+            Ui.WaitFor(() => window.Status == why, () => $"the status to say why the service above was refused; it says {window.Status}");
+            Assert.Contains(why, window.AspireRuntime.LastAppConsole?.Document.Snapshot.ToString() ?? string.Empty, StringComparison.Ordinal);
+
+            (System.Net.WebSockets.ClientWebSocket unsubscribed, System.Net.HttpStatusCode answer) = Ui.Await(Waiting.Apart(() =>
+                project.StartApiAsync("beside", subscribe: false, projectPath: service)), "the IDE's answer to the start of the service beside");
+            unsubscribed.Dispose();
+            Assert.True((int)answer is >= 200 and < 300, $"The IDE refused the start of the service the AppHost names beside the open folder: {answer} ({window.Status})");
+            Ui.WaitFor(() => window.AspireRuntime.Apps.Single().Services.Any(s => PathNames.Same(s.Project, service) && s.ProcessId is > 0),
+                $"the service beside started as DCP asked ({window.Status})");
+        }
+        finally
+        {
+            window.Close();
+            subscribed?.Dispose();
+            Ui.Await(Complete(backend.DisposeAsync().AsTask()), "the stand-in resource service to stop");
+        }
+        Ui.WaitFor(() => !WorkspaceTrust.Trusts(service), "the service beside to be no longer trusted once the window that lent it closed");
     }
 
     /// <summary>Profile of an AppHost the window runs asks which of its running .NET services to profile, in a dialog held to
@@ -2765,10 +2879,10 @@ public sealed class AspireStandInTests(StandInAppHost project) : IClassFixture<S
     }
 
     /// <summary>Discover asks the window's aspire CLI (a stand-in's, <see cref="MainWindow.AspireCliFrom"/>) its version first:
-    /// within 13.x from 13.6.0, any patch, it lists the AppHosts the CLI finds; below it, or another major, it says why and
-    /// lists none.</summary>
+    /// within 13.x from 13.6.0, any patch, or 17.x, it lists the AppHosts the CLI finds; below it, or another major, it says
+    /// why and lists none.</summary>
     [AvaloniaFact]
-    public void Discover_takes_a_CLI_of_13_6_or_later_within_13_and_says_why_it_will_not_take_another()
+    public void Discover_takes_a_CLI_of_13_6_or_later_within_13_or_of_17_and_says_why_it_will_not_take_another()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "The stand-in aspire CLI is a shell script, and Windows runs no shell script as a program");
         project.Reset();
@@ -2781,7 +2895,8 @@ public sealed class AspireStandInTests(StandInAppHost project) : IClassFixture<S
         try
         {
             foreach ((string version, string? refusal) in ((string, string?)[])[("13.6.0", null), ("13.6.3", null), ("13.7.0", null),
-                ("13.5.4", "below the minimum supported version 13.6.0"), ("14.0.0", "uses an unverified protocol major")])
+                ("17.0.0", null), ("17.1.2", null), ("13.5.4", "below the minimum supported version 13.6.0"),
+                ("14.0.0", "uses an unverified protocol major"), ("18.0.0", "uses an unverified protocol major")])
             {
                 File.WriteAllText(Path.Combine(Path.GetDirectoryName(cli)!, "version"), version + "\n");
                 FindAction(window, "Discover Aspire AppHosts");
@@ -3196,12 +3311,11 @@ public sealed class AspireStandInTests(StandInAppHost project) : IClassFixture<S
             "the prompt the AppHost completed to close");
     }
 
-    /// <summary>Select All (the headless platform's, Ctrl+A, on every system) and typing, pressed without waiting for the window
-    /// to settle, since a held answer holds it.</summary>
+    /// <summary>Select All (the system's command key with A) and typing, pressed without waiting for the window to settle,
+    /// since a held answer holds it.</summary>
     private static void ReplaceDuringWork(TopLevel window, string text)
     {
-        window.KeyPress(Avalonia.Input.Key.A, Avalonia.Input.RawInputModifiers.Control, Avalonia.Input.PhysicalKey.None, null);
-        window.KeyRelease(Avalonia.Input.Key.A, Avalonia.Input.RawInputModifiers.Control, Avalonia.Input.PhysicalKey.None, null);
+        Ui.Press(window, Ui.Command("A"), settle: false);
         window.KeyTextInput(text);
     }
 

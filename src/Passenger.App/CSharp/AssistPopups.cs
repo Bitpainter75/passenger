@@ -25,7 +25,7 @@ internal sealed class InfoCard : Border, IHoverCard, IHeldToEditor, IHeardPopup
     /// <summary>The most rows of a value the card shows before it scrolls.</summary>
     private const int MostRows = 16;
 
-    private readonly StackPanel parts = new() { Spacing = 6 };
+    private readonly StackPanel parts = new() { Spacing = Gaps.Small };
 
     /// <summary>The width a card of values has taken: it only grows while it shows them, so a row closed never narrows it
     /// under the pointer.</summary>
@@ -38,7 +38,7 @@ internal sealed class InfoCard : Border, IHoverCard, IHeldToEditor, IHeardPopup
     {
         Called = called;
         Classes.Add(StyleClasses.Popup);
-        Padding = new Thickness(10, 8);
+        Padding = PopupFrame.CardInset;
         MaxWidth = WordsWidth;
         Child = parts;
         IsHitTestVisible = false;
@@ -164,7 +164,7 @@ internal sealed class InfoCard : Border, IHoverCard, IHeldToEditor, IHeardPopup
                 parts.Children.Add(new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
-                    Spacing = 6,
+                    Spacing = Gaps.Small,
                     Children = { play, new TextBlock { Text = preview.Named, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center, Foreground = Brush(TokenKeys.TextMuted) } },
                 });
                 Usable = true;
@@ -292,7 +292,7 @@ internal sealed class CompletionPopup : Border, IHeardPopup
     /// <summary>What the wheel has turned short of a whole row.</summary>
     private double turned;
 
-    /// <summary>The item the selection was last said to be on, so a filter that leaves it there says nothing.</summary>
+    /// <summary>The item the selection was last said to be on, so a filter or an answer that leaves it there says nothing.</summary>
     private Lsp.CompletionItem? told;
 
     /// <summary>Whether the list is being laid out ahead (<see cref="LayOutAhead"/>), its choice no one's to hear of.</summary>
@@ -307,7 +307,7 @@ internal sealed class CompletionPopup : Border, IHeardPopup
         Classes.Add(StyleClasses.Popup);
         MinWidth = LeastWidth;
         MaxWidth = MostWidth;
-        Padding = new Thickness(0, 4);
+        Padding = ListRow.PopupList;
         // Its places stand in a plain panel, which lets go of none it hides; its own scrolling never moves them.
         List = new ListBox
         {
@@ -366,7 +366,8 @@ internal sealed class CompletionPopup : Border, IHeardPopup
         MaxWidth = Math.Min(MostWidth, Math.Max(0, room));
     }
 
-    /// <summary>The selection moved to another item: another row chosen, or the row chosen showing another item.</summary>
+    /// <summary>The selection moved to another item (<see cref="Lsp.CompletionItem.Same"/>): another row chosen, or the row
+    /// chosen showing another item; never the same item a list answered again lists anew.</summary>
     public event EventHandler? SelectedChanged;
 
     /// <summary>A XAML colour's own swatch for its badge, null for an item badged by its kind.</summary>
@@ -379,37 +380,42 @@ internal sealed class CompletionPopup : Border, IHeardPopup
 
     public IReadOnlyList<CompletionRow> Rows => rows;
 
-    /// <summary>The list's rows, the first chosen, or the row of <paramref name="stays"/> where it is among them, scrolled
-    /// only as far as shows the one chosen; rows of the name already shown (<paramref name="sameName"/>: a list grown by
-    /// items as they came, or answered again) that the person had scrolled away from the row chosen keep showing the rows
-    /// scrolled to, wherever they now stand.</summary>
-    public void Show(IReadOnlyList<CompletionRow> rows, Lsp.CompletionItem? stays = null, bool sameName = false)
+    /// <summary>The list's rows, the first chosen, scrolled only as far as shows the one chosen. Rows of the name already
+    /// shown (<paramref name="sameName"/>: a list grown by items as they came, or answered again) keep the item chosen where
+    /// it is among them, and, where the person had scrolled away from it, the rows scrolled to, wherever they now stand.</summary>
+    public void Show(IReadOnlyList<CompletionRow> rows, bool sameName = false)
     {
+        Lsp.CompletionItem? stays = sameName ? Selected?.Item : null;
         Lsp.CompletionItem? first = sameName && chosen >= 0 && (chosen < top || chosen >= top + Shown) && top < this.rows.Count ? this.rows[top].Item : null;
         this.rows = rows;
         chosen = rows.Count > 0 ? 0 : -1;
-        for (int i = 0; stays is not null && i < rows.Count; i++)
+        if (stays is not null && IndexOf(stays) is >= 0 and int kept)
         {
-            if (ReferenceEquals(rows[i].Item, stays))
-            {
-                chosen = i;
-                break;
-            }
+            chosen = kept;
         }
         if (first is null)
         {
             Place();
             return;
         }
-        for (int i = 0; i < rows.Count; i++)
+        if (IndexOf(first) is >= 0 and int scrolled)
         {
-            if (ReferenceEquals(rows[i].Item, first))
-            {
-                top = i;
-                break;
-            }
+            top = scrolled;
         }
         ScrollTo(top, fromBar: false);
+    }
+
+    /// <summary>Where an item stands among the rows, however many answers ago it was listed; -1 where it is not.</summary>
+    private int IndexOf(Lsp.CompletionItem item)
+    {
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (Lsp.CompletionItem.Same(rows[i].Item, item))
+            {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /// <summary>The list laid out once before it is first shown, so its first list costs what any other does: the rows'
@@ -518,9 +524,10 @@ internal sealed class CompletionPopup : Border, IHeardPopup
             return;
         }
         Lsp.CompletionItem? now = Selected?.Item;
-        if (!ReferenceEquals(now, told))
+        bool same = Lsp.CompletionItem.Same(now, told);
+        told = now;
+        if (!same)
         {
-            told = now;
             SelectedChanged?.Invoke(this, EventArgs.Empty);
         }
     }
@@ -553,7 +560,7 @@ internal sealed class CompletionRowView : DockPanel
             Width = 16,
             Height = 16,
             Classes = { StyleClasses.KindBadge },
-            Margin = new Thickness(0, 0, 8, 0),
+            Margin = new Thickness(0, 0, Gaps.Normal, 0),
             VerticalAlignment = VerticalAlignment.Center,
             Child = letter,
         };
@@ -570,7 +577,7 @@ internal sealed class CompletionRowView : DockPanel
         {
             Foreground = InfoCard.Brush(TokenKeys.TextMuted),
             FontSize = 12,
-            Margin = new Thickness(12, 0, 4, 0),
+            Margin = ListRow.Detail,
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxWidth = 200,
             HorizontalAlignment = HorizontalAlignment.Right,
@@ -623,7 +630,7 @@ internal sealed class ChoicePopup : Border, IHeardPopup
         Classes.Add(StyleClasses.Popup);
         MinWidth = 320;
         MaxWidth = 760;
-        Padding = new Thickness(0, 6);
+        Padding = ListRow.PopupList;
         list = new ListBox
         {
             Classes = { StyleClasses.Tree },
@@ -636,10 +643,10 @@ internal sealed class ChoicePopup : Border, IHeardPopup
         ReusedRows.Use(list, () => ChoiceRow(numbered));
         Child = new StackPanel
         {
-            Spacing = 4,
+            Spacing = Gaps.Tight,
             Children =
             {
-                new TextBlock { Text = title, Classes = { StyleClasses.PopupTitle }, Margin = new Thickness(12, 2, 12, 2) },
+                new TextBlock { Text = title, Classes = { StyleClasses.PopupTitle }, Margin = new Thickness(Gaps.Wide, Gaps.Hair) },
                 list,
             },
         };
@@ -685,7 +692,7 @@ internal sealed class ChoicePopup : Border, IHeardPopup
         TextBlock digit = new TextBlock { Width = 10, IsVisible = numbered, VerticalAlignment = VerticalAlignment.Center }.InCodeFont();
         TextBlock text = new() { VerticalAlignment = VerticalAlignment.Center };
         TextBlock detail = new() { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 460, VerticalAlignment = VerticalAlignment.Center };
-        StackPanel row = new() { Orientation = Orientation.Horizontal, Spacing = 10, Height = ListRow.Height, Children = { digit, text, detail } };
+        StackPanel row = new() { Orientation = Orientation.Horizontal, Spacing = Gaps.Normal, Height = ListRow.Height, Children = { digit, text, detail } };
         AutomationProperties.SetLabeledBy(row, text);
         string? detailFont = null;
         return row.Showing<Choice>(choice =>
@@ -733,13 +740,13 @@ internal sealed class RenameBox : Border, IHeardPopup
     {
         Called = caption;
         Classes.Add(StyleClasses.Popup);
-        Padding = new Thickness(8, 6);
+        Padding = new Thickness(Gaps.Normal, Gaps.Small);
         name = new TextBox { Text = current, Classes = { StyleClasses.Search }, MinWidth = 220 }.InCodeFont();
         TextBlock captioned = new() { Text = caption, Classes = { StyleClasses.Muted }, FontSize = 11 };
         AutomationProperties.SetLabeledBy(name, captioned);
         body = new StackPanel
         {
-            Spacing = 4,
+            Spacing = Gaps.Tight,
             Children =
             {
                 captioned,

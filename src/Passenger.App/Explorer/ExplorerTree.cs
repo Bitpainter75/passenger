@@ -1062,9 +1062,18 @@ public sealed class ExplorerNode : Observable, ITreeRow
     /// every other row.</summary>
     public SdkFolder? SdkFolder { get; init; }
 
-    /// <summary>Why Rename, Delete and Cut leave the row where it is: a folder the SDK reads by its name; null for every
-    /// other row.</summary>
-    public string? Kept => SdkFolder is { } read ? Refusals.ReadBySdk(read, Name) : null;
+    /// <summary>Why Rename, Delete, Cut and a drag leave the row where it is: a folder the SDK reads by its name, or a file
+    /// or folder of a NuGet package, every project's copy; null for every other row.</summary>
+    public string? Kept => SdkFolder is { } read ? Refusals.ReadBySdk(read, Name)
+        : Kind is NodeKind.File or NodeKind.Folder && Path is { } path && Packages.PackageFolders.PackageOf(path) is { } package
+            ? Refusals.OfPackage(Name, package, Kind == NodeKind.Folder)
+        : null;
+
+    /// <summary>Why nothing is pasted, dropped or made new in a folder on disk: a NuGet package's, every project's copy;
+    /// null where it may be.</summary>
+    public static string? KeptOut(string folder) => Packages.PackageFolders.PackageIn(folder) is { } package
+        ? Refusals.OfPackage(System.IO.Path.GetFileName(folder), package, folder: true)
+        : null;
 
     /// <summary>Cut and waiting to be pasted, which dims it.</summary>
     public bool IsCut
@@ -1180,7 +1189,7 @@ public sealed class ExplorerNode : Observable, ITreeRow
     public bool IsVcsUnversioned => change is ChangeKind.Unversioned;
     public bool IsVcsConflicted => change is ChangeKind.Conflicted;
 
-    public Thickness Indent => new(Depth * 16, 0, 0, 0);
+    public Thickness Indent => new(Depth * Gaps.Indent, 0, 0, 0);
     public double Opacity => IsDimmed || IsCut ? 0.55 : 1;
     public Geometry Icon => FileIcons.For(this);
     public IBrush IconBrush => FileIcons.BrushFor(this);

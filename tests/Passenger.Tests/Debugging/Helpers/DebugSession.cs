@@ -25,6 +25,7 @@ public sealed class DebugSession : IAsyncDisposable
     private readonly bool terminateDebuggee;
     private readonly Channel<(string Name, JsonElement Body)> events = Channel.CreateUnbounded<(string, JsonElement)>();
     private readonly TaskCompletionSource initialized = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<int> launched = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>The adapter's latest events and standard error, which a wait that fails quotes.</summary>
     private readonly Queue<string> heard = new();
@@ -75,6 +76,10 @@ public sealed class DebugSession : IAsyncDisposable
             {
                 initialized.TrySetResult();
             }
+            else if (name == DapEvents.Process && body.ValueKind == JsonValueKind.Object && body.TryGetProperty("systemProcessId", out JsonElement id) && id.TryGetInt32(out int process))
+            {
+                launched.TrySetResult(process);
+            }
             else if (name is DapEvents.Stopped or DapEvents.Breakpoint or DapEvents.Output or DapEvents.Exited or DapEvents.Terminated)
             {
                 events.Writer.TryWrite((name, body.Clone()));
@@ -84,6 +89,9 @@ public sealed class DebugSession : IAsyncDisposable
     }
 
     public DapConnection Connection { get; }
+
+    /// <summary>The process the adapter started, as its process event names it.</summary>
+    public Task<int> LaunchedProcess => launched.Task;
 
     /// <summary>The adapter with DebuggableConsoleApp started for it to attach to; suspended, the
     /// program waits at startup until the attach lets it go, in configurationDone. The program has
@@ -432,6 +440,39 @@ public sealed class DebugSession : IAsyncDisposable
 
 
 
+    /// <summary>The next stop, or null where the session ends first, with what the program wrote to its standard output
+    /// meanwhile: for a step after which the program is to run on to its end.</summary>
+    public async Task<(StoppedEvent? Stop, string Output)> WaitForStopOrEnd()
+    {
+        using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        limit.CancelAfter(EventLimit);
+        StringBuilder output = new();
+        while (true)
+        {
+            (string Name, JsonElement Body) next;
+            try
+            {
+                next = await events.Reader.ReadAsync(limit.Token);
+            }
+            catch (OperationCanceledException) when (!TestContext.Current.CancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException($"Neither a stop nor the session's end came in {EventLimit.TotalSeconds:0} s. {Heard()}");
+            }
+            if (next.Name == DapEvents.Terminated)
+            {
+                return (null, output.ToString());
+            }
+            if (next.Name == DapEvents.Stopped)
+            {
+                return (next.Body.Deserialize<StoppedEvent>(DapConnection.Options)!, output.ToString());
+            }
+            if (next.Name == DapEvents.Output && next.Body.Deserialize<OutputEvent>(DapConnection.Options) is { Category: DapOutputCategories.Stdout } written)
+            {
+                output.Append(written.Output);
+            }
+        }
+    }
+
     /// <summary>What the program wrote to its standard output and how it ended (no exit code when none was told), read
     /// from the events to the session's end.</summary>
     public async Task<(string Output, int? ExitCode)> WaitForEnd()
@@ -703,7 +744,7 @@ public static class Debuggees
 
     /// <summary>What runs a debuggee on the newest .NET installed rather than the one it targets: from .NET 11 on, the
     /// runtime leaves its own exception dispatch among a stop's frames for the debugger to hide.</summary>
-    public static IReadOnlyDictionary<string, string> NewestRuntime { get; } = new Dictionary<string, string> { ["DOTNET_ROLL_FORWARD"] = "LatestMajor" };
+    public static IReadOnlyDictionary<string, string> NewestRuntime { get; } = new Dictionary<string, string> { [Passenger.Core.RuntimeVariables.RollForward] = "LatestMajor" };
 
     /// <summary>What a debuggee asked to run on the newest .NET evaluates in a frame to show it does: true on .NET 11 or later.</summary>
     public const string RunsOnNewestRuntime = "System.Environment.Version.Major >= 11";
@@ -799,4 +840,6 @@ public static class DebugSessionChain
     public static async Task<T> WaitForEvent<T>(this Task<DebugSession> chain, Predicate<T>? condition = null) => await (await chain).WaitForEvent(condition);
 
     public static async Task<(string Output, int? ExitCode)> WaitForEnd(this Task<DebugSession> chain) => await (await chain).WaitForEnd();
+
+    public static async Task<(StoppedEvent? Stop, string Output)> WaitForStopOrEnd(this Task<DebugSession> chain) => await (await chain).WaitForStopOrEnd();
 }

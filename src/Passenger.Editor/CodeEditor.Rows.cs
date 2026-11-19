@@ -540,12 +540,16 @@ public sealed partial class CodeEditor
                 }
             }
         }
-        if (links is not null)
+        if (decorations.Links is { } links)
         {
             foreach (TextLink link in links(frameText!, line))
             {
                 key.Add(link.Range, start, end);
             }
+        }
+        if (pointed.Link is { } reach && reach.Range.Start < end && reach.Range.End > start)
+        {
+            key.Add(reach.Range, start, end);
         }
         MarkerList markers = decorations.Markers;
         for (int i = markers.FirstReaching(start); i < markers.Count && markers[i].Range.Start <= end; i++)

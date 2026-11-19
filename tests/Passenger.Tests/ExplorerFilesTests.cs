@@ -4,6 +4,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.VisualTree;
+using Microsoft.Win32.SafeHandles;
 using Passenger.App.Debugging;
 using Passenger.App;
 using Passenger.App.CSharp;
@@ -192,6 +193,46 @@ public sealed class ExplorerFilesTests : IDisposable
         window.Close();
     }
 
+    /// <summary>A loaded project's folder renamed while a watcher of its build output for the C# language server walks it
+    /// waits for that walk to end, which lists nothing there once let go of: on Windows a folder with a folder under it open
+    /// does not move. The walk is held at its start, as a busy machine holds it.</summary>
+    [AvaloniaFact]
+    public void A_loaded_projects_folders_rename_waits_for_a_walk_of_its_build_output_under_way_for_the_language_server()
+    {
+        string library = Directory.CreateDirectory(Path.Combine(folder, "Lib")).FullName;
+        File.WriteAllText(Path.Combine(library, "Lib.csproj"), TestProjects.Library());
+        File.WriteAllText(Path.Combine(library, "Code.cs"), "class Code\n{\n}\n");
+        Restore.Run(Path.Combine(library, "Lib.csproj"));
+        MainWindow window = Ui.OpenFolder(folder);
+        string lib = PathNames.Canonical(library);
+        Ui.WaitFor(() => window.CSharpService?.Watching?.Watching.Any(w => PathNames.Within(w.Folder, lib)) == true,
+            () => $"Lib's build output to be watched for the C# language server, where {string.Join(", ", (window.CSharpService?.Watching?.Watching ?? []).Select(w => w.Folder))} are",
+            TimeSpan.FromMinutes(2));
+        ServerWatches watches = window.CSharpService!.Watching!;
+        string walked = watches.Watching.First(w => PathNames.Within(w.Folder, lib)).Folder;
+        TaskCompletionSource released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task holding = watches.HoldNextWalk(at => PathNames.Same(at, walked), released.Task);
+        watches.LetGo([walked]).Held.Dispose();
+        window.Confirm = (_, _, _) => Task.FromResult(true);
+        Task<string?> renaming;
+        try
+        {
+            Assert.True(Ui.Pumped(() => holding.IsCompleted, TimeSpan.FromSeconds(30)), $"The watcher of {walked}, started again, never came to its first walk");
+            renaming = window.RenameAsync(lib, "Core");
+            // Pumped, not settled: the walk held holds the IDE's quiet.
+            Ui.PumpUntil(() => renaming.IsCompleted || window.Status?.StartsWith("Waiting for the design-time build of Lib", StringComparison.Ordinal) == true,
+                "the rename to wait for the walk of Lib's build output");
+            Assert.False(renaming.IsCompleted, $"Lib was renamed while the watcher of {walked} let go of was still to walk it, which on Windows refuses the rename: {window.Status}");
+        }
+        finally
+        {
+            released.TrySetResult();
+        }
+        Assert.Null(Ui.Await(renaming, "the rename"));
+        Assert.True(File.Exists(Path.Combine(folder, "Core", "Lib.csproj")), $"Lib's rename did not take it to Core: {window.Status}");
+        window.Close();
+    }
+
     /// <summary>A loaded project's folder moved into another folder is moved back by Undo and into it again by Redo, each once
     /// its build output is watched for the C# language server where it is: what watches inside it lets go first, as for the
     /// move itself, as Windows moves no folder with one inside it watched, and the folder is not made again where it was.</summary>
@@ -283,6 +324,230 @@ public sealed class ExplorerFilesTests : IDisposable
         }
     }
 
+    /// <summary>A project's folder renamed or deleted while its design-time build runs, the C# language server waiting for
+    /// that build, goes before the server is told the project: telling it looks at the project's files, and the server then
+    /// reads them, as the build lands, and on Windows a folder with a file under it open does not move. The project's file
+    /// is shown, so the server asks for it first.</summary>
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_projects_folder_renamed_or_deleted_as_its_design_time_build_lands_goes_before_the_language_server_is_told_the_project(bool delete)
+    {
+        string library = Directory.CreateDirectory(Path.Combine(folder, "Lib")).FullName;
+        string release = Path.Combine(folder, "release");
+        File.WriteAllText(Path.Combine(library, "Lib.csproj"), TestProjects.Library());
+        File.WriteAllText(Path.Combine(library, "Code.cs"), "class Code\n{\n}\n");
+        File.WriteAllText(Path.Combine(library, "Directory.Build.targets"), Holding(release));
+        Restore.Run(Path.Combine(library, "Lib.csproj"));
+        string lib = PathNames.Canonical(library);
+        string change = delete ? "delete" : "rename";
+        MainWindow window = new() { Width = 1200, Height = 800 };
+        window.Show();
+        window.OpenFolder(folder);
+        window.OpenFile(Path.Combine(lib, "Code.cs"));
+        ProjectBuilds builds = window.Session.DesignTimeBuilds;
+        string project = Path.Combine(lib, "Lib.csproj");
+        Task asked = builds.HoldNextAsked(project, Task.CompletedTask);
+        try
+        {
+            // Pumped, not settled: the language server's load waits for the design-time build.
+            Ui.PumpUntil(() => File.Exists(Path.Combine(library, "held")), "Lib's design-time build to be held", TimeSpan.FromMinutes(2));
+            Assert.True(Ui.Pumped(() => asked.IsCompleted, TimeSpan.FromMinutes(2)),
+                $"The language server never asked for Lib's design-time build, {builds.Awaited} awaited{Ui.IdeLogTail()}{Ui.ServerLogTail()}");
+            Task<string?>? changing = null;
+            bool? toldAfter = null;
+            builds.WhileNextLook(project, () => toldAfter = changing?.IsCompleted);
+            window.Confirm = (_, _, _) => Task.FromResult(true);
+            changing = delete ? Deleted(window, lib) : window.RenameAsync(lib, "Core");
+            Ui.PumpUntil(() => changing.IsCompleted || window.Status?.StartsWith("Waiting for the design-time build of Lib", StringComparison.Ordinal) == true,
+                $"the {change} to wait for Lib's design-time build");
+            Assert.False(changing.IsCompleted, $"The {change} of Lib did not wait for its design-time build: {window.Status}");
+
+            File.WriteAllText(release, "go");
+            string? refused = Ui.AwaitPumped(changing, $"the {change} of Lib", TimeSpan.FromMinutes(2));
+            Assert.True(refused is null && !Directory.Exists(library), $"Lib's {change} was refused: {refused}, the status bar saying {window.Status}{Holders(window, library)}");
+            Ui.PumpUntil(() => toldAfter is not null, "the language server to be told Lib", TimeSpan.FromMinutes(1));
+            Assert.True(toldAfter, $"The language server was told Lib, its files looked at, as its folder's {change} waited to go: the server then reads them, and on Windows a folder with a file under it open does not move");
+        }
+        finally
+        {
+            File.WriteAllText(release, "go");
+            window.Close();
+        }
+
+        static async Task<string?> Deleted(MainWindow window, string lib) => await window.DeleteAsync(lib) ? null : window.Status;
+    }
+
+    /// <summary>On Windows a round of design-time builds is over only once the processes its build session started, MSBuild's
+    /// nodes, are gone: a node goes on working in the folder of the project it built last until its process is gone, and a
+    /// folder going, which waits for the round that built its project, would not move while one does. Shop's and Lib's builds
+    /// are held at once, so one of them runs in a node.</summary>
+    [AvaloniaFact]
+    public void A_round_of_design_time_builds_is_over_only_once_the_msbuild_nodes_its_session_started_are_gone()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Only Windows keeps a folder a process works in from moving, which the round's end is waited for");
+            return;
+        }
+        SkipUnlessTwoBuildsAtOnce();
+        string library = Directory.CreateDirectory(Path.Combine(folder, "Lib")).FullName;
+        string releaseLib = Path.Combine(folder, "release-lib");
+        string releaseShop = Path.Combine(folder, "release-shop");
+        File.WriteAllText(Path.Combine(library, "Lib.csproj"), TestProjects.Library());
+        File.WriteAllText(Path.Combine(library, "Code.cs"), "class Code\n{\n}\n");
+        File.WriteAllText(Path.Combine(library, "Directory.Build.targets"), Holding(releaseLib));
+        File.WriteAllText(Path.Combine(folder, "Directory.Build.targets"), Holding(releaseShop));
+        Restore.Run(Path.Combine(library, "Lib.csproj"));
+        Restore.Run(Path.Combine(folder, "Shop.csproj"));
+        MainWindow window = new() { Width = 1200, Height = 800 };
+        window.Show();
+        window.OpenFolder(folder);
+        try
+        {
+            // Pumped, not settled: the language server's load waits for the design-time builds.
+            Ui.PumpUntil(() => File.Exists(Path.Combine(library, "held")) && File.Exists(Path.Combine(folder, "held")),
+                "Shop's and Lib's design-time builds to be held at once, in one round", TimeSpan.FromMinutes(2));
+            int host = Ui.AwaitPumped(Waiting.Apart(() => Passenger.Workspace.ProjectHosts.ForAsync(folder)), "the folder's project host").ProcessId;
+            // The round's nodes, held by handles of the test's own so no id is another process's by the time it is asked.
+            List<(SafeProcessHandle Process, string Line)> nodes = [];
+            foreach ((int child, int parent) in Kernel32.Processes())
+            {
+                SafeProcessHandle process = Kernel32.OpenProcess(Kernel32.Synchronize | Kernel32.ProcessQueryLimitedInformation, false, (uint)child);
+                if (parent == host && !process.IsInvalid)
+                {
+                    nodes.Add((process, $"{DotnetProcesses.Describe(child)?.CommandLine ?? "a process"} ({child})"));
+                }
+                else
+                {
+                    process.Dispose();
+                }
+            }
+            try
+            {
+                Assert.True(nodes.Count > 0, $"The project host (process {host}) started no process of its own to build Shop and Lib at once, so no node is there to be waited for");
+                (IDisposable held, Task over) = window.Session.DesignTimeBuilds.HoldOff([PathNames.Canonical(library)]);
+                using (held)
+                {
+                    File.WriteAllText(releaseLib, "go");
+                    File.WriteAllText(releaseShop, "go");
+                    Ui.AwaitPumped(over, "the round that builds Lib to be over", TimeSpan.FromMinutes(2));
+                    List<string> left = [];
+                    foreach ((SafeProcessHandle process, string line) in nodes)
+                    {
+                        if (Kernel32.WaitForSingleObject(process, 0) != 0)
+                        {
+                            left.Add(line);
+                        }
+                    }
+                    Assert.True(left.Count == 0, $"The round that built Lib was over while processes its session started still ran, which work in the folder of the project each built last: {string.Join("; ", left)}");
+                }
+            }
+            finally
+            {
+                nodes.ForEach(n => n.Process.Dispose());
+            }
+        }
+        finally
+        {
+            File.WriteAllText(releaseLib, "go");
+            File.WriteAllText(releaseShop, "go");
+            window.Close();
+        }
+    }
+
+    /// <summary>A project whose wildcards take in a folder deleted while its design-time build runs, here Shop over Lib, is
+    /// told to the C# language server only once the folder has gone, though its own build lands first: telling it looks at
+    /// what its build read, and the server then reads its files, Lib's among them, and on Windows a folder with a file under
+    /// it open does not go.</summary>
+    [AvaloniaFact]
+    public void A_project_whose_wildcards_take_in_a_folder_being_deleted_is_told_to_the_language_server_once_it_has_gone()
+    {
+        SkipUnlessTwoBuildsAtOnce();
+        string library = Directory.CreateDirectory(Path.Combine(folder, "Lib")).FullName;
+        string releaseLib = Path.Combine(folder, "release-lib");
+        string releaseShop = Path.Combine(folder, "release-shop");
+        File.WriteAllText(Path.Combine(library, "Lib.csproj"), TestProjects.Library());
+        File.WriteAllText(Path.Combine(library, "Code.cs"), "class Code\n{\n}\n");
+        File.WriteAllText(Path.Combine(library, "Directory.Build.targets"), Holding(releaseLib));
+        File.WriteAllText(Path.Combine(folder, "Directory.Build.targets"), Holding(releaseShop));
+        Restore.Run(Path.Combine(library, "Lib.csproj"));
+        Restore.Run(Path.Combine(folder, "Shop.csproj"));
+        MainWindow window = new() { Width = 1200, Height = 800 };
+        window.Show();
+        window.OpenFolder(folder);
+        ProjectBuilds builds = window.Session.DesignTimeBuilds;
+        string shop = PathNames.Canonical(Path.Combine(folder, "Shop.csproj"));
+        Task asked = builds.HoldNextAsked(shop, Task.CompletedTask);
+        try
+        {
+            // Pumped, not settled: the language server's load waits for the design-time builds.
+            Ui.PumpUntil(() => File.Exists(Path.Combine(library, "held")) && File.Exists(Path.Combine(folder, "held")),
+                "Shop's and Lib's design-time builds to be held", TimeSpan.FromMinutes(2));
+            Assert.True(Ui.Pumped(() => asked.IsCompleted, TimeSpan.FromMinutes(2)), $"The language server never asked for Shop's design-time build{Ui.IdeLogTail()}");
+            Task<bool>? deleting = null;
+            bool? toldAfter = null;
+            builds.WhileNextLook(shop, () => toldAfter = deleting?.IsCompleted);
+            window.Confirm = (_, _, _) => Task.FromResult(true);
+            deleting = window.DeleteAsync(PathNames.Canonical(library));
+            Ui.PumpUntil(() => deleting.IsCompleted || window.Status?.StartsWith("Waiting for the design-time build of Lib", StringComparison.Ordinal) == true,
+                "the delete to wait for Lib's design-time build");
+            Assert.False(deleting.IsCompleted, $"The delete of Lib did not wait for its design-time build: {window.Status}");
+
+            File.WriteAllText(releaseShop, "go");
+            Ui.PumpUntil(() => deleting.IsCompleted || window.Session.DesignTimeBuilds.Builds > 0, "Shop's design-time build to land, Lib's still held");
+            File.WriteAllText(releaseLib, "go");
+            Assert.True(Ui.AwaitPumped(deleting, "the delete of Lib", TimeSpan.FromMinutes(2)), $"Lib was not deleted: {window.Status}{Holders(window, library)}");
+            Ui.PumpUntil(() => toldAfter is not null, "the language server to be told Shop", TimeSpan.FromMinutes(1));
+            Assert.True(toldAfter, "The language server was told Shop, what its build read looked at, while Lib, whose files Shop's wildcards take in, waited to go: the server then reads them, and on Windows a folder with a file under it open does not go");
+        }
+        finally
+        {
+            File.WriteAllText(releaseLib, "go");
+            File.WriteAllText(releaseShop, "go");
+            window.Close();
+        }
+    }
+
+    /// <summary>A folder let go of for a move or a delete holds off evaluating the projects that reach it, here Shop, whose
+    /// wildcards walk Models though no project lies there, until let go, the round under way waited for: a round reads
+    /// what each project's evaluation read and evaluates in the project host, and on Windows a folder with a file or folder
+    /// under it open does not move.</summary>
+    [AvaloniaFact]
+    public void A_folder_let_go_of_holds_off_evaluating_the_projects_whose_wildcards_walk_it_until_let_go()
+    {
+        File.WriteAllText(Path.Combine(folder, "Models", "Order.cs"), "class Order { }\n");
+        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
+        ProjectModels evaluations = window.Session.Models;
+        string models = PathNames.Canonical(Path.Combine(folder, "Models"));
+        string shop = PathNames.Canonical(Path.Combine(folder, "Shop.csproj"));
+        TaskCompletionSource evaluating = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task reached = evaluations.HoldEvaluation(shop, evaluating.Task);
+        File.WriteAllText(Path.Combine(folder, "Extra.cs"), "class Extra { }\n");
+        window.Session.Evaluate();
+        Ui.PumpUntil(() => reached.IsCompleted, "Shop's evaluation, its wildcards taking in Extra.cs, to begin");
+        (IDisposable held, Task evaluated) = evaluations.HoldOff([models]);
+        int before;
+        try
+        {
+            Assert.False(evaluated.IsCompleted, "Models was let go of while Shop's evaluation, whose wildcards walk Models, was still under way");
+            evaluating.SetResult();
+            Ui.AwaitPumped(evaluated, "the round evaluating Shop to end");
+            before = evaluations.Rounds;
+            File.WriteAllText(Path.Combine(folder, "More.cs"), "class More { }\n");
+            window.Session.Evaluate();
+            Ui.Settle();
+            Assert.True(evaluations.Rounds == before, $"A round began, looking at Shop, whose wildcards walk Models, while Models was let go of ({evaluations.Rounds - before} begun)");
+        }
+        finally
+        {
+            evaluating.TrySetResult();
+            held.Dispose();
+        }
+        Ui.WaitFor(() => evaluations.Rounds > before, "the round held off to begin once Models was let go of");
+        window.Close();
+    }
+
     /// <summary>A loaded project's folder let go of for a move stays unwatched by the watches of a C# language server started
     /// meanwhile, until the move is done: a move can begin while a server starts (its start waits for the design-time builds
     /// the move waits out), and on Windows a move with the project's build output watched inside it is refused.</summary>
@@ -301,7 +566,7 @@ public sealed class ExplorerFilesTests : IDisposable
         Ui.WaitFor(() => csharp.Watching?.Watching.Any(w => PathNames.Within(w.Folder, lib)) == true,
             () => $"Lib's build output to be watched for the C# language server, where {Folders()} are", TimeSpan.FromMinutes(2));
         ServerWatches first = csharp.Watching!;
-        IDisposable letting = csharp.LetGoOf([lib]);
+        IDisposable letting = csharp.LetGoOf([lib]).Held;
         Assert.DoesNotContain(first.Watching, w => PathNames.Within(w.Folder, lib));
 
         csharp.Restart();
@@ -323,9 +588,7 @@ public sealed class ExplorerFilesTests : IDisposable
     [AvaloniaFact]
     public void A_folders_delete_waits_for_the_round_of_design_time_builds_that_built_its_project_to_end_only_where_a_folder_worked_in_is_held()
     {
-        // The project host gives MSBuild half the processors, and only two nodes build Shop and Lib at once.
-        Assert.SkipWhen(Environment.ProcessorCount / 2 < 2,
-            $"The project host builds two projects at once only on two MSBuild nodes, half of four processors, and this machine has {Environment.ProcessorCount}");
+        SkipUnlessTwoBuildsAtOnce();
         string library = Directory.CreateDirectory(Path.Combine(folder, "Lib")).FullName;
         string releaseLib = Path.Combine(folder, "release-lib");
         string releaseShop = Path.Combine(folder, "release-shop");
@@ -397,6 +660,45 @@ public sealed class ExplorerFilesTests : IDisposable
         }
         window.Close();
     }
+
+    /// <summary>On Windows a folder with a file under it some program holds open will not take a new name or move, and the
+    /// refusal names that program and the file, so the person knows what to close.</summary>
+    [AvaloniaTheory]
+    [InlineData("rename")]
+    [InlineData("move")]
+    public void A_folder_whose_file_a_program_holds_is_refused_on_Windows_naming_the_program_and_the_file(string change)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows keeps a folder with a file under it held open from moving");
+        string library = PathNames.Canonical(Directory.CreateDirectory(Path.Combine(folder, "Lib")).FullName);
+        string held = Path.Combine(Directory.CreateDirectory(Path.Combine(library, "obj")).FullName, "held.txt");
+        File.WriteAllText(held, "held\n");
+        string shell = Programs.OnPath("powershell.exe") ?? throw new InvalidOperationException("Windows has no powershell.exe on its PATH");
+        MainWindow window = Open();
+        string started = Path.Combine(folder, "started");
+        using System.Diagnostics.Process holding = ChildProcesses.Start(ChildProcesses.Command(shell,
+            ["-NoProfile", "-Command", $"$held = [IO.File]::Open('{held}', 'Open', 'Read', 'ReadWrite, Delete'); Set-Content -Path '{started}' -Value started; Start-Sleep -Seconds 120"], folder));
+        try
+        {
+            Ui.WaitFor(() => File.Exists(started), "powershell to start, holding Lib/obj/held.txt open");
+            string models = PathNames.Canonical(Path.Combine(folder, "Models"));
+            string? refused = change == "rename" ? Ui.Await(window.RenameAsync(library, "Core"), "the rename")
+                : Ui.Await(window.PutAsync([library], models, copy: false), "the move").Count > 0 ? null : window.Status;
+            Assert.True(refused?.Contains($"Held by powershell (process {holding.Id}: {Path.Join("obj", "held.txt")})", StringComparison.Ordinal) == true,
+                $"The {change}'s refusal does not name powershell and the file it holds under Lib, so the person cannot tell what to close: {refused ?? "it went"}");
+            Assert.True(File.Exists(Path.Combine(library, "obj", "held.txt")), $"Lib is not where it was although its {change} was refused");
+        }
+        finally
+        {
+            ChildProcesses.Kill(holding);
+        }
+        window.Close();
+    }
+
+    /// <summary>Skips a test that holds Shop's and Lib's design-time builds at once: the project host gives MSBuild half the
+    /// processors, and builds two projects at once only on two nodes; on fewer, one's hold keeps the other from starting
+    /// until its Exec runs out.</summary>
+    private static void SkipUnlessTwoBuildsAtOnce() => Assert.SkipWhen(Environment.ProcessorCount / 2 < 2,
+        $"The project host builds two projects at once only on two MSBuild nodes, half of four processors, and this machine has {Environment.ProcessorCount}");
 
     /// <summary>A Directory.Build.targets holding the design-time builds of the projects below it before CoreCompile, each
     /// writing held into its project's folder, until <paramref name="release"/> is there.</summary>
@@ -1073,13 +1375,12 @@ public sealed class ExplorerFilesTests : IDisposable
         Assert.True(window.Actions.Context().ToolWindow?.Id == ToolWindowIds.Explorer, $"The Explorer did not take the keys on {row.Name}");
     }
 
-    /// <summary>Clicks a row with the platform's key for choosing another row held (Cmd on macOS, Ctrl elsewhere and on the
-    /// headless platform everywhere), failing unless it is then chosen with those before.</summary>
+    /// <summary>Clicks a row with the system's command key held, the key for choosing another row (Cmd on macOS, Ctrl
+    /// elsewhere), failing unless it is then chosen with those before.</summary>
     private static void AlsoChoose(MainWindow window, ExplorerNode row)
     {
         int before = window.ExplorerView.SelectedNodes.Count;
-        KeyModifiers command = Application.Current?.PlatformSettings?.HotkeyConfiguration.CommandModifiers ?? KeyModifiers.Control;
-        Ui.Click(Ui.Row(window.ExplorerView, row), modifiers: (RawInputModifiers)command);
+        Ui.Click(Ui.Row(window.ExplorerView, row), modifiers: (RawInputModifiers)Keystroke.Command);
         Assert.True(window.ExplorerView.SelectedNodes.Count == before + 1 && window.ExplorerView.SelectedNodes.Contains(row),
             $"A click on {row.Name} with the key for choosing another held left [{string.Join(", ", window.ExplorerView.SelectedNodes.Select(n => n.Name))}] chosen");
     }
@@ -1114,14 +1415,14 @@ public sealed class ExplorerFilesTests : IDisposable
     private static async Task<string?> Moved(Task<IReadOnlyList<string>> moving) => (await moving).Count > 0 ? null : "nothing was moved";
 
     /// <summary>What may hold a folder that would not go or move, for a failure to name: the folders under it watched for the
-    /// C# language server, and on Windows the programs holding it, or a folder under it, open (the IDE's own aside).</summary>
+    /// C# language server, and on Windows the programs holding it, or a file or folder under it, open as the failure is said
+    /// (<see cref="FileHolders.Within"/>); the refusal itself names those holding it as it was refused.</summary>
     private static string Holders(MainWindow window, string folder)
     {
         string[] watched = [.. (window.CSharpService?.Watching?.Watching ?? []).Select(w => w.Folder).Where(w => PathNames.Within(w, folder))];
-        string[] open = !Directory.Exists(folder) ? [] : [.. Directory.EnumerateDirectories(folder, "*", SearchOption.AllDirectories).Prepend(folder)
-            .Select(path => (Path: path, By: FileHolders.Of(path))).Where(held => held.By.Count > 0)
-            .Select(held => $"{held.Path} by {string.Join(", ", held.By.Select(id => DotnetProcesses.Describe(id)?.Program ?? $"process {id}"))}")];
-        return $". Watched for the C# language server under it: [{string.Join(", ", watched)}]; held open: [{string.Join("; ", open)}]";
+        string[] open = [.. FileHolders.Within(folder).Select(held => $"{(held.Process == Environment.ProcessId ? FileHolders.Itself
+            : DotnetProcesses.Describe(held.Process)?.Program ?? "a program")} (process {held.Process}) holding [{string.Join(", ", held.Paths)}]")];
+        return $". Watched for the C# language server under it: [{string.Join(", ", watched)}]; held open now: [{string.Join("; ", open)}]";
     }
 
     /// <summary>What a folder holds, by its paths inside it, for a failure to name.</summary>

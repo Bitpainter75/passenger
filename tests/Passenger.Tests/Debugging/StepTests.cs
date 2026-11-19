@@ -368,6 +368,61 @@ public class StepTests(ITestOutputHelper testOutputHelper)
         }
     }
 
+    /// <summary>A web app stopped at its handler's breakpoint, stepped over and the breakpoint deleted: the steps through the
+    /// rest of the handler end as it returns to the framework that called it, with none of the user's code below it to go
+    /// back to, and the program runs on, the same handler asked again and again never stopping where the deleted breakpoint
+    /// was, nor anywhere else, until the program ends (#1891).</summary>
+    [Fact]
+    public Task A_step_out_of_a_web_apps_handler_lets_the_program_run_on_so_later_requests_never_stop_where_its_deleted_breakpoint_was() =>
+        StepOutOfHandler(MinimalApi, [], "int handled = n + 1;", "return Results.Ok(handled);", "handled 20 requests");
+
+    /// <summary>The same of an async handler stopped after its await: its step out goes to where the framework awaits it,
+    /// none of it the user's, and the program runs on (#1891).</summary>
+    [Fact]
+    public Task A_step_out_of_a_web_apps_async_handler_lets_the_program_run_on_where_the_framework_awaits_it() =>
+        StepOutOfHandler(MinimalApi, [], "int twice = n * 2;", "return Results.Ok(twice);", "handled 20 requests");
+
+    /// <summary>The same where the code awaiting the async handler, not the user's, goes on as the handler ends, on its
+    /// thread above its frame, and calls the next handler there at once, as a web app's next request is taken in when it
+    /// came before the last was answered: the step ends as that code takes over, never in the next handler, the ended
+    /// one's frame below holding none of the user's code still to run (#1990).</summary>
+    [Fact]
+    public Task A_step_out_of_an_async_handler_whose_end_calls_the_next_on_its_thread_lets_the_program_run_on() =>
+        StepOutOfHandler(Looping, ["dispatch"], "the dispatched handler goes on after its await", "the dispatched handler returns", "dispatched 20 handlers");
+
+    private const string MinimalApi = "MinimalApiApp";
+
+    /// <summary>A program run with its arguments stopped at a handler's line by a breakpoint, stepped over to its return and
+    /// the breakpoint deleted, then stepped on until the handler is left: no stop comes after, and the program goes on to
+    /// write <paramref name="ended"/>.</summary>
+    private async Task StepOutOfHandler(string debuggee, string[] args, string from, string returns, string ended)
+    {
+        string source = Debuggees.Source(debuggee, "Program.cs");
+        int stopped = Debuggees.Line(debuggee, from);
+        int returned = Debuggees.Line(debuggee, returns);
+        await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
+        await host.InitializeAsync().LaunchAsync(Debuggees.Program(debuggee), stopAtEntry: false, justMyCode: true, arguments: args).WaitForInitializedEvent();
+        await host.BreakpointsAsync([stopped], source).ConfigurationDoneAsync();
+        StoppedEvent hit = await host.WaitForStoppedEvent();
+        Assert.Equal((StopReasons.Breakpoint, stopped), (hit.Reason, hit.ReadStopInfo().line));
+        int thread = hit.ThreadId!.Value;
+        StoppedEvent stepped = await host.StepOverAsync(thread).WaitForStoppedEvent();
+        Assert.Equal((StopReasons.Step, returned), (stepped.Reason, stepped.ReadStopInfo().line));
+        await host.ClearBreakpointsAsync(source);
+
+        (StoppedEvent? after, string written) = await host.StepOverAsync(thread).WaitForStopOrEnd();
+        if (after is { } closing && closing.ReadStopInfo().line == returned + 1)
+        {
+            // The handler's closing brace, its last stop.
+            (after, written) = await host.StepOverAsync(closing.ThreadId!.Value).WaitForStopOrEnd();
+        }
+        Assert.True(after is null, $"Stepped out of the handler with its breakpoint deleted, the program stopped again for {after?.Reason} at line "
+            + $"{after?.ReadStopInfo().line} on thread {after?.ThreadId}, where it should have run on to its end. The engine's account:\n{StepAccount(host.EngineLog())}");
+        Assert.Contains(ended, written, StringComparison.Ordinal);
+        Assert.True(host.EngineLog().Contains("ends as its frame returns to code that is not the user's", StringComparison.Ordinal),
+            $"The program ended, but not because the step ended as the handler returned:\n{StepAccount(host.EngineLog())}");
+    }
+
     /// <summary>x64 .NET under Rosetta on an Arm Mac, where a thread that takes a trap (a breakpoint, a single step) as the
     /// runtime's activation signal reaches it never receives that signal, nor any after it; the runtime sends a thread no
     /// other while one is unanswered, so it can no longer stop that thread in managed code.</summary>

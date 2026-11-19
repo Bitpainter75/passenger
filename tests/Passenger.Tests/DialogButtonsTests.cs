@@ -102,11 +102,13 @@ public sealed class DialogButtonsTests : IDisposable
 
     /// <summary>Holds a dialog's buttons to the rule: each one shown has its words (or icon) centred in it unless it
     /// reads as text; its text buttons (plain or the default) are one height and one corner radius; and the default
-    /// button and Cancel, when it has both, stand in the platform's order. Returns the dialog.</summary>
+    /// button and Cancel, when it has both, stand in the platform's order. Holds its whole layout too: no words cut and
+    /// nothing drawn over another, at its least width and at display scale 2 (LayoutFaults). Returns the dialog.</summary>
     public static T Check<T>(T dialog) where T : Window
     {
         Ui.Settle();
         string title = dialog.Title ?? dialog.GetType().Name;
+        LayoutFaults.Hold(dialog, title);
         Button[] shown = [.. dialog.GetVisualDescendants().OfType<Button>()
             .Where(b => b is not ToggleButton and not RepeatButton && b.IsEffectivelyVisible && b.Bounds.Width > 0 && b.Bounds.Height > 0)];
         foreach (Button button in shown.Where(b => !b.Classes.Any(ReadAsText.Contains)))
@@ -295,13 +297,14 @@ public sealed class DialogButtonsTests : IDisposable
     }
 
     /// <summary>Holds a default button and Cancel to the platform's order: the default rightmost on macOS, first
-    /// elsewhere.</summary>
+    /// elsewhere; in a footer too narrow for them side by side, which stands them one under another, last or first.</summary>
     private static void InPlatformOrder(Visual within, string title, Button chosen, Button cancel)
     {
-        double chosenAt = chosen.TranslatePoint(default, within)!.Value.X;
-        double cancelAt = cancel.TranslatePoint(default, within)!.Value.X;
-        Assert.True(OperatingSystem.IsMacOS() ? chosenAt > cancelAt : chosenAt < cancelAt,
-            $"In {title}, {Name(chosen)} stands {(chosenAt > cancelAt ? "right" : "left")} of {Name(cancel)}, where Rider puts the default "
+        Point chosenAt = chosen.TranslatePoint(default, within)!.Value;
+        Point cancelAt = cancel.TranslatePoint(default, within)!.Value;
+        bool after = Math.Abs(chosenAt.X - cancelAt.X) < 0.5 ? chosenAt.Y > cancelAt.Y : chosenAt.X > cancelAt.X;
+        Assert.True(OperatingSystem.IsMacOS() ? after : !after,
+            $"In {title}, {Name(chosen)} stands {(after ? "after" : "before")} {Name(cancel)}, where Rider puts the default "
             + (OperatingSystem.IsMacOS() ? "rightmost, after Cancel" : "first, before Cancel"));
     }
 

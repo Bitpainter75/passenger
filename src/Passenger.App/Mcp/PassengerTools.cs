@@ -509,7 +509,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         "no source, and says so). Beyond the language servers': from XAML, the C# or XAML declaring a type, property, event, " +
         "resource or element, a library's type decompiled, a theme's XAML by Source Link; package.json's dependencies and npm " +
         "run scripts; a compose file's build (Dockerfile, project), names, variables (.env) and env_files; Aspire's AddProject " +
-        "and the resource names a service reads; an MSBuild file's properties (where set, the one in force first), item types, " +
+        "and AddDotnetProject and the resource names a service reads; an MSBuild file's properties (where set, the one in force first), item types, " +
         "targets, imports and SDKs.")]
     public Task<IReadOnlyList<Place>> Definition(string? path = null, int? line = null, int? column = null, string? symbol = null, CancellationToken cancel = default) => OnUi(cancel, async () =>
     {
@@ -761,9 +761,9 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         {
             throw new ArgumentException($"No direction '{direction}'; there are callers, callees, supertypes, subtypes and implementations", nameof(direction));
         }
-        HierarchyItem item = (calls ? await lsp.PrepareCallHierarchyAsync(offset) : await lsp.PrepareTypeHierarchyAsync(offset))
-            ?? throw new InvalidOperationException(await NoHierarchyAsync(lsp, offset, calls));
         string name = CSharp.AssistContext.NameAt(document.Text.Snapshot, offset);
+        HierarchyItem item = (calls ? await lsp.PrepareCallHierarchyAsync(offset) : await lsp.PrepareTypeHierarchyAsync(offset))
+            ?? throw new InvalidOperationException(await NoHierarchyAsync(lsp, offset, name, calls));
         if (!calls && !CSharp.RelatedSymbols.IsType(item, name))
         {
             // A member's own, as Base and Derived Symbols go: the server's type hierarchy at a member is its type's.
@@ -784,11 +784,12 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         return [.. found.Select((f, i) => new HierarchyEntry(f.Item.Name, f.Item.Detail, places[i].Path, places[i].Line, places[i].Column, places[i].Text))];
     }
 
-    /// <summary>Why the symbol at an offset has no hierarchy of the kind asked, naming the directions that follow it where
-    /// it has the other kind: a type no callers, a member in no type no supertypes.</summary>
-    private static async Task<string> NoHierarchyAsync(LspDocument lsp, int offset, bool calls)
+    /// <summary>Why the symbol at an offset, of the name there, has no hierarchy of the kind asked, naming the directions
+    /// that follow it where it has the other kind: a type no callers, a member in no type no supertypes. The server's type
+    /// hierarchy at a member is the type the member is in, so only a type of the name there is one.</summary>
+    private static async Task<string> NoHierarchyAsync(LspDocument lsp, int offset, string name, bool calls)
     {
-        if (calls && await lsp.PrepareTypeHierarchyAsync(offset) is { } type)
+        if (calls && await lsp.PrepareTypeHierarchyAsync(offset) is { } type && CSharp.RelatedSymbols.IsType(type, name))
         {
             return $"{type.Name} is a type, which has no callers or callees: direction supertypes, subtypes or implementations follows it";
         }
@@ -833,9 +834,9 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
             }
         }
         Served served = await Serve(at.Path, cancel);
-        if (served.Document.IsReadOnly)
+        if (served.Document.ReadOnlyWhy is { } readOnly)
         {
-            throw new InvalidOperationException($"Rename was not applied: {Refusals.ReadOnly(served.Document.Name)}");
+            throw new InvalidOperationException($"Rename was not applied: {readOnly}");
         }
         int offset = Offset(served.Document, at.Line, at.Column);
         naming.Names(Renaming(served.Document, offset, newName));
@@ -1147,9 +1148,9 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
     /// asked for.</summary>
     private static void RefuseReadOnly(OpenDocument document, string what)
     {
-        if (document.IsReadOnly)
+        if (document.ReadOnlyWhy is { } readOnly)
         {
-            throw new InvalidOperationException($"{what} was not applied: {Refusals.ReadOnly(document.Name)}");
+            throw new InvalidOperationException($"{what} was not applied: {readOnly}");
         }
     }
 
@@ -1210,7 +1211,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
     {
         if (Resolve(path) is { } full && !Reaches(full, changes: true))
         {
-            throw new InvalidOperationException(CSharp.CodeActions.Reformatted.Refused("Reformat Code", Refusals.ReadOnly(Path.GetFileName(full))).Said);
+            throw new InvalidOperationException(CSharp.CodeActions.Reformatted.Refused("Reformat Code", ReadOnlyHere(full, Path.GetFileName(full))).Said);
         }
         OpenDocument document;
         LspDocument? lsp = null;
@@ -1275,24 +1276,26 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         {
             throw new ArgumentException($"No kind '{kind}'; Go to Symbol's kinds are {string.Join(", ", SymbolKinds.All)}", nameof(kind));
         }
-        // Found once the C# files come under the folder's projects are in them: a file just made may declare the name.
+        // Found once the C# files come under the folder's projects are in them (one just made may declare it), saying any left out.
         await Server(cancel);
-        await TakenInAsync(null, cancel);
+        IReadOnlyList<(string Path, string Project)> untaken = await UntakenAsync(cancel) ?? [];
         RoslynSession session = await Server(cancel);
+        string? without = WentWithout(untaken);
         if (exact || indexer)
         {
-            SymbolsNamed named = await NamedAsync(session, query, kind, limit, cancel);
-            return Held([.. named.Symbols.Select(Found)], "symbol", NarrowedSymbols, named.More, LargerLimit);
+            SymbolsNamed named = await NamedAsync(session, query, kind, limit, cancel, waited: untaken);
+            return Held([.. named.Symbols.Select(Found)], "symbol", NarrowedSymbols, named.More, LargerLimit, note: without);
         }
         IReadOnlyList<SymbolFound> indexers = query == "Item" && kind is null or "property"
             ? [.. (await NamedAsync(session, "this[]", "property", limit, cancel, noneRefused: false)).Symbols.Select(Found)]
             : [];
         IReadOnlyList<SymbolInformation> found = await session.SymbolsAsync(query);
-        // Each target framework finds a symbol again; the server's order is not by match, so the name itself first, which no limit cuts.
+        // Each target framework finds a symbol again; the server's order is not by match, so the name itself first, a generator's too, which no limit cuts.
         List<SymbolInformation> matching = [.. WorkspaceSymbols.Kept(found)
             .Where(s => kind is null || SymbolKinds.Name(s.Kind).Equals(kind, StringComparison.OrdinalIgnoreCase))
             .DistinctBy(s => (s.Name, s.Kind, s.Location.Uri, s.Location.Range.Start.Line, s.Location.Range.Start.Character))
-            .OrderBy(WorkspaceSymbols.Generated)
+            .OrderBy(s => NameMatch(s.Name, query) > 0)
+            .ThenBy(WorkspaceSymbols.Generated)
             .ThenBy(s => NameMatch(s.Name, query))
             .ThenBy(s => SymbolKinds.Name(s.Kind) is "class" or "interface" or "struct" or "enum" ? 0 : 1)];
         List<SymbolInformation> kept = [.. matching.Take(Math.Max(0, limit - indexers.Count))];
@@ -1305,7 +1308,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         // Each one's container as the exact find names it, a type's namespace too.
         IReadOnlyList<string?> containers = await session.ContainersAsync([.. kept.Select(s => s.Location)], cancel) ?? [.. kept.Select(s => s.Owner)];
         return Held([.. indexers, .. kept.Select((s, i) => new SymbolFound(s.Name, SymbolKinds.Name(s.Kind), containers[i], places[i].Path, places[i].Line, places[i].Column))],
-            "symbol", NarrowedSymbols, matching.Count - kept.Count, LargerLimit);
+            "symbol", NarrowedSymbols, matching.Count - kept.Count, LargerLimit, note: without);
 
         static SymbolFound Found(NamedPlace n) => new(n.Name, n.Kind, n.Container, n.Path, n.Line, n.Column) { Id = n.Id };
     });
@@ -1361,20 +1364,26 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
 
     /// <summary>The solution's own C# symbols a name names exactly, of a kind when one is given, at most limit; none is
     /// refused, saying how to find a name like it, unless <paramref name="noneRefused"/> is false. A name none declares is
-    /// looked for again once the C# files come under the folder's projects are in them: a file just written may declare it.</summary>
-    private async Task<SymbolsNamed> NamedAsync(RoslynSession session, string name, string? kind, int limit, CancellationToken cancel, bool noneRefused = true)
+    /// looked for again once the C# files come under the folder's projects are in them, a file just written may declare it,
+    /// unless the caller waited for them (<paramref name="waited"/>, those still in none); none found is said to be without
+    /// those still in none after the wait (<see cref="UntakenAsync"/>).</summary>
+    private async Task<SymbolsNamed> NamedAsync(RoslynSession session, string name, string? kind, int limit, CancellationToken cancel, bool noneRefused = true,
+        IReadOnlyList<(string Path, string Project)>? waited = null)
     {
         Roslyn.Extension.SymbolsFound found = await session.SymbolsNamedAsync(name, kind is null ? limit : 1000, cancel);
         List<Roslyn.Extension.NamedSymbol> kept = [.. found.Symbols.Where(s => kind is null || s.Kind.Equals(kind, StringComparison.OrdinalIgnoreCase))];
-        if (kept.Count == 0 && noneRefused && await TakenInAsync(null, cancel) && Session.CSharp?.Session is { } now)
+        IReadOnlyList<(string Path, string Project)> untaken = waited ?? [];
+        if (kept.Count == 0 && noneRefused && waited is null && await UntakenAsync(cancel) is { } left && Session.CSharp?.Session is { } now)
         {
+            untaken = left;
             found = await now.SymbolsNamedAsync(name, kind is null ? limit : 1000, cancel);
             kept = [.. found.Symbols.Where(s => kind is null || s.Kind.Equals(kind, StringComparison.OrdinalIgnoreCase))];
         }
         if (kept.Count == 0 && noneRefused)
         {
             string none = $"No {kind ?? "symbol"} of the solution's own code is named {name}";
-            throw new InvalidOperationException(FailedLoads() is { Count: > 0 } failed ? Refusals.NoneWhileUnloaded(none, failed) : $"{none}: find_symbol finds names like it");
+            throw new InvalidOperationException(FailedLoads() is { Count: > 0 } failed ? Refusals.NoneWhileUnloaded(none, failed)
+                : $"{none}: find_symbol finds names like it{(WentWithout(untaken) is { } without ? $". {without}" : string.Empty)}");
         }
         // A symbol only a source generator declares is at its place in a copy of the generator's code.
         IReadOnlyList<Place> places = await Places([.. kept.Select(s => new LspLocation(s.Path is { } path ? DocumentUris.FromPath(path) : s.Generated!,
@@ -3566,12 +3575,12 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
 
     /// <summary>Waits, once the language server has loaded the workspace, until it holds in their projects the C# files come
     /// under the folder's projects since (an agent's just written first) that the file asked about sees (<see
-    /// cref="CSharpService.SeenFrom"/>), else every one, up to <see cref="Patience.Limit"/>, as it answers without a file in none:
-    /// refused, naming the first, when the time is up, and at once while the projects have no SDK (<see cref="Unloadable"/>);
-    /// whether it was waited for (false while the server still loads the workspace).</summary>
-    private async Task<bool> TakenInAsync(string? path, CancellationToken cancel)
+    /// cref="CSharpService.SeenFrom"/>), up to <see cref="Patience.Limit"/>, as it answers without a file in none: refused,
+    /// naming the first, when the time is up, and at once while the projects have no SDK (<see cref="Unloadable"/>); whether
+    /// it was waited for (false while the server still loads the workspace).</summary>
+    private async Task<bool> TakenInAsync(string path, CancellationToken cancel)
     {
-        if ((path is null || Session.ProjectOf(Resolve(path)) is not null) && Unloadable() is { } unloadable)
+        if (Session.ProjectOf(Resolve(path)) is not null && Unloadable() is { } unloadable)
         {
             throw new InvalidOperationException(unloadable);
         }
@@ -3579,10 +3588,29 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         {
             return false;
         }
-        IReadOnlyList<(string Path, string Project)> left = await csharp.UnplacedAsync(Patience.Limit, looking: true, path is null ? null : csharp.SeenFrom(Resolve(path)),
-            SayTakingIn, cancel);
+        IReadOnlyList<(string Path, string Project)> left = await csharp.UnplacedAsync(Patience.Limit, looking: true, csharp.SeenFrom(Resolve(path)), SayTakingIn, cancel);
         return left.Count == 0 ? true : throw new TimeoutException(NotTakenIn(left));
     }
+
+    /// <summary>Waits, as <see cref="TakenInAsync"/> does for a file, until the server holds in their projects every C# file
+    /// come under the folder's projects since, for a question of the solution's whole code: those still in none when the
+    /// time is up, and the projects not loaded again, which its answer goes without, saying so (<see cref="WentWithout"/>),
+    /// rather than refuse whole; refused at once while the projects have no SDK (<see cref="Unloadable"/>); null while the
+    /// server still loads the workspace.</summary>
+    private async Task<IReadOnlyList<(string Path, string Project)>?> UntakenAsync(CancellationToken cancel)
+    {
+        if (Unloadable() is { } unloadable)
+        {
+            throw new InvalidOperationException(unloadable);
+        }
+        return Session.CSharp is { IsReady: true } csharp ? await csharp.UnplacedAsync(Patience.Limit, looking: true, null, SayTakingIn, cancel) : null;
+    }
+
+    /// <summary>What an answer of the solution's whole code went without (<see cref="UntakenAsync"/>): the files the server
+    /// holds in no project yet, and the projects it answered from as they were; null for none.</summary>
+    private string? WentWithout(IReadOnlyList<(string Path, string Project)> untaken) => untaken.Count == 0 ? null
+        : Refusals.WentWithout([.. untaken.Where(u => !CSharpService.IsReload(u)).Select(u => Relative(u.Path))],
+            [.. untaken.Where(CSharpService.IsReload).Select(u => Path.GetFileNameWithoutExtension(u.Project))]);
 
     /// <summary>The agent's progress while a C# file is waited for (null once it is not).</summary>
     private void SayTakingIn(string? file) => AgentCall.Say(file is null ? null
@@ -3636,12 +3664,15 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
 
     /// <summary>Waits until the C# language server answers for a file of the folder's as its projects stand, and <paramref name="held"/>
     /// holds: answers before the solution has loaded, or before what a restore as it loaded brought (the projects' load
-    /// after it, their generators' run), are of the code before, so the agent is told what it waits for. Refused once the
-    /// server has stopped, and when the time is up with the load or what the restore brought still to come.</summary>
+    /// after it, their generators' run, the files its builds wrote read again), are of the code before, so the agent is
+    /// told what it waits for. Refused once the server has stopped, when the time is up with the load or what the restore
+    /// brought still to come, and when the server's generators' wait ran out meanwhile with what it waited for unread.</summary>
     private async Task ServerSettledAsync(string path, Func<CSharpService, bool> held, CancellationToken cancel)
     {
         string? reloading = null;
+        bool waited = false;
         bool settled = false;
+        long began = System.Diagnostics.Stopwatch.GetTimestamp();
         // Looked at every 50 ms.
         await Until(() =>
         {
@@ -3652,6 +3683,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
             if (csharp.IsReady && csharp.ReloadingWhat(path) is var what && what != reloading)
             {
                 reloading = what;
+                waited |= what is not null;
                 AgentCall.Say(what is null ? null : $"Waiting for {what}");
             }
             return settled = csharp.IsReady && reloading is null && !csharp.AwaitsRestore(path) && held(csharp);
@@ -3663,6 +3695,10 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         if (Session.CSharp is { IsStopped: true })
         {
             throw new InvalidOperationException(Refusals.CSharpStopped);
+        }
+        if (waited && Session.CSharp?.RanOutReading is { } ranOut && ranOut.At > began)
+        {
+            throw new TimeoutException(Refusals.StillComing(System.Diagnostics.Stopwatch.GetElapsedTime(began, ranOut.At), ranOut.What));
         }
         if (!settled && Session.CSharp is { IsReady: false } unready)
         {
@@ -3960,19 +3996,19 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
     /// <summary>The room kept for an answer's words of what it left out and how to read it.</summary>
     private const int WordsRoom = 1_000;
 
-    /// <summary>A list's answer held within <see cref="AgentAnswers.MostCharacters"/>: its first entries as JSON and, where it
-    /// left some out, after them the words saying how many (<paramref name="noun"/>) and how to read them
-    /// (<paramref name="how"/>); <paramref name="beyond"/> more found past the entries (an agent's limit) are said as left
-    /// out too, read as <paramref name="beyondHow"/> says where the limit alone cut them. Where the size cut them, words of
-    /// the last entry kept (<paramref name="readOn"/>) come before <paramref name="how"/>.</summary>
-    private static CallToolResult Held<T>(IReadOnlyList<T> entries, string noun, string how, int beyond = 0, string? beyondHow = null, Func<T, string>? readOn = null)
+    /// <summary>A list's answer held within <see cref="AgentAnswers.MostCharacters"/>: its first entries as JSON, then words of
+    /// how many it left out (<paramref name="noun"/>) and how to read them (<paramref name="how"/>), <paramref name="beyond"/>
+    /// more past an agent's limit counted too, read as <paramref name="beyondHow"/> says where the limit alone cut them, and
+    /// where the size cut them the last entry kept's words first (<paramref name="readOn"/>); then <paramref name="note"/>'s.</summary>
+    private static CallToolResult Held<T>(IReadOnlyList<T> entries, string noun, string how, int beyond = 0, string? beyondHow = null, Func<T, string>? readOn = null,
+        string? note = null)
     {
         int kept = AgentAnswers.Fitting(entries, Size, AgentAnswers.MostCharacters - WordsRoom);
         int left = entries.Count - kept + beyond;
         string said = kept == entries.Count && beyondHow is not null ? beyondHow
             : kept < entries.Count && kept > 0 && readOn is not null ? $"{readOn(entries[kept - 1])}; {how}"
             : how;
-        return Listed(kept == entries.Count ? entries : [.. entries.Take(kept)], left == 0 ? null : AgentAnswers.More(left, noun, said));
+        return Listed(kept == entries.Count ? entries : [.. entries.Take(kept)], left == 0 ? null : AgentAnswers.More(left, noun, said), note);
     }
 
     /// <summary>A text cut, where its JSON runs past <paramref name="room"/> characters, to a part whose JSON does not.</summary>
@@ -3986,11 +4022,12 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         return cut;
     }
 
-    /// <summary>A list's answer: its entries as JSON and, after them, <paramref name="more"/>'s words where it has some.</summary>
-    private static CallToolResult Listed<T>(IReadOnlyList<T> kept, string? more)
+    /// <summary>A list's answer: its entries as JSON and, after them, <paramref name="more"/>'s words where it has some, then
+    /// <paramref name="note"/>'s, what the whole list went without.</summary>
+    private static CallToolResult Listed<T>(IReadOnlyList<T> kept, string? more, string? note = null)
     {
         TextContentBlock json = new() { Text = System.Text.Json.JsonSerializer.Serialize(kept, McpHost.AnswerJson) };
-        return new CallToolResult { Content = more is null ? [json] : [json, new TextContentBlock { Text = more }] };
+        return new CallToolResult { Content = [json, .. new[] { more, note }.OfType<string>().Select(words => new TextContentBlock { Text = words })] };
     }
 
     /// <summary>A text answer's lines held within <see cref="AgentAnswers.MostCharacters"/>: its first lines, and after them
@@ -4070,10 +4107,13 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
 
     /// <summary>What .NET the machine or the folder lacks and how it is mended, as workspace says it; null lacking nothing.</summary>
     private string? SdkMissingSaid(ProjectSession session) =>
-        window.DotnetWant is { Install: not null } wanted && Refusals.Dotnet(wanted, session.Folder) is { } lacking
+        window.DotnetWant is { Installs: not null } wanted && Refusals.Dotnet(wanted, session.Folder) is { } lacking
             ? window.AgentsOwn
                 ? $"{lacking}. This Passenger, an agent's own, installs nothing: the person installs it with Install .NET SDK in the banner over their Passenger's window"
                 : $"{lacking}. Install .NET SDK installs it: the person's, from the banner over Passenger's window, or an agent's ide_action {AppActions.InstallDotnetSdk}, which asks them first"
+            : window.DotnetWant is { Lack: DotnetLack.OtherProcessor } or { Translated: true, Install: not null } && Refusals.Dotnet(window.DotnetWant, session.Folder) is { } loadsNone
+                ? $"{loadsNone}{(window.DotnetWant.Install is null ? string.Empty : $". {Refusals.InstallsOnlyNative}")}. "
+                    + $"The person downloads the Passenger built for this computer from {Updates.Releases.ThisSystemsDownload}"
             : session.Models.MissingSdk is { } missing ? Refusals.NoSdk(missing, session.Folder) : null;
 
     /// <summary>Why the folder's projects cannot load for the C# code tools to search: they have no .NET SDK to load with,
@@ -4093,14 +4133,18 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
     /// <summary>A path an agent gave (<see cref="Named"/>), refused in the one sentence where the agent may not read it, or
     /// with <paramref name="changes"/> change it (<see cref="AgentReach"/>): every path a tool takes but those
     /// <see cref="Named"/> lists. One it reads but never changes is read-only by where it lies (a package's, the SDK's, a
-    /// copy made to be read), whatever its path says.</summary>
+    /// copy made to be read), whatever its path says, a package's naming the package (<see cref="ReadOnlyHere"/>).</summary>
     private string Resolve(string path, bool changes = false)
     {
         string full = Named(path);
         return Reaches(full, changes) ? full
-            : throw new InvalidOperationException(changes && Reaches(full, changes: false) ? $"{Refusals.ReadOnly(Relative(full))}, so nothing changed"
+            : throw new InvalidOperationException(changes && Reaches(full, changes: false) ? $"{ReadOnlyHere(full, Relative(full))}, so nothing changed"
                 : Refusals.OutOfReach(full, Session.Folder, changes));
     }
+
+    /// <summary>A change refused of a file (a canonical path) an agent reads but may not change, the file called
+    /// <paramref name="name"/>: read-only by where it lies, a package's naming the package (<see cref="ReadOnlyFiles.Refused"/>).</summary>
+    private static string ReadOnlyHere(string full, string name) => ReadOnlyFiles.Refused(full, name) ?? Refusals.ReadOnly(name);
 
     /// <summary>Whether the agent may read a file or folder (a canonical path), or with <paramref name="changes"/> change it,
     /// as the window's folder and the folders its trusted solution reaches stand (<see cref="AgentReach"/>).</summary>

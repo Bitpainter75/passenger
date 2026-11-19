@@ -28,6 +28,156 @@ the gate until it is rewritten, and a report-lane failure is an issue (`ci-repor
   - Outside the code: 7 (the runner, GitHub, xunit, Rosetta).
   - Unlabelled: 7.
 
+## 2026-11-19
+
+- `EvalTests`' `At_a_stop_the_locals_are_listed_as_they_are_and_an_evaluation_reads_assigns_and_calls_what_the_method_sees`
+  (gate), CI 44554208543 (Windows gate shard 1, at cb60ca68d): "int.Parse(anotherVar) was answered: error: The evaluation
+  took longer than 3 s and could not be stopped, as it runs outside managed code". **A race in the IDE**: an evaluation
+  held every other thread, the runtime's tiering worker too, which, held, stood partway through compiling a method,
+  inside a type's load whose lock it kept (sampled on the Mac in 5 of 12 loaded rounds), so an evaluation needing that
+  type waited past its time with nothing of the program's on its stack. The worker is left running now on Windows and
+  Linux, told by the name the runtime gives it (`RuntimeThreads`); macOS keeps no such name and holds it as before
+  (335539c9e, #1999).
+- `Variables2Tests`' `A_stop_lists_locals_and_fields_of_every_kind_with_their_values_and_types`, CI 44538058686
+  (Windows report shard 3): "IntProperty = Implicit evaluation is disabled: an …". **A race in the IDE**: an evaluation
+  past its 3 s that ended of itself while the debugger looked for a moment an abort would take still turned implicit
+  evaluation off for the stop, so every later getter was refused; the getter before, one that throws, its exception
+  reaching the debugger twice, cost 1.1 s beside 12 busy loops on the Windows VM where the stop's others cost about
+  400 ms, and ran past 3 s on the loaded runner, its value read right. Only an evaluation stopped or held unfinished
+  turns implicit evaluation off now, its words naming it (bf98d2cf5, #1992).
+- `StepTests`' `A_step_out_of_a_web_apps_async_handler_lets_the_program_run_on_where_the_framework_awaits_it`, CI
+  44522273860 (Linux report shard 1, at b856ed3b9): "the program stopped again for step at line 20 on thread 5350".
+  **A race in the IDE**: an async handler's task completing runs what awaits it, ASP.NET's, on the handler's thread
+  above its frame, and Kestrel took in the next request there at once; the step from
+  `Task.NotifyDebuggerOfWaitCompletion` took the ended handler's frame below, past its last line at its builder's
+  `SetResult`, for the user's code to go back to, so Just My Code stopped it in the next request's handler (1 of 15
+  rounds on the Ubuntu VM under load). Such a frame is now no user code to go back to (`PastItsLastLine`, 3e2a8ca53,
+  #1990).
+- `ContainerRunsBytesTests`' `A_compose_runs_build_and_log_cost_a_small_constant_for_each_line_however_many_come`, the
+  same run: "221 bytes off the window's thread for each line". **The IDE copied each read twice**: since #1814 a masked
+  stream's whole lines were made one string, then read out of their colour codes into a second for the mask, which held
+  the measure at 206 to 211 on the Ubuntu VM, within a few bytes of its bound. The mask's string is now the one copy:
+  144 to 161 there (d8ab045a8, #1989).
+- `UnitTestsTests`' `A_run_whose_test_host_crashes_is_no_pass_in_local_history_and_ends_run_until_failure`, CI
+  44522273860 (macOS report shard 1): "Run 1 broke off: One or more errors occurred. (The…". **A race in VSTest the IDE
+  passed on**: as a test host ends, vstest.console hears its exit and the end of their connection in either order;
+  hearing the exit first, it stops its read of the connection and ends the run with that read's cancellation as its
+  error (an `AggregateException` over the `OperationCanceledException` of `LengthPrefixCommunicationChannel.NotifyDataAvailable`),
+  once in 40 crashed runs in one window on a loaded Mac, and the window said that error in place of the crash VSTest
+  logged and the test running. A run broken off is now said by `BrokenRuns` (a cancellation passed over, the test
+  running named whatever the error); `BrokenRunsTests` holds both orders' words alike (6e5997db8, #1988).
+- `ExplorerFilesTests`' `A_project_whose_wildcards_take_in_a_folder_being_deleted_is_told_to_the_language_server_once_it_has_gone`,
+  CI 44522273860 and 44538058686 (macOS report shard 2, 2 to 3 min): "The delete of Lib did not wait for its
+  design-time build: Moved Lib to the Trash". **The test's**: it held Shop's and Lib's design-time builds at once, which
+  the project host does only on two MSBuild nodes (half of four processors or more); macOS CI's three-processor runners
+  build one at a time, the first held until its Exec's 2-minute limit, and with Lib first its build had ended before
+  the delete, which then rightly had nothing to wait for (reproduced with `DOTNET_PROCESSOR_COUNT=3`). It now skips
+  there, as its two siblings do (`SkipUnlessTwoBuildsAtOnce`, e9a37b2f8, #1940).
+- `ApartSchedulerTests`' `A_loop_given_an_apart_scheduler_runs_on_its_threads_alone_and_they_end_once_it_is_disposed`,
+  the Mac's whole unit-test assembly at load averages of 250 to 415 (#1985's runs, 2 of 3 rounds): "A thread of the
+  scheduler was still running after it was disposed, and would be for as long as the process lives". **The test waited
+  wrong**: it held its threads' arrival, its loop and each thread's end to 30 s of its own on the wall clock, which
+  threads waiting their turn for a processor ran past. The unit tests wait for what they check with the test's token
+  alone, and `WaitLimitsTests` names any wait given a time in their built code (6e0405eeb, #1986).
+- `RelayConnectionTests`' `Once_the_apps_relay_goes_away_the_call_waiting_fails_and_so_does_every_call_after_it`, the
+  Mac's whole unit-test assembly at a load average near 265 (#1979's runs): "A call waiting as the app's relay went away
+  still waits for an answer after 10 s". **The test waited wrong**: it held the call's failure to 10 s of its own on the
+  wall clock, and that failure comes through four threads, each waiting its turn for a processor; the relay times
+  nothing. On the Ubuntu VM beside 300 busy processes 14 of 14 rounds ran past it (10.5 to 12.8 s). The class waits for
+  what it checks with no limit of its own, the run's own limit naming one that waits for good (3fe7c62af, #1985).
+- `CSharpParsingTests`' `A_key_typed_is_measured_by_its_statement_not_the_file`, the same run: "Measuring a key
+  allocated 560 bytes in a long file against 96 in a short one". **The test counted Roslyn making nodes again**: a
+  method body's statements are held only weakly (BlockSyntax's `WithManyWeakChildren`), so a collection between the
+  test's two reads took the typed statement's nodes and the measured read's `FindToken` made them again, 464 bytes
+  whatever the file's size (28 of 110,631 measures on a quiet Mac, none of 39,460 once the path's nodes were held). The
+  test holds the tree's nodes while it measures (3fe7c62af, #1985).
+- `CarriedSchemasTests`' `Every_default_a_carried_schema_offers_is_a_value_its_own_schema_takes` and `VimTests`'
+  `Star_and_hash_with_no_keyword_search_for_the_run_of_other_non_blanks(before: "x |\"y\" \"y\"", keys: "*", …)`, the
+  Mac's whole unit-test assembly at a load average near 150 (#1975's runs): `RegexMatchTimeoutException`, and the caret
+  left where it was. **A regex time limit in a unit test**: a match its code ends in microseconds waited past its limit
+  on the wall clock while the machine ran other work. The schema check held each schema pattern to a second of its own;
+  Vim's * searched under `TextSearch.AtOnce`'s 250 ms and refused, "The search took too long and stopped.", as the
+  Ubuntu VM showed beside 300 busy processes in 13 of 37,235 presses. Every regex time limit in Passenger's code is
+  now TextSearch's (`AtOnce`, `Apart`), lifted in the unit tests from their first moment (`TextSearch.LiftTimeLimits`);
+  `RegexLimitsTests`' rule names a regex given a limit of its own (98846acd4, #1979).
+- `McpNavigationTests`' `A_second_diagnostics_of_an_unchanged_file_answers_from_the_servers_last_pull_sending_none`,
+  CI 44484077195 (macOS): 9 pulls on the second ask again, after #1642. **The test waited wrong**: a server started
+  ahead of the window is taken up a moment after its projects load, and only then do its watchers start; their first
+  walks tell the server of what was written since its head start's builds began reading (those builds' own obj/ files
+  among them), and the server says its diagnostics may have changed about 2 s later, after the word the test took its
+  baseline from. The test now asks again until an ask finds nothing told the server since the one before it, and fails
+  only where an ask pulls though nothing was told; with the cache taken out it fails so (115f2b473, #1978).
+- `RunningLinesTests`' `Finding_the_next_line_that_runs_is_one_walk_however_long_the_class`, CI 44473130591 (Linux
+  gate shard 2, at af9e5dcf8): "Finding the next line in 4000 properties allocated 102256 bytes against 784 in 200".
+  **The test counted the runtime's cast cache**, the walk one as it is: `UpdateHandlersTests` loads the tests' own
+  assembly into collectible load contexts and unloads them beside every other class, and as each context's loader
+  allocator goes, once a collection takes it, the runtime empties its cast cache, which the next thread whose cast
+  misses builds again at the size it had, a 98,352-byte `int[]` at its 4,096 entries, as its own allocation. CI's
+  102,256 bytes are the walk's 784, one such table and a 3,120-byte one of 128 entries after a second flush. A probe
+  unloading contexts beside the walk took such tables in at any token on the Mac and the Ubuntu VM, the allocation
+  ticks on the walk's thread naming `System.Int32[]`. `UpdateHandlersTests` now runs in the unit tests' own Alone
+  collection, after the rest; `AllocationCountTests`' `Every_class_unloading_a_load_context_runs_alone` holds every
+  class unloading a context there and failed with `UpdateHandlersTests` before; the check then passed 6,900 repeats
+  beside the other unit tests on the Mac and 30,352 on the Ubuntu VM (869dbc9ce, #1975).
+- `ProfilerTests`' `A_trace_of_allocations_and_collections_alone_lists_them`, CI 44464475986 (Windows report shard 4,
+  at 0714bb0bd): "The byte arrays allocated are not listed, of []". **The test waited wrong**, on the runtime's order:
+  .NET 11's diagnostics server answers a session's start before it turns the session's providers on (.NET 10 turned
+  them on first), so where the test's thread ran ahead of the server's, its arrays and collections came before the GC's
+  events were on. On the Windows VM a probe allocating as its start was answered held no allocation tick in 8 of 10
+  sessions, and every tick in 10 of 10 once it waited for a provider of its own. Not #1056's shape below, where the
+  session was on. The test's session now holds a provider of its own and allocates once that is on; a failure says
+  whether the session was on at its answer and what the trace held (fe0e7853c, #1973).
+- `InterpreterTests`' `A_multi_dimensional_array_is_made_as_the_program_would_make_it`, CI 44464475986 (Windows report
+  shard 2, at 0714bb0bd): "The expression took too long to evaluate: it was stopped after 3 s", five evaluations in the
+  program taking 2.8 s, one 2 s, the debugger 179 ms, other tests' builds beside. **Neither: the runner's processors.**
+  Each evaluation is a round trip through the program's threads and the debugger's, which on the Windows VM grew with
+  load alone (the end came 5 ms after the program was let go at the median with two busy loops beside, 113 ms with
+  six, the program spending no measurable processor time meanwhile; the debugger heard it 0.3 and 28 ms later, its
+  pool idle, so not #1967's starvation). Not reproduced past 3 s. The engine's log now says, of the longest evaluation,
+  how long its end took to come and how long it took to be heard (1b0d43e51, #1972).
+
+- `DecompiledSymbolsTests`' `A_disconnect_while_CoreLib_is_decompiled_is_answered_before_it_ends_and_leaves_no_symbols_half_written`,
+  CI 44455952846 (Windows report shard 4, at 21271dbb4, 43 s where macOS took 3 s): "CoreLib's frame was resolved
+  before the disconnect was answered: the disconnect waited for the decompile". **A starvation in the debugger**, no
+  lock shared and the test's moment right: the decompile's parallel loop ran on the adapter's thread pool, its workers
+  taking every thread and each finishing a turn and queueing the next often enough that the pool added none, so the
+  protocol's reads and answers waited until the loop ended (on the Mac a threads request took 26 s with the adapter's
+  pool held to its processors). The loop now runs on threads of its own (`ApartScheduler`), requests answered in 70 ms
+  at most beside it; `A_request_and_a_disconnect_are_answered_while_a_decompile_takes_every_processor_and_the_thread_pool_cannot_grow`
+  holds each thread of CoreLib's decompile (`PASSENGER_ENGINE_HOLD_DECOMPILE`) in an adapter whose pool cannot grow past
+  8, and failed before on the Mac and the Windows VM (f77ec10ff, #1967).
+
+## 2026-11-18
+
+- `TestHostLastWordsTests`' `A_test_host_that_writes_a_last_line_and_exits_at_once_has_that_line_in_its_failure_every_time`,
+  CI 44234430125 (Windows report shard 4, round 6 of 20): "PassengerCases (net10.0) ended with exit code 3 before it
+  connected". **A race in the IDE**: the host connects before it writes a word, so it had connected long before it
+  exited; the runner's accept loop woke on its 100 ms tick, found the accept's task not yet completed (on Windows its
+  completion waits its turn on the thread pool, two busy processes beside) and the host gone, and said it never
+  connected. Once it hears the host end the runner now stops the accept and takes what it took, else what waits in the
+  listener's queue (`TestingPlatformRunner`'s `Host.MadeAsync`); `A_test_host_whose_connection_comes_after_its_end_is_heard_is_said_to_have_connected`
+  hands it the connection only once it heard the end (`HoldsConnectionsUntilEnded`) and failed with CI's words before
+  (e5b6b7650, #1879).
+- `NuGetTests`' `A_deprecated_version_chosen_before_install_is_said_in_the_details`, CI 44256034522 (macOS report
+  shard 3, at be67a4a77): "Waited 180 s for 1.5.0 … [1.0.0 is deprecated: critical bugs.]". **Not reproduced** in 9
+  loaded rounds on the Mac. One race in the IDE was found and fixed beside it: whatever lists the packages again while
+  a picked version's deprecation is asked (a refresh, a nuget.config heard, an evaluation, the audit landing) made the
+  details again on the newest version, dropping the pick and never saying its deprecation (`NuGetView.PickedOf`;
+  `A_version_chosen_as_its_deprecation_is_asked_stays_chosen_through_a_refresh_and_is_said_once_answered`, holding the
+  feed's registrations). That order ends "2.0.0 chosen", not CI's words, which need 1.5.0's read failed, the window
+  detached at the pick, or details made again whose versions read failed: the test's failure now names the version
+  chosen, the versions read and whether the window was shown (da2549b3d, #1898).
+
+- `McpWindowTests`' `An_agents_definition_of_what_a_restored_generator_declares_waits_for_the_end_of_the_batch_its_project_loaded_again_in`
+  and `…waits_for_its_run_though_the_server_says_its_diagnostics_moved_first`, loaded rounds on the Mac (#1939's and
+  #1954's agents): "No symbol at MainPage.xaml.cs:9:9". **A race in the IDE**: the design-time build after the restore
+  wrote the global usings and MAUI's editorconfig again in place, and no watcher told the server (the system's watcher
+  was behind, and the fallback looked only at folders whose stamp moved); the generators' wait then ran out and let the
+  question through as of the text before. The wait now tells the server of each file it holds otherwise than the disk
+  itself (`WatchedFiles.TellFound`) and refuses a question that waited for one when it runs out
+  (`CSharpService.RanOutReading`). Two new McpWindowTests hold the watcher's telling back and answered "No symbol" on
+  main (4f3968a34, #1954).
+
 ## 2026-11-16
 
 - `McpNavigationTests`' `Definition_of_a_maui_pages_initialize_component_answers_the_generators_declaration_in_a_copy_of_its_code`,

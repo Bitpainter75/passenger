@@ -25,7 +25,7 @@ public sealed class AgentView : DockPanel
     private readonly Action<string> open;
     private readonly Func<string?> folder;
     private readonly Dictionary<AgentChat, ToggleButton> tabs = [];
-    private readonly StackPanel entries = new() { Name = "AgentEntries", Spacing = 12, Margin = new Thickness(12, 10) };
+    private readonly StackPanel entries = new() { Name = "AgentEntries", Spacing = Gaps.Wide, Margin = new Thickness(Gaps.Wide, Gaps.Normal) };
     private readonly ScrollViewer scroll;
     private readonly EmptyState empty = new();
     private readonly TextBox prompt;
@@ -48,7 +48,7 @@ public sealed class AgentView : DockPanel
         this.browse = browse;
         this.open = open;
         Chat = chosen;
-        StackPanel strip = new() { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(8, 0), VerticalAlignment = VerticalAlignment.Center };
+        StackPanel strip = new() { Orientation = Orientation.Horizontal, Spacing = Gaps.Hair, VerticalAlignment = VerticalAlignment.Center };
         foreach (AgentChat chat in chats)
         {
             ToggleButton tab = ToolTabs.Tab(chat.Program.Name, chat == chosen);
@@ -71,14 +71,8 @@ public sealed class AgentView : DockPanel
                 }
             };
         }
-        StackPanel tools = new()
-        {
-            Orientation = Orientation.Horizontal,
-            Margin = new Thickness(0, 0, 6, 0),
-            [DockProperty] = Dock.Right,
-            Children = { ToolButtons.Of(AppActions.AgentNew, IconKeys.Add, "New Conversation", request) },
-        };
-        Children.Add(ToolBars.Top(new DockPanel { Children = { tools, strip } }));
+        Button renew = ToolButtons.Of(AppActions.AgentNew, IconKeys.Add, "New Conversation", request);
+        Children.Add(ToolBars.Top(new ToolFlow { Margin = new Thickness(Gaps.Normal, Gaps.Hair), Children = { strip, renew } }));
 
         prompt = new TextBox
         {
@@ -91,12 +85,12 @@ public sealed class AgentView : DockPanel
         prompt.AddHandler(KeyDownEvent, OnPromptKey, RoutingStrategies.Tunnel);
         send = ToolButtons.Of(AppActions.AgentSend, IconKeys.Send, "Send", request);
         stop = ToolButtons.Of(AppActions.AgentStop, IconKeys.Stop, "Stop", request);
-        Panel buttons = new() { Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Bottom, [DockProperty] = Dock.Right, Children = { send, stop } };
+        Panel buttons = new() { Margin = new Thickness(Gaps.Small, 0, 0, 0), VerticalAlignment = VerticalAlignment.Bottom, [DockProperty] = Dock.Right, Children = { send, stop } };
         Border box = new()
         {
             [DockProperty] = Dock.Bottom,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Child = new DockPanel { Margin = new Thickness(8, 6), Children = { buttons, prompt } },
+            BorderThickness = Hairlines.Above,
+            Child = new DockPanel { Margin = new Thickness(Gaps.Normal, Gaps.Small), Children = { buttons, prompt } },
         };
         box.Bind(Border.BorderBrushProperty, box.GetResourceObservable(TokenKeys.Divider));
         Children.Add(box);
@@ -216,7 +210,7 @@ public sealed class AgentView : DockPanel
         PersonEntry person => new Border
         {
             Classes = { StyleClasses.Framed },
-            Padding = new Thickness(10, 6),
+            Padding = new Thickness(Gaps.Normal, Gaps.Small),
             Tag = $"You: {person.Text}",
             Child = new SelectableTextBlock { Text = person.Text, TextWrapping = TextWrapping.Wrap },
         },
@@ -243,18 +237,18 @@ public sealed class AgentView : DockPanel
         {
             Width = 12,
             Height = 12,
-            Margin = new Thickness(0, 0, 8, 0),
+            Margin = new Thickness(0, 0, Gaps.Normal, 0),
             VerticalAlignment = VerticalAlignment.Center,
             DataKey = tool.State switch { ToolState.Running => IconKeys.TestRunning, ToolState.Done => IconKeys.TestPassed, _ => IconKeys.TestFailed },
             ForegroundKey = tool.State switch { ToolState.Running => TokenKeys.Test_Running, ToolState.Done => TokenKeys.Test_Passed, _ => TokenKeys.Test_Failed },
         };
-        TextBlock title = new() { Text = tool.Title, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+        TextBlock title = new() { Text = tool.Title, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Gaps.Normal, 0) };
         string first = tool.Detail.Split('\n')[0];
         TextBlock detail = MutedText.Of(first).InCodeFont();
         detail.FontSize = 12;
         ToolTip.SetTip(detail, tool.Detail.Length > first.Length ? tool.Detail : null);
         DockPanel head = new() { Children = { state, title } };
-        StackPanel row = new() { Spacing = 4, Tag = $"{tool.Title} ({tool.State}): {tool.Detail}" };
+        StackPanel row = new() { Spacing = Gaps.Tight, Tag = $"{tool.Title} ({tool.State}): {tool.Detail}" };
         row.Children.Add(head);
         // Its files are named under it, so the row itself need not say them twice.
         if (tool.Files.Count == 0)
@@ -269,12 +263,12 @@ public sealed class AgentView : DockPanel
         {
             Border wrote = CodeBlock.Of(output);
             wrote.MaxHeight = 220;
-            wrote.Margin = new Thickness(20, 0, 0, 0);
+            wrote.Margin = new Thickness(Gaps.Indent, 0, 0, 0);
             Control text = wrote.Child!;
             wrote.Child = null;
             wrote.Child = new ScrollViewer { Content = text, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
             wrote.IsVisible = tool.State == ToolState.Failed || opened.Contains(tool);
-            Button toggle = new() { Classes = { StyleClasses.Link }, Content = "Output", FontSize = 12, Margin = new Thickness(8, 0, 0, 0), [DockProperty] = Dock.Right };
+            Button toggle = new() { Classes = { StyleClasses.Link }, Content = "Output", FontSize = 12, Margin = new Thickness(Gaps.Normal, 0, 0, 0), [DockProperty] = Dock.Right };
             toggle.Click += (_, _) =>
             {
                 wrote.IsVisible = !wrote.IsVisible;
@@ -305,7 +299,7 @@ public sealed class AgentView : DockPanel
             IsEnabled = file.Change != AgentFileChange.Deleted,
         };
         path.Click += (_, _) => open(file.Path);
-        StackPanel edit = new() { Spacing = 2, Margin = new Thickness(20, 0, 0, 0), Children = { path } };
+        StackPanel edit = new() { Spacing = Gaps.Hair, Margin = new Thickness(Gaps.Indent, 0, 0, 0), Children = { path } };
         if (file.Diff.Length > 0)
         {
             StackPanel lines = new();
@@ -336,7 +330,7 @@ public sealed class AgentView : DockPanel
     /// <summary>The agent's question: what it wants leave for, and its answers while it waits, then what was answered.</summary>
     private Border Ask(AskEntry ask)
     {
-        StackPanel page = new() { Spacing = 6 };
+        StackPanel page = new() { Spacing = Gaps.Small };
         page.Children.Add(new TextBlock { Text = $"{Chat.Program.Name} asks: {ask.Title}", FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap });
         if (ask.Detail.Length > 0)
         {
@@ -353,7 +347,7 @@ public sealed class AgentView : DockPanel
         };
         if (ask.Open)
         {
-            WrapPanel answers = new() { ItemSpacing = 6, LineSpacing = 6 };
+            WrapPanel answers = new() { ItemSpacing = Gaps.Small, LineSpacing = Gaps.Small };
             answers.Children.Add(Answer(ask, "Allow", AgentAnswer.Allow));
             if (ask.OffersAlways)
             {
@@ -369,7 +363,7 @@ public sealed class AgentView : DockPanel
         return new Border
         {
             Classes = { StyleClasses.Framed },
-            Padding = new Thickness(10, 8),
+            Padding = new Thickness(Gaps.Normal, Gaps.Normal),
             Tag = ask.Open ? $"Asks {ask.Title}: {ask.Detail}" : $"Asked {ask.Title} ({answered}): {ask.Detail}",
             Child = page,
         };

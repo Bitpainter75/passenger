@@ -20,7 +20,7 @@ public sealed class SqlTableDialog : IdeWindow
     private readonly string schema;
     private readonly Func<IReadOnlyList<string>, Task<string?>> apply;
     private readonly TextBox name = new();
-    private readonly StackPanel rows = new() { Spacing = 4 };
+    private readonly StackPanel rows = new() { Spacing = Gaps.Tight };
     private readonly SelectableTextBlock script = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock problem = new() { Classes = { StyleClasses.Error }, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button ok;
@@ -55,7 +55,7 @@ public sealed class SqlTableDialog : IdeWindow
             added.Name.Focus();
             Paint();
         };
-        Grid titles = new() { ColumnDefinitions = new ColumnDefinitions(Columns), ColumnSpacing = 8 };
+        Grid titles = new() { ColumnDefinitions = new ColumnDefinitions(Columns), ColumnSpacing = Gaps.Normal };
         foreach ((string title, int at) in new[] { "Column", "Type", "Null", "Key", "Identity", "Default" }.Select((t, i) => (t, i)))
         {
             TextBlock header = MutedText.Of(title);
@@ -65,15 +65,15 @@ public sealed class SqlTableDialog : IdeWindow
             titles.Children.Add(header);
         }
         titles.Children.Add(new Border { Width = 28, [Grid.ColumnProperty] = 6 });
-        Border scripted = new() { Classes = { StyleClasses.Code }, Height = 150, Child = new ScrollViewer { Content = script.InCodeFont() }, [DockPanel.DockProperty] = Dock.Bottom, Margin = new Thickness(0, 10, 0, 0) };
+        Border scripted = new() { Classes = { StyleClasses.Code }, Height = 150, Child = new ScrollViewer { Content = script.InCodeFont() }, [DockPanel.DockProperty] = Dock.Bottom, Margin = new Thickness(0, Gaps.Normal, 0, 0) };
         DockPanel page = new()
         {
             Children =
             {
-                new StackPanel { [DockPanel.DockProperty] = Dock.Top, Spacing = 10, Children = { FormRows.Of("Table:", name), titles } },
+                new StackPanel { [DockPanel.DockProperty] = Dock.Top, Spacing = Gaps.Wide, Children = { FormRows.Of("Table:", name), titles } },
                 scripted,
-                new Border { [DockPanel.DockProperty] = Dock.Bottom, Margin = new Thickness(0, 8, 0, 0), Child = add },
-                new ScrollViewer { Content = rows, Margin = new Thickness(0, 4, 0, 0) },
+                new Border { [DockPanel.DockProperty] = Dock.Bottom, Margin = new Thickness(0, Gaps.Normal, 0, 0), Child = add },
+                new ScrollViewer { Content = rows, Margin = new Thickness(0, Gaps.Tight, 0, 0) },
             },
         };
         Content = DialogFooter.Page(page, DialogFooter.OkCancel(ok, () => Close(false), problem));
@@ -159,7 +159,7 @@ public sealed class SqlTableDialog : IdeWindow
             this.was = was;
             read = column;
             ColumnDefinitions = new ColumnDefinitions(Columns);
-            ColumnSpacing = 8;
+            ColumnSpacing = Gaps.Normal;
             Name.Text = column.Name;
             type.Text = column.Type;
             type.PlaceholderText = "int, nvarchar(50), date…";

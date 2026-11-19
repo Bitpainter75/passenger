@@ -14,9 +14,10 @@ namespace Passenger.Tests;
 /// without a source generator's, the name itself first, usages read by file with the symbol the place took, a generator's
 /// place (a usage, a declaration) in a copy of its code with its line's text, a place with no symbol said to be one, or
 /// the symbol its line declares taken; symbols named rather than placed, found exactly, each overload told apart by its
-/// documentation id, an indexer by this[] or Item; a hover card as plain text, and a fix's Suppress and Configure choices
-/// counted until asked for; calls on many files leaving open, in the IDE and the language server, only the file the agent
-/// opened and the one it left unsaved; and a type a code action has just moved known at once in its new file.</summary>
+/// documentation id, an indexer by this[] or Item, a record's positional property as Record.Property; a hover card as plain
+/// text, and a fix's Suppress and Configure choices counted until asked for; calls on many files leaving open, in the IDE
+/// and the language server, only the file the agent opened and the one it left unsaved; and a type a code action has just
+/// moved known at once in its new file.</summary>
 public sealed class McpNavigationTests : McpRig, IClassFixture<RestoredFolders>
 {
     public McpNavigationTests(RestoredFolders folders)
@@ -111,13 +112,8 @@ public sealed class McpNavigationTests : McpRig, IClassFixture<RestoredFolders>
     [Fact]
     public async Task Renaming_a_method_and_its_type_a_maui_expression_names_renames_the_expression_with_them()
     {
-        string folder = MauiPage("mcp-maui-renamed-");
+        (string folder, string page) = MauiPageCallingHelper("mcp-maui-renamed-");
         DeleteAtEnd(folder);
-        TestFolders.Write(folder, "Helper.cs", "namespace MauiApp1;\n\npublic static class Helper\n{\n    public static string Shout(string text) => text.ToUpperInvariant();\n}\n");
-        string page = File.ReadAllText(Path.Combine(folder, "MainPage.xaml"))
-            .Replace("<ContentPage x:Class=\"MauiApp1.MainPage\">", "<ContentPage x:Class=\"MauiApp1.MainPage\" xmlns:local=\"clr-namespace:MauiApp1\">", StringComparison.Ordinal)
-            .Replace("Text=\"Hello, World!\"", "Text=\"{local:Helper.Shout('hello')}\"", StringComparison.Ordinal);
-        TestFolders.Write(folder, "MainPage.xaml", page);
         await using McpClient client = await Start(["--mcp", folder]);
 
         await Call(client, McpTools.Rename, new() { ["path"] = "Helper.cs", ["line"] = 5, ["column"] = 26, ["newName"] = "Yell" });
@@ -274,6 +270,19 @@ public sealed class McpNavigationTests : McpRig, IClassFixture<RestoredFolders>
         TestFolders.Write(folder, "MainPage.xaml", MauiXamlTests.Gallery.MainPage);
         TestFolders.Write(folder, "MainPage.xaml.cs", MauiXamlTests.Gallery.MainPageCode);
         return folder;
+    }
+
+    /// <summary>A MAUI page's folder (<see cref="MauiPage"/>) whose page's C# expression calls the app's Helper.Shout, declared
+    /// in Helper.cs, through a XAML prefix; with the page's text as written.</summary>
+    internal static (string Folder, string Page) MauiPageCallingHelper(string prefix)
+    {
+        string folder = MauiPage(prefix);
+        TestFolders.Write(folder, "Helper.cs", "namespace MauiApp1;\n\npublic static class Helper\n{\n    public static string Shout(string text) => text.ToUpperInvariant();\n}\n");
+        string page = File.ReadAllText(Path.Combine(folder, "MainPage.xaml"))
+            .Replace("<ContentPage x:Class=\"MauiApp1.MainPage\">", "<ContentPage x:Class=\"MauiApp1.MainPage\" xmlns:local=\"clr-namespace:MauiApp1\">", StringComparison.Ordinal)
+            .Replace("Text=\"Hello, World!\"", "Text=\"{local:Helper.Shout('hello')}\"", StringComparison.Ordinal);
+        TestFolders.Write(folder, "MainPage.xaml", page);
+        return (folder, page);
     }
 
     /// <summary>Two projects each given a package once loaded: the server loads both again and restores both, one restore
@@ -589,6 +598,27 @@ public sealed class McpNavigationTests : McpRig, IClassFixture<RestoredFolders>
             $"usages where no symbol is answered: {Text(nothing)}");
     }
 
+    /// <summary>find_symbol lists the name itself first though only a source generator declares it (the regex generator's
+    /// class Word_0), before the solution's own names that start with it, so no limit cuts it; the solution's own come before
+    /// the rest of what generators declare.</summary>
+    [Fact]
+    public async Task An_agents_find_symbol_lists_a_generated_symbol_it_names_first_before_the_solutions_own_names_like_it()
+    {
+        await TakeFolderAsync();
+        Write("Words.cs", Words);
+        Write("Counts.cs", "static class Word_0Count\n{\n    public static int Word_0Total;\n}\n");
+        await using McpClient client = await Start(["--mcp", Folder]);
+
+        JsonElement[] found = [.. (await Call(client, McpTools.FindSymbol, new() { ["query"] = "Word_0" })).EnumerateArray()];
+        // The generator's class and its constructor, both named Word_0.
+        JsonElement[] named = [.. found.TakeWhile(s => s.GetProperty("name").GetString() == "Word_0")];
+        Assert.True(named.Length > 0 && named.All(s => s.GetProperty("path").GetString()!.EndsWith("RegexGenerator.g.cs", StringComparison.Ordinal))
+            && found.Skip(named.Length).Take(2).Select(s => s.GetProperty("name").GetString()).SequenceEqual(["Word_0Count", "Word_0Total"]),
+            $"find_symbol Word_0 did not list the generator's Word_0 first, then the solution's own names starting with it: {string.Join(", ", found.Select(s => s.GetRawText()))}");
+        JsonElement first = Assert.Single((await Call(client, McpTools.FindSymbol, new() { ["query"] = "Word_0", ["limit"] = 1 })).EnumerateArray());
+        Assert.True(first.GetProperty("name").GetString() == "Word_0", $"find_symbol Word_0 with a limit of 1 cut the name itself for {first.GetRawText()}");
+    }
+
     /// <summary>usages says which files are generated code, as Roslyn tells it, and lists them after the person's: a source
     /// generator's, a .g.cs a tool wrote, and a file whose first comment says &lt;auto-generated&gt;; a file written by hand
     /// says nothing of it.</summary>
@@ -730,6 +760,95 @@ public sealed class McpNavigationTests : McpRig, IClassFixture<RestoredFolders>
         Assert.Contains("public static int All(string[] texts)", File.ReadAllText(Path.Combine(Folder, "Aaa.cs")), StringComparison.Ordinal);
     }
 
+    private const string Feeds = "public sealed record ReleaseFeed(string Latest, int Count)\n{\n    public string Upper { get; } = Latest.ToUpperInvariant();\n}\n\n"
+        + "public readonly record struct Spot(int Across, int Down);\n";
+
+    private const string Readers = "static class Readers\n{\n    public static string Of(ReleaseFeed feed, Spot spot) => feed.Latest + feed.Count + spot.Down;\n\n"
+        + "    public static ReleaseFeed Next(ReleaseFeed feed) => feed with { Latest = \"2.0\" };\n}\n";
+
+    /// <summary>A record's positional property, which its primary constructor's parameter declares, is named as
+    /// Record.Property, of a record class and a record struct, as find_symbol lists it: usages, definition and rename by that
+    /// name answer what they answer from a use of it, as the editor's Find Usages, Go to Declaration and Rename do, the
+    /// property, not the parameter, said to be what the place took.</summary>
+    [Fact]
+    public async Task An_agent_names_a_records_positional_property_as_Record_Property_and_gets_its_uses_declaration_and_rename_as_from_a_use()
+    {
+        await TakeFolderAsync();
+        Write("Feeds.cs", Feeds);
+        Write("Readers.cs", Readers);
+        await using McpClient client = await Start(["--mcp", Folder]);
+
+        JsonElement listed = Assert.Single((await Call(client, McpTools.FindSymbol, new() { ["query"] = "Latest", ["kind"] = "property" })).EnumerateArray());
+        JsonElement exact = Assert.Single((await Call(client, McpTools.FindSymbol, new() { ["query"] = "Latest", ["exact"] = true })).EnumerateArray());
+        Assert.Equal(("property", "ReleaseFeed", "Feeds.cs:1:41"), Found(listed));
+        Assert.Equal((Found(listed), "P:ReleaseFeed.Latest"), (Found(exact), exact.GetProperty("id").GetString()));
+
+        await FoundAsync("ReleaseFeed.Latest", 66, ["Feeds.cs:1:41", "Feeds.cs:3:36", "Readers.cs:3:66", "Readers.cs:5:69"]);
+        await FoundAsync("Spot.Down", 93, ["Feeds.cs:6:52", "Readers.cs:3:93"]);
+        Assert.Equal(["Feeds.cs:6:52"], Placed(await Call(client, McpTools.Definition, new() { ["symbol"] = "P:Spot.Down" })));
+
+        Assert.Equal("Renamed in 2 files: Feeds.cs, Readers.cs", (await Call(client, McpTools.Rename, new() { ["symbol"] = "ReleaseFeed.Latest", ["newName"] = "Newest" })).GetString());
+        Assert.Equal("Renamed in 2 files: Feeds.cs, Readers.cs", (await Call(client, McpTools.Rename, new() { ["symbol"] = "Spot.Down", ["newName"] = "Below" })).GetString());
+        Assert.Equal(Feeds.Replace("Latest", "Newest", StringComparison.Ordinal).Replace("Down", "Below", StringComparison.Ordinal), File.ReadAllText(Path.Combine(Folder, "Feeds.cs")));
+        Assert.Equal(Readers.Replace("Latest", "Newest", StringComparison.Ordinal).Replace("Down", "Below", StringComparison.Ordinal), File.ReadAllText(Path.Combine(Folder, "Readers.cs")));
+
+        async Task FoundAsync(string named, int column, string[] uses)
+        {
+            Dictionary<string, object?> fromUse = new() { ["path"] = "Readers.cs", ["line"] = 3, ["column"] = column };
+            JsonElement byName = await Call(client, McpTools.Usages, new() { ["symbol"] = named });
+            JsonElement byUse = await Call(client, McpTools.Usages, fromUse);
+            Assert.True(byName.GetProperty("symbol").GetString() == $"{named} (property)" && byUse.GetProperty("symbol").GetString() == $"{named} (property)",
+                $"usages of {named} said it took {byName.GetProperty("symbol")} by name and {byUse.GetProperty("symbol")} from a use: an agent naming the property is told of another symbol");
+            Assert.Equal(uses, Used(byName).Select(u => $"{u.Path}:{u.Line}:{u.Column}"));
+            Assert.Equal(Used(byUse), Used(byName));
+            Assert.Equal([uses[0]], Placed(await Call(client, McpTools.Definition, new() { ["symbol"] = named })));
+            Assert.Equal([uses[0]], Placed(await Call(client, McpTools.Definition, fromUse)));
+        }
+
+        static (string Kind, string? Container, string Place) Found(JsonElement symbol) => (symbol.GetProperty("kind").GetString()!, symbol.GetProperty("container").GetString(),
+            $"{symbol.GetProperty("path").GetString()}:{symbol.GetProperty("line").GetInt32()}:{symbol.GetProperty("column").GetInt32()}");
+    }
+
+    /// <summary>hierarchy of a record's positional property answers its callers, the members that read or set it, each at
+    /// its first use, from a use of it in another file, by name and at its declaration, as for any property, where it
+    /// answered that the record was a type with no callers; its callees none, as an auto-property's. A method asked about at
+    /// a use in another file answers as at its declaration, its callees the positional properties it reads; the record's
+    /// parameter read in its own body is no member, and said to be none.</summary>
+    [Fact]
+    public async Task An_agent_gets_a_records_positional_propertys_callers_from_a_use_by_name_and_at_its_declaration()
+    {
+        await TakeFolderAsync();
+        Write("Feeds.cs", Feeds);
+        Write("Readers.cs", Readers);
+        Write("Both.cs", "static class Both\n{\n    public static string Of(ReleaseFeed feed, Spot spot) => Readers.Of(feed, spot) + Readers.Of(feed, spot);\n}\n");
+        await using McpClient client = await Start(["--mcp", Folder]);
+
+        foreach (Dictionary<string, object?> asked in new Dictionary<string, object?>[]
+        {
+            new() { ["path"] = "Readers.cs", ["line"] = 3, ["column"] = 66 },
+            new() { ["symbol"] = "ReleaseFeed.Latest" },
+            new() { ["path"] = "Feeds.cs", ["line"] = 1, ["column"] = 41 },
+        })
+        {
+            Assert.Equal(["Readers.Of(ReleaseFeed, Spot) Readers.cs:3:66", "Readers.Next(ReleaseFeed) Readers.cs:5:69"], await CallsAsync(asked));
+            Assert.Empty(await CallsAsync(new(asked) { ["direction"] = "callees" }));
+        }
+        Assert.Equal(["Readers.Of(ReleaseFeed, Spot) Readers.cs:3:93"], await CallsAsync(new() { ["symbol"] = "Spot.Down" }));
+
+        Dictionary<string, object?> ofUsed = new() { ["path"] = "Both.cs", ["line"] = 3, ["column"] = 69 };
+        Assert.Equal(["Both.Of(ReleaseFeed, Spot) Both.cs:3:69"], await CallsAsync(ofUsed));
+        Assert.Equal(["ReleaseFeed.Latest Feeds.cs:1:41", "ReleaseFeed.Count Feeds.cs:1:53", "Spot.Down Feeds.cs:6:52"],
+            await CallsAsync(new(ofUsed) { ["direction"] = "callees" }));
+
+        CallToolResult parameter = await Result(client, McpTools.Hierarchy, new() { ["path"] = "Feeds.cs", ["line"] = 3, ["column"] = 36 });
+        Assert.True(parameter.IsError == true && Text(parameter).Contains("No method, property or event there", StringComparison.Ordinal),
+            $"hierarchy at the record's parameter read in its own body answered: {Text(parameter)}");
+
+        async Task<string[]> CallsAsync(Dictionary<string, object?> arguments) =>
+            [.. (await Call(client, McpTools.Hierarchy, arguments)).EnumerateArray()
+                .Select(c => $"{c.GetProperty("name").GetString()} {c.GetProperty("path").GetString()}:{c.GetProperty("line").GetInt32()}:{c.GetProperty("column").GetInt32()}")];
+    }
+
     /// <summary>rename of a type answers once Git's index holds its file's move: git status, run the moment the answer comes,
     /// as an agent's shell runs it, shows the file renamed, never the old one deleted and the new one untracked.</summary>
     [Fact]
@@ -843,30 +962,98 @@ public sealed class McpNavigationTests : McpRig, IClassFixture<RestoredFolders>
     }
 
     /// <summary>A file an agent asks diagnostics of stays open in the language server after the call, so a second ask of it,
-    /// unchanged, answers what the first did from the server's last pull, sending none (the protocol trace).</summary>
+    /// unchanged, answers what the first did from the server's last pull, sending none (the protocol trace), once nothing has
+    /// told the server anything since that pull (<see cref="AskedAgainAsync"/>).</summary>
     [Fact]
     public async Task A_second_diagnostics_of_an_unchanged_file_answers_from_the_servers_last_pull_sending_none()
     {
         await TakeFolderAsync();
         await using McpClient client = await StartTracedAsync();
+        string trace = Path.Combine(OwnState, "logs", "lsp.log");
+        int asked = TraceLines(trace).Length;
         string first = Text(await Call(client, McpTools.Diagnostics, new() { ["path"] = "Helper.cs" }));
         Assert.Contains("unused", first, StringComparison.Ordinal);
-        string trace = Path.Combine(OwnState, "logs", "lsp.log");
         // The window's own pulls of the file just opened come first, then the server's word after its load: the ask after that word pulls again.
         await MovedAfterLoadAsync();
-        await Call(client, McpTools.Diagnostics, new() { ["path"] = "Helper.cs" });
+        await AskedAgainAsync(client, trace, first, asked, "The second ask of Helper.cs, unchanged,", meanwhile: () => Task.CompletedTask);
+        Assert.Contains("Helper.cs", ServerOpen(trace));
+    }
+
+    /// <summary>Asks diagnostics of Helper.cs again, after <paramref name="meanwhile"/>, until an ask finds nothing told the
+    /// language server since the ask before it began (the first at lsp.log's line <paramref name="asked"/>), and finds that
+    /// one answers <paramref name="first"/> sending no pull. An ask after something told it (its word that diagnostics may
+    /// have changed, a change on disk Passenger heard, as when the first walks of the watchers of a server started ahead tell
+    /// what its builds wrote) rightly pulls again, so it is asked again; one that pulls though nothing was told fails.</summary>
+    private async Task AskedAgainAsync(McpClient client, string trace, string first, int asked, string what, Func<Task> meanwhile)
+    {
+        List<string> told = [];
+        for (int ask = 0; ask < 6; ask++)
+        {
+            int pulls = Settled(trace);
+            int asking = TraceLines(trace).Length;
+            await meanwhile();
+            string again = Text(await Call(client, McpTools.Diagnostics, new() { ["path"] = "Helper.cs" }));
+            Assert.Equal(first, again);
+            await TracedAsync(client, trace);
+            if (Pulls(trace, "Helper.cs") == pulls)
+            {
+                return;
+            }
+            string[] moved = MovedSince(trace, asked, PullLine(trace, "Helper.cs", pulls + 1));
+            Assert.True(moved.Length > 0,
+                $"{what} sent the language server {Pulls(trace, "Helper.cs") - pulls} pulls of its diagnostics though nothing was told the server since the ask before it, whose pull answered");
+            told.Add(string.Join("; ", moved));
+            asked = asking;
+        }
+        Assert.Fail($"{what} pulled again at each of six asks, each after something was told the language server since the ask before it: {string.Join(" | ", told)}");
+    }
+
+    /// <summary>The count of lsp.log's pulls of Helper.cs once it has held still a second, the window's own pulls of it done.</summary>
+    private static int Settled(string trace)
+    {
         int pulls = -1;
         for (int round = 0; round < 20 && Pulls(trace, "Helper.cs") != pulls; round++)
         {
             pulls = Pulls(trace, "Helper.cs");
-            Waiting.For(TimeSpan.FromSeconds(1), "the trace of the first calls' pulls to settle");
+            Waiting.For(TimeSpan.FromSeconds(1), "the trace of the calls' pulls to settle");
         }
-        string second = Text(await Call(client, McpTools.Diagnostics, new() { ["path"] = "Helper.cs" }));
-        Assert.Equal(first, second);
-        await TracedAsync(client, trace);
-        Assert.True(Pulls(trace, "Helper.cs") == pulls,
-            $"The second ask of Helper.cs, unchanged, sent the language server {Pulls(trace, "Helper.cs") - pulls} pulls of its diagnostics, where its last pull answered");
-        Assert.Contains("Helper.cs", ServerOpen(trace));
+        return pulls;
+    }
+
+    /// <summary>The line of lsp.log of pull request <paramref name="number"/> of a file, counted from 1; past the end where
+    /// there is none.</summary>
+    private static int PullLine(string trace, string file, int number)
+    {
+        string[] lines = TraceLines(trace);
+        int seen = 0;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (IsPull(lines[i], file) && ++seen == number)
+            {
+                return i;
+            }
+        }
+        return lines.Length;
+    }
+
+    /// <summary>Whether a line of lsp.log is a pull of a file's diagnostics sent the server.</summary>
+    private static bool IsPull(string line, string file) => line.Contains("] --> ", StringComparison.Ordinal)
+        && line.Contains($"\"method\":\"{Passenger.Lsp.LspMethods.DocumentDiagnostic}\"", StringComparison.Ordinal) && line.Contains("/" + file + "\"", StringComparison.Ordinal);
+
+    /// <summary>What lsp.log says moved the server's answers (<see cref="Passenger.Lsp.LanguageServer.Changes"/>) from line
+    /// <paramref name="from"/> to <paramref name="to"/>: each notification it was sent, but the protocol's own, and its word
+    /// that its projects loaded or its diagnostics may have changed, and its asks for a project's builds.</summary>
+    private static string[] MovedSince(string trace, int from, int to)
+    {
+        string[] lines = TraceLines(trace);
+        string[] moving = [Passenger.Lsp.LspMethods.DiagnosticRefresh, Passenger.Lsp.LspMethods.ProjectInitializationComplete, Passenger.Roslyn.Extension.ProjectMethods.Info];
+        return [.. lines[Math.Min(from, lines.Length)..Math.Min(to, lines.Length)].Select(l => (Line: l, Method: MethodOf(l))).Where(l => l.Method is { } method
+            && (l.Line.Contains("] --> ", StringComparison.Ordinal) && !l.Line.Contains("\"id\":", StringComparison.Ordinal) && !method.StartsWith("$/", StringComparison.Ordinal)
+                || l.Line.Contains("] <-- ", StringComparison.Ordinal) && moving.Contains(method)))
+            .Select(l => l.Method!).Distinct()];
+
+        static string? MethodOf(string line) =>
+            line.IndexOf("\"method\":\"", StringComparison.Ordinal) is var at and >= 0 && line.IndexOf('"', at + 10) is var end and > 0 ? line[(at + 10)..end] : null;
     }
 
     /// <summary>A completion list changes nothing the language server answers, so an agent's diagnostics of a file asked again
@@ -877,27 +1064,19 @@ public sealed class McpNavigationTests : McpRig, IClassFixture<RestoredFolders>
         await TakeFolderAsync();
         await using McpClient client = await StartTracedAsync();
         await Call(client, McpTools.Open, new() { ["path"] = "Helper.cs", ["line"] = 6, ["column"] = 16 });
+        string trace = Path.Combine(OwnState, "logs", "lsp.log");
+        int asked = TraceLines(trace).Length;
         string first = Text(await Call(client, McpTools.Diagnostics, new() { ["path"] = "Helper.cs" }));
         Assert.Contains("unused", first, StringComparison.Ordinal);
-        string trace = Path.Combine(OwnState, "logs", "lsp.log");
         // The window's own pulls of the file just opened come first, then the server's word after its load: the ask after that word pulls again.
         await MovedAfterLoadAsync();
-        await Call(client, McpTools.Diagnostics, new() { ["path"] = "Helper.cs" });
-        int pulls = -1;
-        for (int round = 0; round < 20 && Pulls(trace, "Helper.cs") != pulls; round++)
+        await AskedAgainAsync(client, trace, first, asked, "Diagnostics of Helper.cs asked again after a completion list, nothing changed,", meanwhile: async () =>
         {
-            pulls = Pulls(trace, "Helper.cs");
-            Waiting.For(TimeSpan.FromSeconds(1), "the trace of the first calls' pulls to settle");
-        }
-
-        await Call(client, McpTools.IdeAction, new() { ["action"] = AppActions.Complete });
-        Assert.True(await Waiting.UntilAsync(() => Answered(trace, Passenger.Roslyn.Extension.ExtensionMethods.Completion), TimeSpan.FromSeconds(30).Scaled(), Cancel),
-            "Basic Completion at return value in Helper.cs had no completion list answered by the language server");
-        string second = Text(await Call(client, McpTools.Diagnostics, new() { ["path"] = "Helper.cs" }));
-        Assert.Equal(first, second);
-        await TracedAsync(client, trace);
-        Assert.True(Pulls(trace, "Helper.cs") == pulls,
-            $"Diagnostics of Helper.cs asked again after a completion list, nothing changed, sent the language server {Pulls(trace, "Helper.cs") - pulls} pulls of them, where its last pull answered");
+            int lists = Sent(trace, Passenger.Roslyn.Extension.ExtensionMethods.Completion);
+            await Call(client, McpTools.IdeAction, new() { ["action"] = AppActions.Complete });
+            Assert.True(await Waiting.UntilAsync(() => Sent(trace, Passenger.Roslyn.Extension.ExtensionMethods.Completion) > lists && Answered(trace, Passenger.Roslyn.Extension.ExtensionMethods.Completion),
+                TimeSpan.FromSeconds(30).Scaled(), Cancel), "Basic Completion at return value in Helper.cs had no completion list answered by the language server");
+        });
     }
 
     /// <summary>A type a code action moved to a file of its own is known at once to what the agent asks next of a file using

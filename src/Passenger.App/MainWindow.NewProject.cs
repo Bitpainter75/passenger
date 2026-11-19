@@ -23,7 +23,7 @@ public partial class MainWindow
         actions!.Add(new IdeAction(AppActions.NewSolution, "New Solution…", "IDE", _ => ShowNewSolution())
         {
             WhyNot = _ => WithoutAnySdk(),
-            Menus = [new MenuPlace("File", 0, -1)],
+            Menus = [new MenuPlace("File", 0, -2)],
         });
         actions.Add(new IdeAction(AppActions.NewProject, "New Project…", "IDE", _ => ShowNewProject(ChosenSolutionFolder()))
         {
@@ -47,7 +47,7 @@ public partial class MainWindow
     /// <summary>New Solution: the dialog over this window, and the solution opened, built, once it is made.</summary>
     public NewProjectDialog ShowNewSolution()
     {
-        NewProjectDialog dialog = new(BesideLast(), null, ContainersWhyNot(), settings.GodotExecutable) { Workloads = InstallAskedWorkloadsAsync };
+        NewProjectDialog dialog = new(BesideLast(), null, ContainersWhyNot(), settings.GodotExecutable) { Workloads = InstallAskedWorkloadsAsync, WorkloadPlace = WorkloadFoldersAsync };
         dialog.Closed += (_, _) =>
         {
             // What Passenger made is the person's own code, opened trusted, but in a Git repository only the person trusts.
@@ -72,7 +72,7 @@ public partial class MainWindow
     }
 
     /// <summary>New Project's Install of a workload, the person's ask: the window's one install of workloads, asking nothing more.</summary>
-    public Task<(bool Installed, string Said)> InstallAskedWorkloadsAsync(IReadOnlyList<string> ids, Action<string> stages, Action<string> lines, CancellationToken stop) =>
+    public Task<(bool Installed, string Said, string? ToRun)> InstallAskedWorkloadsAsync(IReadOnlyList<string> ids, Action<string> stages, Action<string> lines, CancellationToken stop) =>
         InstallWorkloadsAsync(ids, asks: false, stages, lines, stop);
 
     /// <summary>Add, New Project: the dialog over this window for a project in the open solution, in a solution folder
@@ -86,7 +86,7 @@ public partial class MainWindow
         }
         ProjectTarget target = new(solution.Path, into, [.. solution.Projects.Select(p => Path.GetFileNameWithoutExtension(p.Path))],
             Projects.FirstOrDefault(p => p.Exists && p.IsAspireHost)?.Name);
-        NewProjectDialog dialog = new(ProjectFolderFor(solution, into), target, ContainersWhyNot(), settings.GodotExecutable) { Workloads = InstallAskedWorkloadsAsync };
+        NewProjectDialog dialog = new(ProjectFolderFor(solution, into), target, ContainersWhyNot(), settings.GodotExecutable) { Workloads = InstallAskedWorkloadsAsync, WorkloadPlace = WorkloadFoldersAsync };
         dialog.Closed += (_, _) =>
         {
             if (dialog.Created is { } made && Solution?.Path == solution.Path)

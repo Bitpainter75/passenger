@@ -230,6 +230,7 @@ public sealed partial class CodeEditor : Control
             }
             decorations = shown;
             decorations.Changed += OnDecorationsChanged;
+            ForgetLinks();
         }
         ownsDecorations = owned;
         wrappedHints = decorations.InlayHints;
@@ -263,8 +264,12 @@ public sealed partial class CodeEditor : Control
                 FollowInputMethod();
                 break;
         }
-        // The gutter's columns read change marks and bookmarks, which a row's key leaves to them; a fold moves rows.
-        if (kind is DecorationKind.ChangeMarks or DecorationKind.Bookmarks or DecorationKind.Folds)
+        if (kind == DecorationKind.Links)
+        {
+            ForgetLinks();
+        }
+        // The gutter's columns read change marks and bookmarks; a fold moves rows; a row's key holds no address found in it.
+        if (kind is DecorationKind.ChangeMarks or DecorationKind.Bookmarks or DecorationKind.Folds or DecorationKind.Links)
         {
             Redraw();
         }
@@ -464,6 +469,7 @@ public sealed partial class CodeEditor : Control
         StopWrapping();
         document.ChangedFirst -= OnChangedFirst;
         document.Changed -= OnDocumentChanged;
+        ForgetSplitBlocks();
         document = value;
         document.ChangedFirst += OnChangedFirst;
         document.Changed += OnDocumentChanged;
@@ -750,7 +756,14 @@ public sealed partial class CodeEditor : Control
         base.OnAttachedToVisualTree(e);
         RefreshStyle();
         RestartBlink();
+        // A modifier pressed or let go anywhere in the window may begin or end a gesture held over the text of any split.
+        keysHeard = TopLevel.GetTopLevel(this);
+        keysHeard?.AddHandler(KeyDownEvent, HeardKeys, RoutingStrategies.Tunnel, handledEventsToo: true);
+        keysHeard?.AddHandler(KeyUpEvent, HeardKeys, RoutingStrategies.Tunnel, handledEventsToo: true);
     }
+
+    /// <summary>The window whose keys the editor hears while it is shown in it.</summary>
+    private TopLevel? keysHeard;
 
     /// <summary>Gone from the screen (its popup, dialog or window closed), it stops its timers, which would hold it from the
     /// dispatcher for as long as they ran.</summary>
@@ -759,6 +772,11 @@ public sealed partial class CodeEditor : Control
         base.OnDetachedFromVisualTree(e);
         blink.Stop();
         hover?.Stop();
+        keysHeard?.RemoveHandler(KeyDownEvent, HeardKeys);
+        keysHeard?.RemoveHandler(KeyUpEvent, HeardKeys);
+        keysHeard = null;
+        pointer = null;
+        DropReach();
     }
 
     protected override void OnGotFocus(FocusChangedEventArgs e)
@@ -773,6 +791,8 @@ public sealed partial class CodeEditor : Control
     {
         base.OnLostFocus(e);
         blink.Stop();
+        // A gesture's key let go while another window has the keys goes unheard.
+        DropReach();
         ownKeys?.Reset();
         document.BreakUndoGroup();
         Redraw();
@@ -800,6 +820,7 @@ public sealed partial class CodeEditor : Control
         bool changed = !clamped.SameAs(selections) || clamped.PrimaryIndex != selections.PrimaryIndex;
         selections = clamped;
         caretsText = document.Snapshot;
+        FollowSplitBlocks();
         CheckSnippet();
         if (reveal)
         {
@@ -884,7 +905,11 @@ public sealed partial class CodeEditor : Control
             ScrollWithinRows();
         }
         widestStale = true;
-        InvalidateArrange();
+        // An arrange draws the ground again, and so every row; what it lays out moves with the line count alone (gutter, extent).
+        if (e.After.LineCount != e.Before.LineCount)
+        {
+            InvalidateArrange();
+        }
         RedrawChanged();
     }
 

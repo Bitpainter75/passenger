@@ -183,9 +183,11 @@ public sealed class ServerWatches : IDisposable
     private void OnRegistered(object? sender, EventArgs e) => Refresh();
 
     /// <summary>Stops watching what is under folders about to go or move (deleted, renamed or moved by the IDE), and starts
-    /// nothing there until disposed, when what the registrations need is watched again: Windows moves and deletes no folder
-    /// with a folder inside it watched. Done once no refresh still starts a watcher there.</summary>
-    public IDisposable LetGo(IReadOnlyList<string> folders)
+    /// nothing there until disposed (<c>Held</c>), when what the registrations need is watched again: Windows moves and
+    /// deletes no folder with a folder inside it watched, or a file or folder inside it open. Returns once no refresh still
+    /// starts a watcher there; <c>Stopped</c> is done once the watchers stopped have run what they had queued, so none of
+    /// them still lists a folder there.</summary>
+    public (IDisposable Held, Task Stopped) LetGo(IReadOnlyList<string> folders)
     {
         List<Watched> stopped;
         // Taken as a refresh takes it, so none starts a watcher under them after this.
@@ -205,7 +207,7 @@ public sealed class ServerWatches : IDisposable
             IdeErrors.Write($"C# language server (process {server.ProcessId}): no longer watched for it, as {Plural.Listed([.. folders])} {Plural.Agreeing(folders.Count, "goes or moves", "go or move")}: "
                 + string.Join(", ", stopped.Select(w => w.Top)));
         }
-        return new LettingGo(this, folders);
+        return (new LettingGo(this, folders), Task.WhenAll(stopped.Select(w => w.Stopped)));
     }
 
     /// <summary>Whether a folder is under one about to go or move; asked under the gate.</summary>
@@ -385,7 +387,7 @@ public sealed class ServerWatches : IDisposable
                 bool taken = false;
                 lock (gate)
                 {
-                    if (!disposed && !own.ContainsKey((at, recursive)) && !Going(at) && tree.Watches.Count > 0)
+                    if (!disposed && !own.ContainsKey((at, recursive)) && !Going(at) && tree.Watched.Count > 0)
                     {
                         own[(at, recursive)] = tree;
                         taken = true;
@@ -457,10 +459,14 @@ public sealed class ServerWatches : IDisposable
     private HashSet<(string Folder, bool Recursive)> Needed()
     {
         string? beside;
+        List<string> leaving;
         lock (gate)
         {
             beside = folder;
+            leaving = [.. going];
         }
+        // Nothing under a folder about to go or move is looked at: Windows refuses the move while a file or folder there is open.
+        bool Leaving(string at) => leaving.Any(g => PathNames.Within(at, g));
         List<(string Folder, bool Recursive)> wanted = [];
         foreach (FileWatch watch in watched.Watches.DistinctBy(w => (w.Folder, w.Recursive)))
         {
@@ -469,20 +475,24 @@ public sealed class ServerWatches : IDisposable
                 // A glob over whole paths: the folder's watcher's changes are matched against it, and nothing more is known of where.
                 continue;
             }
+            if (Leaving(at))
+            {
+                continue;
+            }
             if (beside is null || !PathNames.Within(at, beside) || IgnoredFolders.AnyIn(beside, PathNames.Below(at, beside)))
             {
                 wanted.Add((at, watch.Recursive));
             }
             else if (watch.Recursive)
             {
-                wanted.AddRange(OutputUnder(at).Select(output => (output, true)));
+                wanted.AddRange(OutputUnder(at, Leaving).Select(output => (output, true)));
             }
         }
         HashSet<(string Folder, bool Recursive)> needed = [];
         List<string> whole = [.. wanted.Where(w => w.Recursive).Select(w => w.Folder)];
         foreach ((string at, bool recursive) in wanted)
         {
-            if (whole.Any(above => PathNames.IsUnder(at, above) || (!recursive && PathNames.Same(at, above))))
+            if (whole.Any(above => PathNames.IsUnder(at, above) || (!recursive && PathNames.Same(at, above))) || Leaving(at))
             {
                 continue;
             }
@@ -498,8 +508,9 @@ public sealed class ServerWatches : IDisposable
         return needed;
     }
 
-    /// <summary>The build output under a folder (<see cref="BuildOutput"/>), as found before unless it may have moved since.</summary>
-    private IReadOnlyList<string> OutputUnder(string at)
+    /// <summary>The build output under a folder (<see cref="BuildOutput"/>), as found before unless it may have moved since;
+    /// none walked under a folder <paramref name="leaving"/> takes, as about to go or move.</summary>
+    private IReadOnlyList<string> OutputUnder(string at, Func<string, bool> leaving)
     {
         int asOf;
         lock (gate)
@@ -510,7 +521,7 @@ public sealed class ServerWatches : IDisposable
             }
             asOf = outputsDropped;
         }
-        IReadOnlyList<string> walked = BuildOutput(at);
+        IReadOnlyList<string> walked = BuildOutput(at, leaving);
         lock (gate)
         {
             if (outputsDropped == asOf)
@@ -525,8 +536,8 @@ public sealed class ServerWatches : IDisposable
     /// it hears under it through no link, however deep: a project's obj, with the sources it generates, its bin, artifacts,
     /// Godot.NET.Sdk's .godot/mono/temp. Neither version control's and other IDEs' (hidden) nor dependencies' (node_modules),
     /// which hold no project's files and would take a watch for each of their many folders on Linux.</summary>
-    private static List<string> BuildOutput(string at) =>
-        [.. PathNames.FoldersUnder(at, sub => !IgnoredFolders.Is(sub) && (File.GetAttributes(sub) & FileAttributes.ReparsePoint) == 0)
+    private static List<string> BuildOutput(string at, Func<string, bool> leaving) =>
+        [.. PathNames.FoldersUnder(at, sub => !IgnoredFolders.Is(sub) && !leaving(sub) && (File.GetAttributes(sub) & FileAttributes.ReparsePoint) == 0)
             .SelectMany(folder => BuildOutputIn(folder, registered: PathNames.Same(folder, at)))];
 
     /// <summary>The build output in one folder the folder's watcher hears (<see cref="BuildOutput"/>): in the folder
@@ -610,7 +621,8 @@ public sealed class ServerWatches : IDisposable
     /// <summary>A folder watched for the server as the folder's watcher watches the open folder, kept to the folders the
     /// registrations over it reach and recording only the files they match: a change the server never asked for (a
     /// build's churn) counts toward a burst but is never told; what was written since the server, or a build it was given,
-    /// may have read it is told as its first walk ends, from the walk's own listings; and with changes lost there, every
+    /// may have read it is told as its first walk ends, from the walk's own listings, but what stands as it did when the
+    /// server was given its project's builds (<see cref="WatchedFiles.StandsAsGiven"/>); and with changes lost there, every
     /// file in it is told, those its record held now gone too. One outside the open folder walks apart from the IDE's
     /// quiet: it holds nothing the window shows, and on a cold disk the walk of one as large as the references' packs
     /// went on for minutes.</summary>
@@ -639,7 +651,8 @@ public sealed class ServerWatches : IDisposable
                 IdeErrors.Write($"{Shown} records {Plural.Of(folders, "folder")} and {Plural.Of(entries, "entry", "entries")} "
                     + $"{Durations.Said(System.Diagnostics.Stopwatch.GetElapsedTime(began))} after it started{(apart ? ", apart from the IDE's quiet" : string.Empty)}");
                 // Told whether or not a registration matches them yet: one the server's load sends later takes those kept for it.
-                owner.InTurn(() => TellAsync([.. written.Select(file => new FileEvent(file, FileChangeType.Changed))]), this);
+                List<FileEvent> changed = [.. written.Where(file => !owner.watched.StandsAsGiven(file)).Select(file => new FileEvent(file, FileChangeType.Changed))];
+                owner.InTurn(() => TellAsync(changed), this);
             }, after: owner.WalkHeld(top));
         }
 
@@ -738,7 +751,7 @@ public sealed class ServerWatches : IDisposable
         protected override void Hand(FolderChanges changes)
         {
             owner.watched.Hearing(changes.Paths);
-            owner.InTurn(() => TellAsync(Events(changes, Top, Recursive, _ => false)), this);
+            owner.InTurn(() => IsDisposed ? Task.CompletedTask : TellAsync(Events(changes, Top, Recursive, _ => false)), this);
         }
 
         /// <summary>Tells the server what changed here, but an assembly of a folder it watches whole that no project

@@ -133,18 +133,30 @@ public sealed record WorkspaceModel(string Folder, SolutionModel? Solution, IRea
     /// MSBuild's alone (.proj).</summary>
     private static readonly string[] ProjectExtensions = [".csproj", ".fsproj", ".vbproj", ".proj"];
 
+    /// <summary>The extensions of a file that opens as the workspace (<see cref="Opens"/>): a solution's, a solution
+    /// filter's and a C# or Visual Basic project's.</summary>
+    public static IReadOnlyList<string> OpenedExtensions => Opened;
+
+    private static readonly string[] Opened = [.. SolutionExtensions, CSharpProject, VisualBasicProject];
+
     /// <summary>Whether a file opens as the workspace rather than in an editor: a solution (.sln, .slnx), a solution
     /// filter (.slnf) or a C# or Visual Basic project (.csproj, .vbproj).</summary>
-    public static bool Opens(string path) => IsSolution(path) || IsProject(path);
+    public static bool Opens(string path) => PathNames.HasExtension(path, Opened);
 
     /// <summary>Whether a file is a solution or a solution filter, either of which opens a solution.</summary>
     public static bool IsSolution(string path) => PathNames.HasExtension(path, SolutionExtensions);
 
     /// <summary>Whether a file is a C# or a Visual Basic project, the kinds of project that open as the workspace.</summary>
-    public static bool IsProject(string path) => PathNames.HasExtension(path, [".csproj", ".vbproj"]);
+    public static bool IsProject(string path) => PathNames.HasExtension(path, ProjectKinds);
 
     /// <summary>Whether a project is Visual Basic's, which Passenger's own server answers for and Roslyn's never loads.</summary>
-    public static bool IsVisualBasic(string path) => PathNames.HasExtension(path, [".vbproj"]);
+    public static bool IsVisualBasic(string path) => PathNames.HasExtension(path, [VisualBasicProject]);
+
+    private const string CSharpProject = ".csproj";
+
+    private const string VisualBasicProject = ".vbproj";
+
+    private static readonly string[] ProjectKinds = [CSharpProject, VisualBasicProject];
 
     /// <summary>Whether a file is a project file of any kind MSBuild evaluates as itself (<see cref="ProjectExtensions"/>),
     /// a C# project's among them.</summary>
@@ -388,7 +400,7 @@ public sealed record WorkspaceModel(string Folder, SolutionModel? Solution, IRea
     /// outside every project's folder, whose files are the project's; in a folder with no project, a file of no directive
     /// that begins with top-level statements is one too (<see cref="TakesPlainPrograms"/>).</summary>
     public static bool IsProgram(string path, IReadOnlyList<string> head) =>
-        ProgramFiles.IsProgram(path) && head.Count > 0 && !head.Any(IsAspireSdk);
+        ProgramFiles.IsProgram(path) && head.Count > 0 && !AspireHosts.IsHead(head);
 
     /// <summary>Whether its C# files of no directive that begin with top-level statements are programs, as <c>dotnet run</c>
     /// runs them: a folder opened with no solution or project in it, nor any found under it.</summary>
@@ -401,6 +413,15 @@ public sealed record WorkspaceModel(string Folder, SolutionModel? Solution, IRea
         List<string> head = ProgramFiles.Head(path);
         return IsProgram(path, head) || head.Count == 0 && ProgramFiles.IsProgram(path) && TakesPlainPrograms && ProgramFiles.BeginsWithStatement(path);
     }
+
+    /// <summary>Whether a C# file is one of its programs now, among the <paramref name="projects"/> loaded: in a folder the
+    /// walk for programs enters, there, compiled by no project nor another program, and a program by its text (<see
+    /// cref="IsProgramFile"/>) or one a program references (<c>#:ref</c>). Its head is read, so more than a few are a worker's.</summary>
+    public bool IsProgramNow(string path, IReadOnlyList<ProjectModel> projects) =>
+        FolderWalk.Enters(Folder, PathNames.Below(Path.GetDirectoryName(path)!, Folder), built: true)
+        && File.Exists(path)
+        && !projects.Any(p => p.IsProgram ? !PathNames.Same(p.Path, path) && p.Holds(path) : PathNames.Within(path, p.Folder))
+        && (IsProgramFile(path) || projects.Any(p => p.IsProgram && p.ProjectReferences.Contains(path, PathNames.Comparer)));
 
     /// <summary>Whether a C# file opened alone opens with its folder, a program of it: its head makes it one, or it has none
     /// and begins with top-level statements in a folder holding no project or solution.</summary>
@@ -424,7 +445,4 @@ public sealed record WorkspaceModel(string Folder, SolutionModel? Solution, IRea
             return false;
         }
     }
-
-    private static bool IsAspireSdk(string directive) =>
-        ProgramFiles.Parse(directive) is ("sdk", { } sdk) && sdk.Split('@')[0].Trim().Equals("Aspire.AppHost.Sdk", StringComparison.OrdinalIgnoreCase);
 }
