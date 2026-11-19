@@ -757,6 +757,7 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.CodeAnalysis.CSharp": "[5.12.0, )",
+          "Microsoft.CodeAnalysis.VisualBasic": "[5.12.0, )",
           "Passenger.Core": "[0.4.0, )",
           "Passenger.Packages": "[0.4.0, )",
           "Passenger.Text": "[0.4.0, )"

@@ -827,6 +827,7 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.CodeAnalysis.CSharp": "[5.12.0, )",
+          "Microsoft.CodeAnalysis.VisualBasic": "[5.12.0, )",
           "Passenger.Core": "[0.4.0, )",
           "Passenger.Packages": "[0.4.0, )",
           "Passenger.Text": "[0.4.0, )"
@@ -852,6 +853,16 @@
         "requested": "[5.12.0, )",
         "resolved": "5.12.0",
         "contentHash": "6W6vBcpQFjlxog+KUGNM2fFy+XA2StC1PtnkEkechk68vFy3a28tGjEdnoA7NrxhMdr8a+zh/AmiUtBAmdkQPg==",
+        "dependencies": {
+          "Microsoft.CodeAnalysis.Analyzers": "5.9.0",
+          "Microsoft.CodeAnalysis.Common": "[5.12.0]"
+        }
+      },
+      "Microsoft.CodeAnalysis.VisualBasic": {
+        "type": "CentralTransitive",
+        "requested": "[5.12.0, )",
+        "resolved": "5.12.0",
+        "contentHash": "iwd4NiGd/Sb4rEKdjR+Sub+aZmtw/MbrT53rhygYpH5co5AXMQ39qlIfhz93dPFBt/EqyWhYbfCOKRWVEsFekQ==",
         "dependencies": {
           "Microsoft.CodeAnalysis.Analyzers": "5.9.0",
           "Microsoft.CodeAnalysis.Common": "[5.12.0]"

@@ -63,6 +63,17 @@ Watches, the evaluate box, a hover and a breakpoint's condition: `rows(1)`, `Me.
 `open AndAlso total > 3`, `total = 6` (a comparison), `names(0) & "!"`, `If(label, "none")`, `CType(total, Long)`,
 `TypeOf x Is T`, `New List(Of Integer) From {1, 2}`, `$"{Name}: {total:D3}"`. A C# expression still evaluates there.
 
+**XAML (Avalonia and WPF).** A Visual Basic project's XAML has the help a C# project's has: Passenger's own XAML reads
+the project's `.vb` files as it reads C# (Roslyn's Visual Basic parser, the syntax alone, no build), so completion,
+the binding checks, Go to Declaration and hover know its view models, its own controls and a code-behind's handlers,
+and follow them as they are typed. Every declaration lies in the project's root namespace (its `RootNamespace`, else
+its name), as the compiler puts it, unless written `Namespace Global.…`; a member written without its access is the
+language's default (a `Dim` field private, but a structure's, and the rest public); a module's members are shared, so
+`{x:Static}` names them; the namespaces the project imports (the SDK's own and its `Import` items) hold in every file.
+An `x:Class` is found within the root namespace too, as WPF's Visual Basic templates write it (`x:Class="MainWindow"`).
+Create from usage makes a converter as a `.vb` file in Visual Basic; it creates no property in a Visual Basic view
+model, which would need the file's own edit.
+
 **Visual Basic projects are projects.** A folder is walked for `.vbproj` as for `.csproj`, so a Visual Basic project
 opened by its folder is in the Solution view, has its run configuration, and builds and runs through MSBuild as a C#
 project does. Before, only a solution that named a `.vbproj` knew it; a folder holding one showed "No
@@ -81,8 +92,9 @@ configurations". Roslyn's C# server is never given a Visual Basic project.
 | The language server | `src/Passenger.VisualBasic`, carried under `visualbasic/` beside the app | a process of its own on Passenger's runtime (`ChildProcesses.HelperCommand`), as the debug adapter is |
 | Its place in the App | `WebServerKind.VisualBasic` in `Web/WebLanguages.cs` | it speaks the standard protocol, so everything the web languages' servers give a file (`WebDocument`, `WebAssist`) it gives a `.vb` file |
 | Its projects | `ProjectSession.VisualBasicBuildsAsync`, `WebLanguages.VisualBasicProjects` | the project host's design-time builds, which already read `VbcCommandLineArgs` |
+| XAML's reading of the code | `VisualBasicTypes` (`src/Passenger.Xaml/Metadata`), `ProjectInputs.IsVisualBasic`/`RootNamespace`, `TypeSystem.ClassNamed`, `XamlService` taking `.vbproj` and `.vb` | the same types the C# reader makes, so every XAML feature reads them unchanged |
 | The debugger's expressions | `VisualBasicExpressions` in `src/Passenger.Debugger`, asked by `CilExpressionCompiler.TryCompile` | Roslyn publishes no expression compiler for Visual Basic, and nuget.org's is C#'s alone |
-| The tests | `FileColoursTests` (a file's kinds, its comment, the apostrophe, Markdown), `EditingTests` (typing), `FoldingTests` (the folds), `VisualBasicBlocksTests` (Enter), `VisualBasicExpressionsTests` (the debugger's reading), `VisualBasicTests` (the server and the templates through the window) | |
+| The tests | `FileColoursTests` (a file's kinds, its comment, the apostrophe, Markdown), `EditingTests` (typing), `FoldingTests` (the folds), `VisualBasicBlocksTests` (Enter), `VisualBasicExpressionsTests` (the debugger's reading), `VisualBasicTests` (the server and the templates through the window), `VisualBasicXamlTests` (a WPF project's code read for its XAML) | |
 
 **Why a grammar of Passenger's own.** Every other grammar here is VS Code's, unchanged. VS Code's grammar for `.vb`
 (`extensions/vb`, converted from textmate/asp.vb.net.tmbundle) is classic ASP's: it knows no `Imports`, `Namespace`,
@@ -176,6 +188,10 @@ with `ConservingMemory`, as Roslyn's server does, and ends with the IDE.
 - **A solution mixing C# and Visual Basic** is untested. Roslyn's server is told of no `.vbproj`, but the C# service
   still counts it among the workspace's projects.
 - **Enter inside a block's first line** (not at its end) only carries the indentation.
+- **XAML and Visual Basic code across languages**: Find Usages and Rename of a Visual Basic member do not reach the
+  XAML that names it (Visual Basic's server knows no XAML), the MVVM Toolkit's generated members (C# generators) and
+  a property created from usage are C#'s alone, and a type named in another letter case than it is declared in is not
+  found, though Visual Basic would take it.
 - **Tests before a first build** are not listed: the Tests window's reading of source is C#'s alone, so a Visual Basic
   project's tests come with its first run or Discover. NUnit and MSTest in Visual Basic are untested.
 - **The debugger's expressions** are Visual Basic said in C#, not compiled as Visual Basic, so a few differ: `/` on two

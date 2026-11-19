@@ -68,7 +68,8 @@ public static class CreateFromUsage
             return null;
         }
         string folder = Directory.Exists(Path.Combine(file.Project.Folder, "Converters")) ? Path.Combine(file.Project.Folder, "Converters") : Path.GetDirectoryName(file.Path)!;
-        string path = Path.Combine(folder, name + ".cs");
+        bool visualBasic = file.Project.Inputs.IsVisualBasic;
+        string path = Path.Combine(folder, name + (visualBasic ? ".vb" : ".cs"));
         if (File.Exists(path))
         {
             return null;
@@ -77,7 +78,7 @@ public static class CreateFromUsage
         bool avalonia = file.Dialect is AvaloniaDialect;
         string uri = file.Dialect.ClrNamespaceUri(space, null);
         string wanted = space.EndsWith(".Converters", StringComparison.Ordinal) || space == "Converters" ? "converters" : "local";
-        string made = ConverterText(file, space, name, avalonia);
+        string made = visualBasic ? VisualBasicConverterText(file, space, name, avalonia) : ConverterText(file, space, name, avalonia);
         return new XamlFix($"Create converter '{key}'", file.Path, text =>
         {
             XmlTree tree = XmlTree.Parse(text);
@@ -87,7 +88,7 @@ public static class CreateFromUsage
             return XamlRefactorings.AddResource(text, $"<{(prefix.Length > 0 ? prefix + ":" : string.Empty)}{name} {x}:Key=\"{key}\" />", declared);
         })
         {
-            Detail = $"{name}.cs, IValueConverter",
+            Detail = $"{Path.GetFileName(path)}, IValueConverter",
             Others = [new XamlFileChange(path, null, made)],
         };
     }
@@ -375,6 +376,11 @@ public static class CreateFromUsage
         {
             return there;
         }
+        if (file.Project.Inputs.IsVisualBasic)
+        {
+            // Visual Basic puts every file in the root namespace, whatever its folder.
+            return file.Project.Inputs.RootNamespace ?? string.Empty;
+        }
         string root = file.Project.Inputs.PropertyValue("RootNamespace") is { Length: > 0 } named ? named : file.Project.AssemblyName;
         string relative = Path.GetRelativePath(file.Project.Folder, folder);
         return relative == "." ? root : root + "." + relative.Replace(Path.DirectorySeparatorChar, '.').Replace('/', '.');
@@ -422,6 +428,48 @@ public static class CreateFromUsage
         if (!scoped)
         {
             made.Append("}\n");
+        }
+        return made.ToString();
+    }
+
+    /// <summary>A Visual Basic project's converter file: its class implementing the dialect's IValueConverter (a name that
+    /// is a keyword in brackets), each function left to write, in a <c>Namespace</c> only where it lies outside the project's
+    /// root namespace, importing only what the project does not import already.</summary>
+    private static string VisualBasicConverterText(XamlFile file, string space, string name, bool avalonia)
+    {
+        string converters = avalonia ? "Avalonia.Data.Converters" : file.Dialect is MauiDialect ? "Microsoft.Maui.Controls" : "System.Windows.Data";
+        StringBuilder made = new();
+        foreach (string needed in ((string[])["System", "System.Globalization", converters]).Where(n => !file.Project.Inputs.ImplicitUsings.Contains(n, StringComparer.OrdinalIgnoreCase)))
+        {
+            made.Append($"Imports {needed}\n");
+        }
+        if (made.Length > 0)
+        {
+            made.Append('\n');
+        }
+        string? root = file.Project.Inputs.RootNamespace;
+        string? within = space.Length == 0 || space == root ? null
+            : root is { Length: > 0 } && space.StartsWith(root + ".", StringComparison.Ordinal) ? space[(root.Length + 1)..] : $"Global.{space}";
+        string indent = within is null ? string.Empty : Unit;
+        if (within is not null)
+        {
+            made.Append($"Namespace {within}\n\n");
+        }
+        string written = Microsoft.CodeAnalysis.VisualBasic.SyntaxFacts.GetKeywordKind(name) == Microsoft.CodeAnalysis.VisualBasic.SyntaxKind.None ? name : $"[{name}]";
+        made.Append($"{indent}Public Class {written}\n{indent}{Unit}Implements IValueConverter\n\n");
+        foreach (string method in (string[])["Convert", "ConvertBack"])
+        {
+            made.Append($"{indent}{Unit}Public Function {method}(value As Object, targetType As Type, parameter As Object, culture As CultureInfo) As Object Implements IValueConverter.{method}\n")
+                .Append($"{indent}{Unit}{Unit}Throw New NotImplementedException()\n{indent}{Unit}End Function\n");
+            if (method == "Convert")
+            {
+                made.Append('\n');
+            }
+        }
+        made.Append($"{indent}End Class\n");
+        if (within is not null)
+        {
+            made.Append("\nEnd Namespace\n");
         }
         return made.ToString();
     }

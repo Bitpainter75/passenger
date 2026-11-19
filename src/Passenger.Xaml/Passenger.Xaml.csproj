@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- XAML with no UI, Passenger's own and shared by its dialects (Avalonia's and WPF's): XML with positions, xmlns
-       to CLR namespaces, the types a project's assemblies and its own C# declare (System.Reflection.Metadata, Roslyn's
-       parser), markup extensions, resources, and what a XAML file completes, warns of and goes to from that. -->
+       to CLR namespaces, the types a project's assemblies and its own C# or Visual Basic declare (System.Reflection.Metadata,
+       Roslyn's parsers), markup extensions, resources, and what a XAML file completes, warns of and goes to from that. -->
   <PropertyGroup>
     <RootNamespace>Passenger.Xaml</RootNamespace>
   </PropertyGroup>
@@ -12,6 +12,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <!-- A Visual Basic project's own types, read from its code-behind and view models by Visual Basic's parser. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.VisualBasic" />
     <ProjectReference Include="../Passenger.Core/Passenger.Core.csproj" />
     <!-- The package cache a project's restores use, as its nuget.config names it, for a project not restored yet. -->
     <ProjectReference Include="../Passenger.Packages/Passenger.Packages.csproj" />

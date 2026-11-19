@@ -299,7 +299,7 @@ public static class XamlDiagnostics
             case "Class" when element.Parent is not null:
                 found.Add(new XamlDiagnostic(attribute.NameRange, XamlSeverity.Error, "x:Class is only allowed on the root element"));
                 break;
-            case "Class" when attribute.Value.Length > 0 && file.Types.Find(attribute.Value) is null:
+            case "Class" when attribute.Value.Length > 0 && file.Types.ClassNamed(attribute.Value) is null:
                 found.Add(new XamlDiagnostic(attribute.ValueRange, XamlSeverity.Error, $"Cannot resolve class '{attribute.Value}'"));
                 break;
             case "DataType" when attribute.Value.Length > 0 && file.TypeFromValue(element, attribute.Value) is null:

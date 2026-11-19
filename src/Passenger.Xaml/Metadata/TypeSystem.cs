@@ -22,10 +22,12 @@ public sealed class TypeSystem
 
     /// <summary>The types of the assemblies and C# given; <paramref name="implied"/> are the xmlns definitions a dialect's
     /// compiler adds to the project's own assembly (<see cref="Dialects.XamlDialect.ImpliedDefinitions"/>), and
-    /// <paramref name="generated"/> what source generators add to the C#'s types, each a part of the type the C# declares.</summary>
+    /// <paramref name="generated"/> what source generators add to the C#'s types, each a part of the type the C# declares,
+    /// and <paramref name="classRoot"/> the root namespace a Visual Basic project's <c>x:Class</c> is written within.</summary>
     public TypeSystem(IReadOnlyList<AssemblyTypes> assemblies, IReadOnlyList<SourceTypes> sources, string assemblyName, IReadOnlyList<string>? implicitUsings = null,
-        IReadOnlyList<XmlnsDefinition>? implied = null, IReadOnlyList<GeneratedPart>? generated = null)
+        IReadOnlyList<XmlnsDefinition>? implied = null, IReadOnlyList<GeneratedPart>? generated = null, string? classRoot = null)
     {
+        ClassRoot = classRoot;
         Dictionary<string, GeneratedPart> made = new(StringComparer.Ordinal);
         foreach (GeneratedPart part in generated ?? [])
         {
@@ -97,6 +99,14 @@ public sealed class TypeSystem
     public IEnumerable<ClrType> All => byName.Values;
 
     public ClrType? Find(string fullName) => byName.GetValueOrDefault(fullName);
+
+    /// <summary>The root namespace a Visual Basic project's every declaration lies in, which WPF's XAML compiler puts before
+    /// an <c>x:Class</c> as Visual Basic's compiler puts it before the class's own code; null for a C# project.</summary>
+    public string? ClassRoot { get; }
+
+    /// <summary>The class an <c>x:Class</c> names: by its full name, else, in a Visual Basic project, within its root
+    /// namespace (<see cref="ClassRoot"/>), as WPF's Visual Basic templates write it.</summary>
+    public ClrType? ClassNamed(string name) => Find(name) ?? (ClassRoot is { } root ? Find($"{root}.{name}") : null);
 
     /// <summary>Where the project's C# declares a type, each part of a partial one (a code-behind and its other files).</summary>
     public IReadOnlyList<SourcePlace> PlacesOf(string fullName) => parts.GetValueOrDefault(fullName) ?? [];

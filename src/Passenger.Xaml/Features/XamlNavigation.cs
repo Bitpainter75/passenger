@@ -156,7 +156,7 @@ public static class XamlNavigation
         {
             switch (attribute.LocalName)
             {
-                case "Class" when file.Types.Find(value) is { } owner:
+                case "Class" when file.Types.ClassNamed(value) is { } owner:
                     return new XamlSymbol(whole, owner.Name, [TypeTarget(owner)]);
                 case "DataType" when file.TypeFromValue(element, value) is { } dataType:
                     return new XamlSymbol(whole, dataType.Name, [TypeTarget(dataType)]);

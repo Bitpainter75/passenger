@@ -103,7 +103,7 @@ public sealed class XamlFile
     /// <summary>The type the root names in <c>x:Class</c>, its code-behind's.</summary>
     public string? ClassName => ClassAttribute(Tree)?.Value;
 
-    public ClrType? ClassType => ClassName is { } name ? Types.Find(name) : null;
+    public ClrType? ClassType => ClassName is { } name ? Types.ClassNamed(name) : null;
 
     /// <summary>The URI a prefix means at an element (the empty prefix, the default namespace): as declared, else as the
     /// dialect declares it for every file (MAUI's implicit prefixes).</summary>

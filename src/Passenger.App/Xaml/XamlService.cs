@@ -142,7 +142,7 @@ public sealed class XamlService : IDisposable
     /// <summary>Whether a path is a XAML file Passenger reads, by its name.</summary>
     public static bool IsXaml(string path) => Languages.Language.ForPath(path) == Languages.Language.Xaml;
 
-    /// <summary>An open file's XAML, null for a file that is not XAML of a C# project.</summary>
+    /// <summary>An open file's XAML, null for a file that is not XAML of a C# or Visual Basic project.</summary>
     public XamlDocument? For(OpenDocument document) => documents.GetValueOrDefault(document);
 
     public IReadOnlyCollection<XamlDocument> Documents => documents.Values;
@@ -181,7 +181,7 @@ public sealed class XamlService : IDisposable
         return documents.Keys.FirstOrDefault(d => PathNames.Same(d.Path, path))?.Text.Snapshot;
     }
 
-    /// <summary>Gives an open XAML file of a C# project its share of the project's XAML, and follows an open C# file as it
+    /// <summary>Gives an open XAML file of a project its share of the project's XAML, and follows an open C# or Visual Basic file as it
     /// is typed, so the XAML naming its types sees them.</summary>
     public void Attach(OpenDocument document)
     {
@@ -203,7 +203,7 @@ public sealed class XamlService : IDisposable
             }
             return;
         }
-        if (document.Language == Languages.Language.CSharp)
+        if (document.Language == Languages.Language.CSharp || document.Language == Languages.Language.VisualBasic)
         {
             // Only a file a XAML project may read waits for a pause: each wait holds background work half a second.
             Debounce wait = new(SourceSettle, () => SourceTypedAsync(document), () => Pending(Reading(document.Path)));
@@ -215,6 +215,7 @@ public sealed class XamlService : IDisposable
                 }
             };
             document.Text.Changed += handler;
+            // A C# file's colours too, which Passenger's parse of it finds; a Visual Basic file has no parse of the editor's.
             document.Parsed += OnParsed;
             sources[document] = new TypedSource(handler, wait);
         }
@@ -277,7 +278,7 @@ public sealed class XamlService : IDisposable
         {
             XamlLoading loading = changed.Key;
             List<string> files = [.. changed];
-            if (files.Any(f => f.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(f) == "project.assets.json"))
+            if (files.Any(f => IsProjectFile(f) || Path.GetFileName(f) == "project.assets.json"))
             {
                 Reload(loading);
                 continue;
@@ -293,7 +294,7 @@ public sealed class XamlService : IDisposable
                 XamlProject? made = null;
                 foreach (string file in files)
                 {
-                    if (file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                    if (ProjectInputs.IsCode(file))
                     {
                         // An open file's types are its editor's text, which the disk's may be behind; a file deleted goes.
                         made = (typed.TryGetValue(file, out (TypedSource Source, TextSnapshot Text, int Version) editor) && File.Exists(file)
@@ -437,7 +438,7 @@ public sealed class XamlService : IDisposable
     /// anything else, the project it is in, or whose restore it is.</summary>
     private IEnumerable<XamlLoading> OwnersOf(string path)
     {
-        if (path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+        if (ProjectInputs.IsCode(path))
         {
             return Reading(path);
         }
@@ -692,7 +693,7 @@ public sealed class XamlService : IDisposable
         {
             return [];
         }
-        List<string> given = [.. projectFiles.Where(p => p.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)).Distinct(PathNames.Comparer)];
+        List<string> given = [.. projectFiles.Where(IsProjectFile).Distinct(PathNames.Comparer)];
         List<string> unread = [.. given.Where(p => !projects.ContainsKey(p) && !withoutXaml.Contains(p))];
         int came = xamlMayHaveCome;
         Func<string, TextSnapshot?> open = OpenSnapshots();
@@ -882,15 +883,19 @@ public sealed class XamlService : IDisposable
         }
     }
 
-    /// <summary>A file's project: the nearest folder at or above it with a C# project file, in the person's folders
-    /// (<see cref="FoldersUp"/>).</summary>
+    /// <summary>Whether a file is a project whose XAML Passenger reads: a C# or a Visual Basic one.</summary>
+    private static bool IsProjectFile(string path) => Passenger.Workspace.WorkspaceModel.IsProject(path);
+
+    /// <summary>A file's project: the nearest folder at or above it with a C# or Visual Basic project file, in the person's
+    /// folders (<see cref="FoldersUp"/>).</summary>
     private static string? ProjectFile(string path)
     {
         foreach (string at in Path.GetDirectoryName(Path.GetFullPath(path)) is { } start ? FoldersUp.From(start) : [])
         {
             try
             {
-                string? found = Directory.EnumerateFiles(at, "*.csproj").Order(StringComparer.Ordinal).FirstOrDefault(f => FoldersUp.Found(at, Path.GetFileName(f)) is not null);
+                string? found = Directory.EnumerateFiles(at, "*.*proj").Where(IsProjectFile).Order(StringComparer.Ordinal)
+                    .FirstOrDefault(f => FoldersUp.Found(at, Path.GetFileName(f)) is not null);
                 if (found is not null)
                 {
                     return found;

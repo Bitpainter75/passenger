@@ -108,8 +108,7 @@ public sealed class XamlProjectBuilder
             sources.Clear();
             List<(string Path, ProjectInputs Project)> cs = [.. inputs.SourceFiles.Select(f => (f, inputs))];
             cs.AddRange(referenced.SelectMany(r => r.Inputs.SourceFiles.Select(f => (f, r.Inputs))));
-            foreach (SourceTypes read in cs.AsParallel().Select(f => Reading(() => SourceTypes.Read(f.Path, open?.Invoke(f.Path) ?? ReadText(f.Path), f.Project.AssemblyName,
-                ParsingOf(f.Project)))).OfType<SourceTypes>())
+            foreach (SourceTypes read in cs.AsParallel().Select(f => Reading(() => Read(f.Path, open?.Invoke(f.Path) ?? ReadText(f.Path), f.Project))).OfType<SourceTypes>())
             {
                 sources[read.Path] = read;
             }
@@ -156,7 +155,7 @@ public sealed class XamlProjectBuilder
         }
     }
 
-    /// <summary>A C# file's text changed (typed, or written on disk): its types are read again; a file deleted goes. Null
+    /// <summary>A code file's text changed (typed, or written on disk): its types are read again; a file deleted goes. Null
     /// for a file neither the project nor one it references compiles.</summary>
     public XamlProject? SourceChanged(string path, string? text)
     {
@@ -173,7 +172,7 @@ public sealed class XamlProjectBuilder
             }
             else
             {
-                sources[path] = SourceTypes.Read(path, text ?? ReadText(path), project.AssemblyName, ParsingOf(project));
+                sources[path] = Read(path, text ?? ReadText(path), project);
             }
             return built = Make();
         }
@@ -255,14 +254,20 @@ public sealed class XamlProjectBuilder
     /// <summary>What a project's C# files are parsed with: what its evaluation says, else what a project with none takes.</summary>
     private CSharpParseOptions ParsingOf(ProjectInputs project) => project.Parsing ?? unevaluated;
 
+    /// <summary>A code file's types, read in its project's language: a Visual Basic project's in its root namespace.</summary>
+    private SourceTypes Read(string path, string text, ProjectInputs project) => project.IsVisualBasic
+        ? VisualBasicTypes.Read(path, text, project.AssemblyName, project.RootNamespace)
+        : SourceTypes.Read(path, text, project.AssemblyName, ParsingOf(project));
+
     private XamlProject Make()
     {
         IReadOnlyList<XmlnsDefinition> implied = Dialect.ImpliedDefinitions(inputs.AssemblyName);
         IReadOnlyList<GeneratedPart> made = [.. generated.Values];
-        TypeSystem types = new(assemblies, [.. sources.Values], inputs.AssemblyName, inputs.ImplicitUsings, implied, made);
+        string? classRoot = inputs.IsVisualBasic ? inputs.RootNamespace : null;
+        TypeSystem types = new(assemblies, [.. sources.Values], inputs.AssemblyName, inputs.ImplicitUsings, implied, made, classRoot);
         if (XamlClasses(types) is { Count: > 0 } declared)
         {
-            types = new TypeSystem(assemblies, [.. sources.Values, .. declared], inputs.AssemblyName, inputs.ImplicitUsings, implied, made);
+            types = new TypeSystem(assemblies, [.. sources.Values, .. declared], inputs.AssemblyName, inputs.ImplicitUsings, implied, made, classRoot);
         }
         classes = ClassesSaid();
         return With(types);
@@ -279,8 +284,9 @@ public sealed class XamlProjectBuilder
     private string ClassesSaid() =>
         string.Join('|', files.Values.Where(f => f.Class is not null).Select(f => $"{f.Path}:{f.Class}:{f.Root}").Order(StringComparer.Ordinal));
 
-    /// <summary>The class each XAML file's <c>x:Class</c> names that no C# declares, where the dialect's compiler makes it
-    /// (a XAML-only WPF control, MarkupCompile's class alone): a class of its root element's type, declared at its x:Class.</summary>
+    /// <summary>The class each XAML file's <c>x:Class</c> names that no code declares, where the dialect's compiler makes it
+    /// (a XAML-only WPF control, MarkupCompile's class alone): a class of its root element's type, declared at its x:Class,
+    /// in a Visual Basic project's root namespace (<see cref="TypeSystem.ClassNamed"/>).</summary>
     private List<SourceTypes> XamlClasses(TypeSystem types)
     {
         List<SourceTypes> declared = [];
@@ -290,11 +296,12 @@ public sealed class XamlProjectBuilder
         }
         foreach (XamlFileSummary file in files.Values)
         {
-            if (file.Class is not { Length: > 0 } name || file.ClassPlace is not { } place || types.Find(name) is not null
-                || !name.Split('.').All(SyntaxFacts.IsValidIdentifier))
+            if (file.Class is not { Length: > 0 } written || file.ClassPlace is not { } place || types.ClassNamed(written) is not null
+                || !written.Split('.').All(SyntaxFacts.IsValidIdentifier))
             {
                 continue;
             }
+            string name = types.ClassRoot is { } within ? $"{within}.{written}" : written;
             int dot = name.LastIndexOf('.');
             TypeRef? root = file.Root is { } element
                 ? types.ClrNamespacesOf(element.Uri).Select(n => types.Find(n.Length > 0 ? $"{n}.{element.Name}" : element.Name)).OfType<ClrType>()

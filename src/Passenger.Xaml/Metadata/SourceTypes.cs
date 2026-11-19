@@ -29,7 +29,7 @@ public sealed class SourceTypes
     public string Path { get; }
 
     /// <summary>What the file was parsed with: its project's preprocessor symbols and C# version. Null for types declared
-    /// other than in C#.</summary>
+    /// other than in C# (a XAML file's class, a Visual Basic file's).</summary>
     public CSharpParseOptions? Parsing { get; }
 
     /// <summary>Every type the file declares, nested ones included, each part of a partial type on its own.</summary>
@@ -44,6 +44,11 @@ public sealed class SourceTypes
     /// <summary>Types a file declares other than in C#: the class a XAML file's <c>x:Class</c> names, which its XAML compiler
     /// makes when no C# does.</summary>
     public static SourceTypes Declaring(string path, IReadOnlyList<ClrType> types) => new(path, types, [], [], null);
+
+    /// <summary>A file's types read other than by the C# reader (<see cref="VisualBasicTypes"/>), with the namespaces it
+    /// imports for the whole project and its assembly attributes.</summary>
+    internal static SourceTypes Of(string path, IReadOnlyList<ClrType> types, IReadOnlyList<string> globalUsings, IReadOnlyList<ClrAttribute> attributes) =>
+        new(path, types, globalUsings, attributes, null);
 
     /// <summary>A C# file's, parsed with what its project compiles it with (<paramref name="parsing"/>), its documentation
     /// comments passed over.</summary>

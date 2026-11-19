@@ -59,6 +59,14 @@ public sealed record ProjectInputs(
     /// null without one.</summary>
     public CSharpParseOptions? Parsing { get; init; }
 
+    /// <summary>Whether the project is Visual Basic's (.vbproj): its own code is read from its .vb files, in its
+    /// <see cref="RootNamespace"/>, the namespaces it imports in <see cref="ImplicitUsings"/>.</summary>
+    public bool IsVisualBasic => PathNames.HasExtension(ProjectPath, [VisualBasicProject]);
+
+    /// <summary>The namespace a Visual Basic project's every declaration lies in, as the project sets it, else as the SDK
+    /// makes it from the project's name; null for a C# project, whose namespaces are as written, and for none.</summary>
+    public string? RootNamespace { get; init; }
+
     /// <summary>The target framework chosen of a multi-targeted project's (<see cref="ProjectEvaluation.TargetFramework"/>),
     /// whose restore it is read from and whose build alone is previewed; null for a project of one.</summary>
     public string? ChosenFramework { get; init; }
@@ -72,21 +80,7 @@ public sealed record ProjectInputs(
 
     /// <summary>A property as the project sets it: its own file's, else the nearest Directory.Build.props' above it in the
     /// person's folders (<see cref="FoldersUp"/>); null when neither sets it plainly (without other properties in it).</summary>
-    public string? PropertyValue(string name)
-    {
-        if (Property(Load(ProjectPath), name) is { } own)
-        {
-            return own;
-        }
-        foreach (string at in FoldersUp.From(Folder))
-        {
-            if (FoldersUp.Found(at, "Directory.Build.props") is { } props && File.Exists(props))
-            {
-                return Property(Load(props), name);
-            }
-        }
-        return null;
-    }
+    public string? PropertyValue(string name) => PropertyIn(ProjectPath, Load(ProjectPath), name);
 
     /// <summary>Reads a project's inputs; <paramref name="dotnet"/> is where the .NET that builds it keeps its packs, whose
     /// <c>packs/</c> hold the framework's reference assemblies, its own folder's and, where it installs workloads for each
@@ -152,10 +146,12 @@ public sealed record ProjectInputs(
         }
         Dictionary<string, string> folders = read is null ? new(StringComparer.OrdinalIgnoreCase) : new(read.Folders, StringComparer.OrdinalIgnoreCase);
         FindInCache(folders, versions, [evaluation?.PackageRoot, .. read?.PackageFolders ?? []], folder);
+        bool visualBasic = PathNames.HasExtension(projectPath, [VisualBasicProject]);
         // Two profiles of one framework (WPF's and Windows Forms') share its pack.
-        return new ProjectInputs(projectPath, assemblyName, framework, [.. references.Distinct(StringComparer.Ordinal)], projectReferences, SourceFilesOf(folder),
-            ImplicitUsingsOf(assets, framework, assemblyName), assets, packages)
+        return new ProjectInputs(projectPath, assemblyName, framework, [.. references.Distinct(StringComparer.Ordinal)], projectReferences,
+            SourceFilesOf(folder, visualBasic), visualBasic ? VisualBasicImports(projectPath, project) : ImplicitUsingsOf(assets, framework, assemblyName), assets, packages)
         {
+            RootNamespace = visualBasic ? RootNamespaceOf(projectPath, project) : null,
             PackageVersions = versions,
             PackageFolders = folders,
             TargetPath = evaluation?.TargetPath is { Length: > 0 } built ? built : null,
@@ -461,11 +457,75 @@ public sealed record ProjectInputs(
         return [];
     }
 
-    /// <summary>Whether a C# file is one of the project's own, as <see cref="SourceFiles"/> reads them, there now or not.</summary>
-    public bool Compiles(string path) => path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && ProjectFolders.Holds(Folder, path);
+    /// <summary>Whether a file is one of the project's own code, as <see cref="SourceFiles"/> reads them (C#, or a Visual
+    /// Basic project's Visual Basic), there now or not.</summary>
+    public bool Compiles(string path) => PathNames.HasExtension(path, [IsVisualBasic ? ".vb" : ".cs"]) && ProjectFolders.Holds(Folder, path);
 
-    /// <summary>The project's own C# files: those in its own folders (<see cref="ProjectFolders.Under"/>).</summary>
-    private static List<string> SourceFilesOf(string folder) => [.. ProjectFolders.Under(folder).SelectMany(f => FilesIn(f, "*.cs"))];
+    /// <summary>Whether a file is code a project's XAML may read: C#, or Visual Basic, either project's (a Visual Basic
+    /// app's XAML binding to a C# library's view models).</summary>
+    public static bool IsCode(string path) => PathNames.HasExtension(path, [".cs", ".vb"]);
+
+    private const string VisualBasicProject = ".vbproj";
+
+    /// <summary>The project's own code files: those in its own folders (<see cref="ProjectFolders.Under"/>) in its language.</summary>
+    private static List<string> SourceFilesOf(string folder, bool visualBasic) =>
+        [.. ProjectFolders.Under(folder).SelectMany(f => FilesIn(f, visualBasic ? "*.vb" : "*.cs"))];
+
+    /// <summary>The namespaces a Visual Basic project imports in every file: the SDK's own unless the project turns them off
+    /// (<c>DisableImplicitNamespaceImports</c>), and those its project file's <c>Import</c> items add or remove.</summary>
+    private static IReadOnlyList<string> VisualBasicImports(string projectPath, XDocument? project)
+    {
+        bool off = string.Equals(PropertyIn(projectPath, project, "DisableImplicitNamespaceImports"), "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(PropertyIn(projectPath, project, "DisableImplicitFrameworkReferences"), "true", StringComparison.OrdinalIgnoreCase);
+        List<string> imports = off ? [] : [.. SdkImports];
+        foreach (XElement import in Elements(project, "Import").Where(e => e.Parent?.Name.LocalName == "ItemGroup"))
+        {
+            foreach (string name in ItemPaths.Parts(import.Attribute("Include")?.Value).Where(n => !n.Contains("$(", StringComparison.Ordinal)))
+            {
+                if (!imports.Contains(name, StringComparer.OrdinalIgnoreCase))
+                {
+                    imports.Add(name);
+                }
+            }
+            foreach (string name in ItemPaths.Parts(import.Attribute("Remove")?.Value))
+            {
+                imports.RemoveAll(i => string.Equals(i, name, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+        return imports;
+    }
+
+    /// <summary>The namespaces the .NET SDK imports in a Visual Basic project for .NET (Microsoft.NET.Sdk.VisualBasic.targets).</summary>
+    private static readonly string[] SdkImports =
+        ["Microsoft.VisualBasic", "System", "System.Collections", "System.Collections.Generic", "System.Diagnostics", "System.Linq", "System.Xml.Linq", "System.Threading.Tasks"];
+
+    /// <summary>A Visual Basic project's root namespace: as its project file or the Directory.Build.props above it sets it,
+    /// else the project's name, its spaces underscores, as the SDK makes it; null where it is set empty.</summary>
+    private static string? RootNamespaceOf(string projectPath, XDocument? project)
+    {
+        if (Elements(project, "RootNamespace").LastOrDefault() is { } written && !written.Value.Contains("$(", StringComparison.Ordinal))
+        {
+            return written.Value.Trim() is { Length: > 0 } named ? named : null;
+        }
+        return PropertyIn(projectPath, project, "RootNamespace") ?? Path.GetFileNameWithoutExtension(projectPath).Replace(' ', '_');
+    }
+
+    /// <summary>A property as a project sets it (<see cref="PropertyValue"/>), its file read already.</summary>
+    private static string? PropertyIn(string projectPath, XDocument? project, string name)
+    {
+        if (Property(project, name) is { } own)
+        {
+            return own;
+        }
+        foreach (string at in FoldersUp.From(Path.GetDirectoryName(projectPath)!))
+        {
+            if (FoldersUp.Found(at, "Directory.Build.props") is { } props && File.Exists(props))
+            {
+                return Property(Load(props), name);
+            }
+        }
+        return null;
+    }
 
     /// <summary>A folder's files a pattern names, none for a folder that cannot be read.</summary>
     internal static IReadOnlyList<string> FilesIn(string folder, string pattern)
