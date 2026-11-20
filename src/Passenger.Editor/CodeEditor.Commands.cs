@@ -173,7 +173,7 @@ public sealed partial class CodeEditor
                 Apply(TextEditing.DeleteWord(text, selections, backward: false, WordStop));
                 return true;
             case EditorActions.NewLine:
-                Apply(TextEditing.NewLine(text, selections, eol, Indent, Markup, Blocks));
+                NewLine(TextEditing.NewLine(text, selections, eol, Indent, Markup, Blocks));
                 return true;
             case EditorActions.StartNewLine:
                 Apply(TextEditing.StartNewLine(text, selections, eol, Indent, above: false, Markup));

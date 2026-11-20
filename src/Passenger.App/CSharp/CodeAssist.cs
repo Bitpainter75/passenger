@@ -124,6 +124,13 @@ public sealed class CodeAssist
                     context.Languages.CSharp.FormatLeft(closer);
                 }
             };
+            editor.OpenedBlock += (_, _) =>
+            {
+                if (editor == Editor)
+                {
+                    context.Languages.CSharp.FormatOpened();
+                }
+            };
             editor.Typed += (_, text) =>
             {
                 if (editor == Editor)
@@ -271,6 +278,9 @@ public sealed class CodeAssist
 
     /// <summary>What the card beside the completion list says about the chosen item while it shows, null otherwise.</summary>
     public string? ItemDocumentation => completion.ItemDocumentation;
+
+    /// <summary>The card beside the completion list while it shows.</summary>
+    public Border? ItemCard => completion.ItemCard;
 
     /// <summary>Where the completion list and the card beside it lie in their window, as last laid out, while the card shows.</summary>
     public (Rect List, Rect Card)? ItemCardPlace => completion.ItemCardPlace;
@@ -502,7 +512,8 @@ public sealed class CodeAssist
         set => completion.CallsMethods = value;
     }
 
-    /// <summary>Whether C# is formatted as it is typed, at a statement's ';' and a block's '}', as Settings leaves it.</summary>
+    /// <summary>Whether C# is formatted as it is typed, at a statement's ';', a block's '}' and Enter between a '{' and its
+    /// '}', as Settings leaves it.</summary>
     public bool FormatOnType
     {
         get => context.Languages.CSharp.FormatsOnType;

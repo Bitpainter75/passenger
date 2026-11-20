@@ -261,7 +261,7 @@ public sealed class AgentView : DockPanel
         }
         if (tool.Output is { } output)
         {
-            Border wrote = CodeBlock.Of(output);
+            Border wrote = ColouredCode.Plain(output);
             wrote.MaxHeight = 220;
             wrote.Margin = new Thickness(Gaps.Indent, 0, 0, 0);
             Control text = wrote.Child!;
@@ -334,7 +334,7 @@ public sealed class AgentView : DockPanel
         page.Children.Add(new TextBlock { Text = $"{Chat.Program.Name} asks: {ask.Title}", FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap });
         if (ask.Detail.Length > 0)
         {
-            Border detail = CodeBlock.Of(ask.Detail);
+            Border detail = ColouredCode.Plain(ask.Detail);
             detail.MaxHeight = 200;
             page.Children.Add(detail);
         }

@@ -30,6 +30,19 @@ the gate until it is rewritten, and a report-lane failure is an issue (`ci-repor
 
 ## 2026-11-19
 
+- `DecompiledSymbolsTests`' `An_adapter_starting_deletes_symbols_unused_for_a_month_and_writes_never_finished_and_keeps_those_in_use`,
+  CI 44604254929 (Linux report shard 2): "The pruned entry's folders were left behind, empty". **A race in the test**:
+  it read the cache as soon as the stale files were gone, but the prune deletes the folders they leave empty only after
+  every entry, up to 53 ms later on a loaded VM; reproduced by a prune outlasting the adapter's initialize (9 of 60 on
+  the VM). The test now reads once the adapter logs that it pruned, and a unit test holds the prune's order (26d1e0abb,
+  #2005).
+- `PauseTests`' `A_condition_that_calls_a_method_stops_a_parallel_loop_on_its_matching_iteration` (gate), CI
+  44584497461 (Windows gate shard 2, at 7652b9340): "The stopped thread's top frame, [Managed to Native Transition] at
+  line 0, has 0 scopes". **A race in the IDE**: during one worker's condition, the runtime's hold of every other thread
+  missed another, which sent six breakpoint events in a millisecond; each was put off and the program let go on, so it
+  ran on into native code, and its first breakpoint, tried later, found it there ("Frame is not an IL frame"). What
+  cleared its mark is not known (never seen on the Arm VM or the Mac); the engine now holds a thread whose event it puts
+  off, and again as each evaluation begins (`HoldPutOff`, `HoldWaiting`; 2c63d880d, #2004).
 - `EvalTests`' `At_a_stop_the_locals_are_listed_as_they_are_and_an_evaluation_reads_assigns_and_calls_what_the_method_sees`
   (gate), CI 44554208543 (Windows gate shard 1, at cb60ca68d): "int.Parse(anotherVar) was answered: error: The evaluation
   took longer than 3 s and could not be stopped, as it runs outside managed code". **A race in the IDE**: an evaluation

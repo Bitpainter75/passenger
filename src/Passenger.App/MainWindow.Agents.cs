@@ -390,7 +390,7 @@ public partial class MainWindow
     /// past a height.</summary>
     private static Control AgentBlock(string text)
     {
-        Border frame = CodeBlock.Of(text);
+        Border frame = ColouredCode.Plain(text);
         frame.MaxHeight = 200;
         Control shown = frame.Child!;
         frame.Child = null;
