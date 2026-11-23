@@ -208,6 +208,8 @@ public sealed class TestRun : IAsyncDisposable
         Environment.SetEnvironmentVariable(Passenger.App.Containers.BuildKitChecks.Variable, "off");
         // Nor the person's motion and caret settings: carets blink at Passenger's own rate but where a test stands in.
         Environment.SetEnvironmentVariable(Passenger.App.SystemMotion.Variable, "full,blink=530");
+        // Nor the person's high contrast: a window shows the theme its test chooses but where a test stands in.
+        Environment.SetEnvironmentVariable(Passenger.App.SystemContrast.Variable, "none");
         // Nor the person's user secrets: a container run mounts a project's from the run's own folder, which a test writes.
         Environment.SetEnvironmentVariable(Passenger.App.Containers.ContainerPlans.UserSecretsVariable, UserSecrets);
         // Nor the person's Passenger: an agent's call with no window to join starts this build headless, in the run's state.
@@ -249,6 +251,8 @@ public sealed class TestRun : IAsyncDisposable
         Environment.SetEnvironmentVariable(Passenger.App.MainWindow.WatchSaysLaterVariable, "3000");
         Environment.SetEnvironmentVariable(Passenger.App.Mcp.AgentCall.EveryVariable, "1000");
         Environment.SetEnvironmentVariable(Passenger.Text.TextSearch.ApartVariable, "1000");
+        // The pauses every settle after a key waits out, still longer than keys a test types together take.
+        Environment.SetEnvironmentVariable(Passenger.App.Editors.TypingPauses.Variable, "100");
         // The IDE's own waits on what it started (an Aspire service's start, a restart's wait for it) as long as the run's.
         Environment.SetEnvironmentVariable(Passenger.Core.Waits.ScaleVariable, TimeScale.ToString(System.Globalization.CultureInfo.InvariantCulture));
         // A run stopped before its end (Ctrl+C) leaves nothing either, but what is held, which the next run's start removes.
@@ -347,6 +351,20 @@ public sealed class TestRun : IAsyncDisposable
         return new Restored(run);
     }
 
+    /// <summary>Until disposed, what the IDE starts runs the analyzers or skips them as the build that made the tests did
+    /// (Passenger.Tests.csproj's RunAnalyzers), so a build of the checkout finds that build's compiles current, where one
+    /// running them after a build that skipped them compiles every project again.</summary>
+    public static IDisposable AnalyzersAsBuilt()
+    {
+        const string RunAnalyzers = "RunAnalyzers";
+        Dictionary<string, string?> run = new() { [RunAnalyzers] = Environment.GetEnvironmentVariable(RunAnalyzers) };
+        if (AvaloniaApp.MetadataOrNone(RunAnalyzers) is { } built)
+        {
+            Environment.SetEnvironmentVariable(RunAnalyzers, built);
+        }
+        return new Restored(run);
+    }
+
     /// <summary>A command run on the person's checkout given their NuGet settings back, as <see cref="PersonsNuGet"/> gives
     /// them, but to it alone, so its restore of their projects is the one their builds wrote.</summary>
     public static System.Diagnostics.ProcessStartInfo WithPersonsNuGet(System.Diagnostics.ProcessStartInfo start)
@@ -416,9 +434,66 @@ public sealed class TestRun : IAsyncDisposable
 /// <summary>A test's wall-clock limits, each written as the time on a developer's machine and given as that times the run's
 /// <see cref="TestRun.TimeScale"/>: Ui's waits scale what they are given, and every other limit a test sets goes through
 /// <see cref="Scaled"/>.</summary>
-public static class Limits
+public static partial class Limits
 {
     public static TimeSpan Scaled(this TimeSpan limit) => limit == Timeout.InfiniteTimeSpan ? limit : limit * TestRun.TimeScale;
+
+    /// <summary>The run's limit on one test, which no time scale lengthens, read from test-shards.py's HANG: CI's and just
+    /// test's <c>--blame-hang-timeout</c>, past which the test host is ended with nothing said of where the test stood.</summary>
+    public static readonly TimeSpan Hang = HangOfTheRun();
+
+    /// <summary>When the running test's waits held to <see cref="WithinHang"/> give up, from <see cref="BeginHang"/>.</summary>
+    private static readonly AsyncLocal<Deadline?> HangEnd = new();
+
+    /// <summary>Starts the running test's time within <see cref="Hang"/>, less half a minute to tell a failure in, until the
+    /// scope ends: a test of minutes begins with it, so a wait that stalls fails naming itself before the run ends the test.</summary>
+    public static IDisposable BeginHang()
+    {
+        HangEnd.Value = Deadline.In(TestsTime);
+        return new HangScope();
+    }
+
+    /// <summary>A test's time within <see cref="Hang"/> from <see cref="BeginHang"/>: half a minute short of it.</summary>
+    private static TimeSpan TestsTime => Hang - TimeSpan.FromSeconds(30);
+
+    /// <summary>A wait's limit as Ui's waits take one, before their scaling: <paramref name="limit"/>, or what is left of
+    /// the running test's time within <see cref="Hang"/> where that is less; <paramref name="limit"/> outside such a time.</summary>
+    public static TimeSpan WithinHang(TimeSpan limit)
+    {
+        if (HangEnd.Value is not { } end)
+        {
+            return limit;
+        }
+        TimeSpan left = end.Left / TestRun.TimeScale;
+        return left < limit ? left : limit;
+    }
+
+    /// <summary>What a wait that gives up once the running test's time is spent (<see cref="BeginHang"/>) says of how long
+    /// it waited; nothing otherwise.</summary>
+    internal static string SpentSaid() => HangEnd.Value is { Passed: true }
+        ? $", all the test had left of its {Durations.Said(TestsTime)} within the run's limit on a test," : string.Empty;
+
+    /// <summary>What a wait that gives up within the running test's time ends its words with: the IDE's log's end, which
+    /// says how long each program the steps ran took, so a step left no time says where it went; nothing outside one.</summary>
+    internal static string WhereTheTimeWent() => HangEnd.Value is null ? string.Empty : Ui.IdeLogTail();
+
+    private sealed class HangScope : IDisposable
+    {
+        public void Dispose() => HangEnd.Value = null;
+    }
+
+    /// <summary>tools/test-shards.py's HANG, which it writes in minutes; written otherwise, the tests fail, rather than hold
+    /// their waits to another limit than the run's.</summary>
+    private static TimeSpan HangOfTheRun()
+    {
+        string script = Path.Combine(Debugging.Helpers.Debuggees.Root, "tools", "test-shards.py");
+        System.Text.RegularExpressions.Match hang = HangWritten().Match(File.ReadAllText(script));
+        return hang.Success ? TimeSpan.FromMinutes(int.Parse(hang.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))
+            : throw new InvalidOperationException($"{script} gives no HANG in minutes (HANG = \"<minutes>m\"), the run's limit on a test, which the tests' long waits end within");
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^HANG = ""(\d+)m""$", System.Text.RegularExpressions.RegexOptions.Multiline)]
+    private static partial System.Text.RegularExpressions.Regex HangWritten();
 }
 
 /// <summary>A while as the IDE says one (<see cref="Durations.Said"/>), as a regular expression: its number to a tenth and its
@@ -487,7 +562,9 @@ public static partial class Nice
 /// test, every window it left open is closed (one that failed before its own close) and what its windows started (a
 /// language server, a build, a debugger, a program) is waited out, those it closed itself too, then the folders the test
 /// made as it ran are removed, the windows that used them gone first. Any test fails where the person's Godot user folders
-/// were written as it ran (<see cref="PersonsGodot"/>), or left a game running of a Godot editor it ended (<see cref="TestGodotEditors"/>).</summary>
+/// were written as it ran (<see cref="PersonsGodot"/>), or left a game running of a Godot editor it ended (<see cref="TestGodotEditors"/>)
+/// or a container of the run's running (<see cref="Docker.LeftBy"/>), each ended, or a gone program's runtime files
+/// (<see cref="LeftRuntimeFiles"/>), each removed.</summary>
 [AttributeUsage(AttributeTargets.Assembly)]
 public sealed class TestsLeaveNothingBehindAttribute : BeforeAfterTestAttribute
 {
@@ -499,13 +576,18 @@ public sealed class TestsLeaveNothingBehindAttribute : BeforeAfterTestAttribute
             Passenger.App.UiThread.Own();
             BackgroundWork.Forget();
             Passenger.Core.InFlight.Forget();
+            OpenWindows.Following = SameOnEverySystemAttribute.Marks(methodUnderTest);
             OpenWindows.Watch();
         }
         TestFolders.Begin(test.UniqueID);
+        Docker.Begin(test);
     }
 
     public override void After(MethodInfo methodUnderTest, IXunitTest test)
     {
+        // Read before the windows close, said once they have.
+        string? unlike = IsWindowTest(methodUnderTest) ? SameOnEverySystemAttribute.Unlike(methodUnderTest, OpenWindows.RanUnlike) : null;
+        IReadOnlyList<string> containers;
         try
         {
             if (IsWindowTest(methodUnderTest) && !OpenWindows.CloseAll())
@@ -516,6 +598,16 @@ public sealed class TestsLeaveNothingBehindAttribute : BeforeAfterTestAttribute
         finally
         {
             TestFolders.End(test.UniqueID);
+            // Removed whatever else the test failed on: one left running slows every test after it.
+            containers = Docker.LeftBy(test);
+        }
+        if (containers.Count > 0)
+        {
+            throw new InvalidOperationException($"{test.TestDisplayName} left the run's containers running, removed now: {string.Join("; ", containers)}");
+        }
+        if (unlike is not null)
+        {
+            throw new InvalidOperationException(unlike);
         }
         if (PersonsGodot.Written($"as {test.TestDisplayName} ran") is { } written)
         {
@@ -524,6 +616,10 @@ public sealed class TestsLeaveNothingBehindAttribute : BeforeAfterTestAttribute
         if (TestGodotEditors.LeftGames() is [_, ..] left)
         {
             throw new InvalidOperationException($"{test.TestDisplayName} left games of a Godot editor it ended running, ended now: {string.Join("; ", left)}");
+        }
+        if (LeftRuntimeFiles.LeftBy(test.TestDisplayName) is { } runtimeFiles)
+        {
+            throw new InvalidOperationException(runtimeFiles);
         }
     }
 
@@ -546,12 +642,67 @@ public static class OpenWindows
     /// what they started.</summary>
     private static readonly TimeSpan Landing = TimeSpan.FromSeconds(30);
 
+    private static readonly List<string> ranUnlike = [];
+
+    /// <summary>The IDE's windows followed since the test began, by whose folders the programs it starts are told apart
+    /// from those of the classes beside it.</summary>
+    private static readonly List<Passenger.App.MainWindow> followed = [];
+
+    /// <summary>Whether the IDE's windows the test opens are followed for what another system could do otherwise, as a
+    /// test of a class marked [SameOnEverySystem]'s are (<see cref="SameOnEverySystemAttribute.Follow"/>).</summary>
+    public static bool Following { get; set; }
+
+    /// <summary>What the IDE's windows followed since the test began ran that another system could do otherwise, those
+    /// open now as they stand.</summary>
+    public static IReadOnlyList<string> RanUnlike
+    {
+        get
+        {
+            lock (followed)
+            {
+                return [.. ranUnlike, .. Following ? Open.OfType<Passenger.App.MainWindow>().SelectMany(SameOnEverySystemAttribute.Standing) : []];
+            }
+        }
+    }
+
+    /// <summary>A program the IDE started, on whatever thread started it: what another system could do otherwise where it
+    /// runs in a followed window's folder.</summary>
+    private static void Heard(object? sender, ChildStart start)
+    {
+        lock (followed)
+        {
+            if (followed.Any(window => window.Session.Folder is { } folder && start.Folder.Length > 0 && (PathNames.Same(start.Folder, folder) || PathNames.IsUnder(start.Folder, folder)))
+                && SameOnEverySystemAttribute.Started(start) is { } ran)
+            {
+                ranUnlike.Add(ran);
+            }
+        }
+    }
+
     public static void Watch()
     {
         if (!watching)
         {
             watching = true;
-            Window.WindowOpenedEvent.AddClassHandler<Window>((window, _) => Open.Add(window));
+            ChildProcesses.Started += Heard;
+            Window.WindowOpenedEvent.AddClassHandler<Window>((window, _) =>
+            {
+                Open.Add(window);
+                if (window is Passenger.App.MainWindow ide && Following)
+                {
+                    lock (followed)
+                    {
+                        followed.Add(ide);
+                    }
+                    SameOnEverySystemAttribute.Follow(ide, ran =>
+                    {
+                        lock (followed)
+                        {
+                            ranUnlike.Add(ran);
+                        }
+                    });
+                }
+            });
             Window.WindowClosedEvent.AddClassHandler<Window>((window, _) =>
             {
                 Open.Remove(window);
@@ -563,6 +714,11 @@ public static class OpenWindows
         }
         Open.Clear();
         Ending.Clear();
+        lock (followed)
+        {
+            ranUnlike.Clear();
+            followed.Clear();
+        }
     }
 
     /// <summary>Keeps what a closed window started ending, which its own Closed sets, if it has not yet.</summary>
@@ -1024,6 +1180,16 @@ public static class Ui
         ? promote.CreateDelegate<Action<Dispatcher>>()
         : throw new MissingMethodException("Avalonia's Dispatcher no longer has PromoteTimers, by which a settle fires the timers come due");
 
+    /// <summary>The announcers a test hears (<see cref="Hears"/>), each with its window, whose gathering of words told a
+    /// settle waits out while the window shows, as it draws nothing and so holds no background work.</summary>
+    private static readonly ConditionalWeakTable<Passenger.App.Announcer, TopLevel> Heard = [];
+
+    /// <summary>Has every settle from now on wait until the window's announcer has said what it gathered, for a test of what
+    /// a screen reader hears.</summary>
+    public static void Hears(TopLevel window, Passenger.App.Announcer announcer) => Heard.AddOrUpdate(announcer, window);
+
+    private static bool Hearing() => Heard.Any(heard => heard.Value.IsVisible && heard.Key.IsGathering);
+
     /// <summary>Runs queued UI work and waits until the IDE is quiet: its background work landed (<see cref="BackgroundWork"/>),
     /// nothing in flight that no frame waits for (<see cref="Passenger.Core.InFlight"/>: a language server's request
     /// unanswered), every dispatcher timer that has come due fired, and the frame its last work laid out drawn
@@ -1086,7 +1252,7 @@ public static class Ui
             return false;
         }
         Draw();
-        return BackgroundWork.Pending == 0 && Passenger.Core.InFlight.Count == 0 && (also is null || also());
+        return BackgroundWork.Pending == 0 && Passenger.Core.InFlight.Count == 0 && !Hearing() && (also is null || also());
     }, limit.Left, every: TimeSpan.FromMilliseconds(2), scaled: false);
 
     /// <summary>Runs what the window has queued (its layout among it) and draws until what that laid out is drawn
@@ -1139,6 +1305,14 @@ public static class Ui
         return conversations.Length == 0 ? string.Empty : $"\nThe language servers' conversations:\n{conversations}";
     }
 
+    /// <summary>What the project hosts were asked and have not answered, and whether their gate is held: no host's request is
+    /// work a quiet wait waits for, so a wait that gave up with the IDE quiet may have stood on one.</summary>
+    private static string HostsAsked()
+    {
+        string asked = Passenger.Workspace.ProjectHosts.Unanswered();
+        return asked.Length == 0 ? string.Empty : $"\nThe project hosts had not answered:\n{asked}";
+    }
+
     /// <summary>The programs still running under the tests' process, with their command lines, which say where work waiting
     /// on a program stopped: a git, a helper it started, or a stand-in's server.</summary>
     private static string ProgramsRunning()
@@ -1189,12 +1363,12 @@ public static class Ui
         {
             if (until.Passed)
             {
-                throw new TimeoutException($"Waited {within.TotalSeconds} s for {what()}");
+                throw new TimeoutException($"Waited {within.TotalSeconds} s{Limits.SpentSaid()} for {what()}{HostsAsked()}{Limits.WhereTheTimeWent()}");
             }
             Frame();
             if (!Settled(Deadline.Later(Deadline.In(SettleLimit.Scaled()), until)))
             {
-                throw new TimeoutException($"The IDE was not quiet while waiting {within.TotalSeconds} s for {what()}. Still busy:\n{Busy()}{ServerConversations()}{IdeLogTail()}{ServerLogTail()}");
+                throw new TimeoutException($"The IDE was not quiet while waiting {within.TotalSeconds} s for {what()}. Still busy:\n{Busy()}{ServerConversations()}{HostsAsked()}{IdeLogTail()}{ServerLogTail()}");
             }
         }
         // What it waited for may have landed with none of the window's jobs run since (a read that ended at once).
@@ -1549,11 +1723,11 @@ public static class Ui
     }
 
     /// <summary>A drag with the left button from one point of a window to another (its units), through ten moves between,
-    /// as a person's hand goes.</summary>
-    public static void Drag(TopLevel window, Point from, Point to) => Dragged(window, from, to, MouseButton.Left, RawInputModifiers.None);
+    /// as a person's hand goes, apart from a click there before it, as a click is (so never the second press of a double
+    /// click).</summary>
+    public static void Drag(TopLevel window, Point from, Point to) => Drag(window, from, to, MouseButton.Left, RawInputModifiers.None);
 
-    /// <summary>A drag as <see cref="Drag(TopLevel, Point, Point)"/> makes one, with another button or modifiers held, and
-    /// apart from a click there before it, as a click is (so never the second press of a double click).</summary>
+    /// <summary>A drag as <see cref="Drag(TopLevel, Point, Point)"/> makes one, with another button or modifiers held.</summary>
     public static void Drag(TopLevel window, Point from, Point to, MouseButton button, RawInputModifiers modifiers)
     {
         Apart(window, from);
@@ -1578,7 +1752,7 @@ public static class Ui
             MouseButton.Right => RawInputModifiers.RightMouseButton,
             _ => throw new ArgumentOutOfRangeException(nameof(button), button, "a drag is made with the left, middle or right button"),
         };
-        window.MouseDown(from, button, modifiers);
+        string? doubled = Pressed(window, from, button, modifiers) is > 1 and int count ? Doubled(window, from, count, "A drag's press") : null;
         for (int step = 1; step <= 10; step++)
         {
             if (drawn)
@@ -1593,25 +1767,22 @@ public static class Ui
         }
         window.MouseUp(to, button, modifiers);
         Clicked(window, from);
+        if (doubled is not null)
+        {
+            throw new InvalidOperationException(doubled);
+        }
         Settle();
     }
 
     private static void Click(Control control, Point? at, MouseButton button, RawInputModifiers modifiers, bool settle)
     {
         (TopLevel top, Point point) = Aim(control, at);
+        if (at is null && control is Button)
+        {
+            point = Beside(top, control, point);
+        }
         Apart(top, point);
-        int count = 0;
-        EventHandler<PointerPressedEventArgs> pressed = (_, e) => count = e.ClickCount;
-        top.AddHandler(InputElement.PointerPressedEvent, pressed, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
-        try
-        {
-            top.MouseDown(point, button, modifiers);
-        }
-        finally
-        {
-            top.RemoveHandler(InputElement.PointerPressedEvent, pressed);
-        }
-        string? doubled = count > 1 ? Doubled(top, point, count) : null;
+        string? doubled = Pressed(top, point, button, modifiers) is > 1 and int count ? Doubled(top, point, count, "A click") : null;
         top.MouseUp(point, button, modifiers);
         Clicked(top, point);
         if (doubled is not null)
@@ -1624,15 +1795,33 @@ public static class Ui
         }
     }
 
-    /// <summary>What a click the platform took as the second of a double click (or later) says: where it and the window's
-    /// click before it went, how far apart in time, and the double-tap time and size the test waited by.</summary>
-    private static string Doubled(TopLevel top, Point point, int count)
+    /// <summary>Presses a mouse button at a point of a window, saying which click of a run the platform counted the press.</summary>
+    private static int Pressed(TopLevel top, Point point, MouseButton button, RawInputModifiers modifiers)
+    {
+        int count = 0;
+        EventHandler<PointerPressedEventArgs> pressed = (_, e) => count = e.ClickCount;
+        top.AddHandler(InputElement.PointerPressedEvent, pressed, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        try
+        {
+            top.MouseDown(point, button, modifiers);
+        }
+        finally
+        {
+            top.RemoveHandler(InputElement.PointerPressedEvent, pressed);
+        }
+        return count;
+    }
+
+    /// <summary>What a press (<paramref name="what"/>: a click, a drag's) the platform took as the second of a double click
+    /// (or later) says: where it and the window's click before it went, how far apart in time, and the double-tap time and
+    /// size the test waited by.</summary>
+    private static string Doubled(TopLevel top, Point point, int count, string what)
     {
         Avalonia.Platform.IPlatformSettings? platform = Application.Current?.PlatformSettings;
         string before = LastClicks.TryGetValue(top, out StrongBox<(Point Point, DateTime At)>? last)
             ? $"at {last.Value.Point}, {(DateTime.UtcNow - last.Value.At).TotalMilliseconds:0} ms before"
             : "none Ui made";
-        return $"A click at {point} in {top.GetType().Name} was taken as click {count} of a run, not a click of its own; the window's click before it was {before}. "
+        return $"{what} at {point} in {top.GetType().Name} was taken as click {count} of a run, not a click of its own; the window's click before it was {before}. "
             + $"The double-tap time and size waited by: {platform?.GetDoubleTapTime(PointerType.Mouse).TotalMilliseconds.ToString() ?? "none (500)"} ms, {platform?.GetDoubleTapSize(PointerType.Mouse).ToString() ?? "none (4, 4)"}";
     }
 
@@ -1656,6 +1845,37 @@ public static class Ui
         {
             Hold(between - since, "a second click at the same place to be a click of its own, not a double click");
         }
+    }
+
+    /// <summary>Where on a button a click goes that the platform counts as a click of its own: its centre, or, where the
+    /// window's last click went there a moment ago, a point of the button just beyond the double-click size from it, which
+    /// the pointer finds the button at; a button does the same wherever it is clicked, so <see cref="Apart"/> need not wait
+    /// out the double-click time. A button too small for such a point is clicked at its centre, once that time has passed.</summary>
+    private static Point Beside(TopLevel top, Control button, Point centre)
+    {
+        if (!LastClicks.TryGetValue(top, out StrongBox<(Point Point, DateTime At)>? last))
+        {
+            return centre;
+        }
+        Size near = Application.Current?.PlatformSettings?.GetDoubleTapSize(PointerType.Mouse) ?? new Size(4, 4);
+        bool Near(Point point) => Math.Abs(last.Value.Point.X - point.X) <= near.Width / 2 && Math.Abs(last.Value.Point.Y - point.Y) <= near.Height / 2;
+        if (!Near(centre))
+        {
+            return centre;
+        }
+        Rect bounds = new(button.TranslatePoint(default, top) ?? centre, button.Bounds.Size);
+        double across = Math.Floor(near.Width / 2) + 1;
+        double down = Math.Floor(near.Height / 2) + 1;
+        foreach (Vector step in (Vector[])[new(across, 0), new(-across, 0), new(0, down), new(0, -down)])
+        {
+            Point point = last.Value.Point + step;
+            if (bounds.Deflate(1).Contains(point) && !Near(point)
+                && top.InputHitTest(point, v => v.GetType().Name != "LightDismissOverlayLayer") is Visual found && (found == button || button.IsVisualAncestorOf(found)))
+            {
+                return point;
+            }
+        }
+        return centre;
     }
 
     /// <summary>Where a click on a control lands, in the window or popup showing it, scrolled into view, the tooltips the pointer
@@ -1737,6 +1957,16 @@ public static class Ui
         int at = editor.Document.Snapshot.ToString().IndexOf(text, StringComparison.Ordinal);
         Assert.True(at >= 0, $"'{text}' is not in the file");
         editor.Selections = SelectionSet.Single(at + text.Length);
+    }
+
+    /// <summary>The completion list just opened and the card beside it, waited for while its first item is the one chosen,
+    /// no key having moved the choice: the first item's label and what its card says.</summary>
+    public static (string First, string Card) FirstItemsCard(Passenger.App.MainWindow window)
+    {
+        WaitFor(() => window.Assist.CompletionLabels is [{ } first, ..] && window.Assist.CompletionChosen == first && window.Assist.ItemDocumentation is { Length: > 0 },
+            () => $"the card of the list's first item as the list opened, that item still chosen: the list shows {string.Join(", ", window.Assist.CompletionLabels.Take(5))}, "
+                + $"{window.Assist.CompletionChosen ?? "none"} chosen, the card says {window.Assist.ItemDocumentation ?? "nothing"}");
+        return (window.Assist.CompletionChosen!, window.Assist.ItemDocumentation!);
     }
 
     /// <summary>A line typed into a console (Run's, Debug's) as a person types it there, a click in it first taking the keys:
@@ -1933,6 +2163,7 @@ public static class Ui
         string where = "The menu";
         for (int i = 0; i < path.Length; i++)
         {
+            GreyedSayWhy(items, where);
             string step = path[i];
             MenuItem item = items.FirstOrDefault(m => m.Header as string == step)
                 ?? throw new InvalidOperationException($"{where} has no {step}: [{string.Join(", ", items.Select(m => $"{m.Header}{(m.IsEnabled ? "" : " (disabled)")}"))}]");
@@ -1953,6 +2184,16 @@ public static class Ui
             items = item.Items.OfType<MenuItem>();
             where = step;
         }
+    }
+
+    /// <summary>Holds a menu's items to its one rule (ListMenus): each greyed says why in its tip, but a heading over a
+    /// group of items or a notice in place of them, which are words, never a command.</summary>
+    public static void GreyedSayWhy(IEnumerable<MenuItem> items, string where)
+    {
+        string[] unsaid = [.. items.Where(m => !m.IsEnabled && ToolTip.GetTip(m) is null
+            && !m.Classes.Contains(Passenger.StyleClasses.MenuHeading) && !m.Classes.Contains(Passenger.StyleClasses.MenuNotice)).Select(m => $"{m.Header}")];
+        Assert.True(unsaid.Length == 0, $"{where} greys [{string.Join(", ", unsaid)}] saying nothing of why, so a person reads a command that cannot run "
+            + "with no way to learn what it waits for: grey each through ListMenus (its whyNot, or ListMenus.Grey), or make words that are no command a Heading or Notice");
     }
 
     /// <summary>The words a text block draws, as it laid them out (an access key's mark taken out, where it took one).</summary>
@@ -3298,8 +3539,9 @@ public readonly struct OwnProcess
         }
     }
 
-    /// <summary>Ends it and what it started, or it alone as a crash ends it, while it is still the process the test knew,
-    /// passing over one that has ended; <paramref name="waited"/>, once it has gone (what it started is not waited for).</summary>
+    /// <summary>Ends it and what it started, their runtime files taken, or it alone as a crash ends it, while it is still the
+    /// process the test knew, passing over one that has ended; <paramref name="waited"/>, once it has gone (what it started
+    /// is not waited for).</summary>
     public void Kill(bool alone = false, bool waited = false)
     {
         if (OperatingSystem.IsWindows())
@@ -3325,6 +3567,7 @@ public readonly struct OwnProcess
         }
         else
         {
+            RuntimeFiles[] files = LeftRuntimeFiles.Of(Id);
             try
             {
                 using Process found = Process.GetProcessById(Id);
@@ -3334,6 +3577,7 @@ public readonly struct OwnProcess
             {
                 // Gone meanwhile.
             }
+            LeftRuntimeFiles.TakeOnceGone(files);
         }
         if (waited)
         {

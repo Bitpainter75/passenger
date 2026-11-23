@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="Passenger.TestTables" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
@@ -37,6 +38,15 @@
     <Compile Include="../../src/Passenger.Inspector/FrameWire.cs" Link="FrameWire.cs" />
     <!-- What Passenger's Hot Reload hook says, and the name its thread goes by in a debugged program. -->
     <Compile Include="../../src/Passenger.UpdateHandlers/Wire.cs" Link="UpdateHandlersWire.cs" />
+    <!-- The ways one test holds many checks, a table of rows and a flow of steps (tests/Shared), linked into both test
+         projects. -->
+    <Compile Include="../Shared/*.cs" LinkBase="Shared" />
+  </ItemGroup>
+
+  <!-- Whether the build that made the tests ran the analyzers, where it said (CI's builds but one skip them): a test's
+       build of the checkout runs them as that build did, and so finds its compiles current (SelfDebuggingTests). -->
+  <ItemGroup Condition="'$(RunAnalyzers)' != ''">
+    <AssemblyMetadata Include="RunAnalyzers" Value="$(RunAnalyzers)" />
   </ItemGroup>
 
   <!-- Avalonia's templates, restored from nuget.org as every package is and served to the tests from the package cache

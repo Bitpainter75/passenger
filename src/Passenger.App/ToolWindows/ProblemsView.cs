@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Passenger.App.Run;
+using Passenger.Core;
 
 namespace Passenger.App.ToolWindows;
 
@@ -23,9 +24,9 @@ public sealed class ProblemsView : DockPanel
 
     private readonly ProblemsModel model;
     private readonly TreeList list;
-    private readonly TextBlock empty;
+    private readonly EmptyState empty;
     private readonly TextBox search;
-    private readonly Dictionary<ProblemsTab, ToggleButton> tabs = [];
+    private readonly ToolTabs.Strip<ProblemsTab> tabs = new();
     private readonly Dictionary<ProblemSeverity, (ToggleButton Button, TextBlock Count)> severities = [];
     private bool following;
 
@@ -35,13 +36,11 @@ public sealed class ProblemsView : DockPanel
         ToolFlow bar = new() { Margin = new Thickness(Gaps.Normal, Gaps.Hair) };
         foreach (ProblemsTab tab in Enum.GetValues<ProblemsTab>())
         {
-            ToggleButton button = new() { Classes = { StyleClasses.PanelTab } };
-            button.Click += (_, _) => model.Shown = tab;
-            tabs[tab] = button;
-            bar.Children.Add(button);
+            tabs.Add(tab, string.Empty);
         }
-        search = FilterBox.Of();
-        ToolFlow.SetFills(search, new ToolLayout.Fills(160, 200));
+        tabs.Chosen += (_, tab) => model.Shown = tab;
+        bar.Children.Add(tabs);
+        search = SearchBox.Finding("Filter problems");
         search.Text = model.Filter.Text;
         search.TextChanged += (_, _) => model.Filter = model.Filter with { Text = (search.Text ?? string.Empty).Trim() };
         search.KeyDown += OnSearchKey;
@@ -61,7 +60,7 @@ public sealed class ProblemsView : DockPanel
             ItemsSource = model.ShownRows,
         };
         ReusedRows.Use(list, Row);
-        empty = new TextBlock { Classes = { StyleClasses.EmptyText } };
+        empty = new EmptyState();
         // The list comes first among the parts, so the window's action gives it the keys and Find's give them the filter.
         Grid.SetRow(topBar, 0);
         Children.Add(new Grid { RowDefinitions = new RowDefinitions("Auto,*"), Children = { new Panel { [Grid.RowProperty] = 1, Children = { empty, list } }, topBar } });
@@ -75,11 +74,11 @@ public sealed class ProblemsView : DockPanel
         };
         ListMenus.Attach(list, () => list.SelectedItem is not ProblemRow { Problem: { } problem } ? [] :
         [
-            ListMenus.Item("Go to", "F4", Choose, problem.Path is not null),
-            ListMenus.Item("Copy Message", null, () => IdeErrors.Observe(ListMenus.CopyAsync(this, problem.Message))),
-            ListMenus.Item("Open Link", null, () => model.Open(problem.Link!), problem.Link is not null),
+            ListMenus.Source(Choose, problem.Path is null ? Refusals.ProblemNamesNoFile : null),
+            ListMenus.Item("Copy Message", () => IdeErrors.Observe(ListMenus.CopyAsync(this, problem.Message))),
+            ListMenus.Item("Open Link", () => model.Open(problem.Link!), problem.Link is null ? Refusals.ProblemHasNoLink : null),
             new Separator(),
-            ListMenus.Item("Show Context Actions", null, () => model.Fix(problem), model.HasFixes(problem)),
+            ListMenus.Item("Show Context Actions", () => model.Fix(problem), model.WhyNotFix(problem)),
         ]);
         model.TabsChanged += (_, _) => Titles();
         model.ChosenRowChanged += (_, reveal) => Follow(reveal);
@@ -116,12 +115,12 @@ public sealed class ProblemsView : DockPanel
     /// <summary>Each tab's title with its count, the one shown pressed, and the empty list's words.</summary>
     private void Titles()
     {
-        foreach ((ProblemsTab tab, ToggleButton button) in tabs)
+        foreach (ProblemsTab tab in tabs.Keys)
         {
-            button.Content = model.TitleWithCount(tab);
-            button.IsVisible = model.HasTab(tab);
-            button.IsChecked = tab == model.Shown;
+            tabs[tab].Content = model.TitleWithCount(tab);
+            tabs[tab].IsVisible = model.HasTab(tab);
         }
+        tabs.Choice = model.Shown;
         empty.Text = model.EmptyText;
         empty.IsVisible = model.Rows.Count == 0;
         // The filter taken away for a problem revealed.
@@ -132,8 +131,7 @@ public sealed class ProblemsView : DockPanel
         (int errors, int warnings, int messages) = model.SeverityCounts();
         foreach ((ProblemSeverity severity, (ToggleButton button, TextBlock count)) in severities)
         {
-            count.Text = (severity switch { ProblemSeverity.Error => errors, ProblemSeverity.Warning => warnings, _ => messages })
-                .ToString(System.Globalization.CultureInfo.CurrentCulture);
+            count.Text = Numbers.Said(severity switch { ProblemSeverity.Error => errors, ProblemSeverity.Warning => warnings, _ => messages });
             button.IsChecked = model.Filter.Shows(severity);
         }
     }
@@ -163,15 +161,7 @@ public sealed class ProblemsView : DockPanel
         {
             list.SelectedItem = first;
         }
-        if (list.SelectedItem is { } chosen)
-        {
-            list.ScrollIntoView(chosen);
-            list.ContainerFromItem(chosen)?.Focus();
-        }
-        else
-        {
-            list.Focus();
-        }
+        ListKeys.Hold(list);
     }
 
     private void Choose()
@@ -190,7 +180,7 @@ public sealed class ProblemsView : DockPanel
         TextBlock text = new() { VerticalAlignment = VerticalAlignment.Center };
         Button open = new() { Classes = { StyleClasses.Link }, VerticalAlignment = VerticalAlignment.Center };
         TextBlock after = new() { VerticalAlignment = VerticalAlignment.Center };
-        TextBlock detail = new() { FontSize = 12, Margin = new Thickness(Gaps.Wide, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        TextBlock detail = new() { Classes = { StyleClasses.Caption }, Margin = new Thickness(Gaps.Wide, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         detail.Classes.Add(StyleClasses.Muted);
         ShrinkingRow panel = new() { Height = ListRow.Height, Children = { icon, text, open, after, detail } };
         open.Click += (_, e) =>
@@ -221,7 +211,7 @@ public sealed class ProblemsView : DockPanel
             icon.DataKey = kind < 0 ? null : Severities[kind].Icon;
             icon.ForegroundKey = kind < 0 ? null : Severities[kind].Brush;
             ToolTip.SetTip(panel, problem is null ? null : row.Label);
-            text.FontWeight = problem is null && row.Depth == 0 ? FontWeight.SemiBold : FontWeight.Normal;
+            text.Classes.Set(StyleClasses.Strong, problem is null && row.Depth == 0);
             text.TextTrimming = problem is null ? TextTrimming.None : TextTrimming.CharacterEllipsis;
             open.IsVisible = after.IsVisible = false;
             if (problem is null)

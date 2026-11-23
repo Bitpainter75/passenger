@@ -9,11 +9,19 @@ public class Variables2Tests(ITestOutputHelper testOutputHelper)
 {
     private static readonly int TestEnd = Debuggees.Line("DebuggableConsoleApp", "VariablesClass.cs", "CompositeValueFixtures localCompositeValues = new CompositeValueFixtures();") + 1;
 
+    /// <summary>A stop lists locals and fields of every kind with their values and types, and a float and a double
+    /// read as C# writes them under a German culture and take back the text shown.</summary>
+    [Fact]
+    public async Task A_stop_lists_every_kind_of_local_and_field_with_its_value_read_as_CSharp_writes_it()
+    {
+        await Flow.StepApartAsync<Variables2Tests>("a stop lists locals and fields of every kind with their values and types", () => new Variables2Tests(testOutputHelper), t => t.A_stop_lists_locals_and_fields_of_every_kind_with_their_values_and_types());
+        await Flow.StepApartAsync<Variables2Tests>("a float and a double read as C# writes them under a German culture and take back the text shown", () => new Variables2Tests(testOutputHelper), t => t.A_float_and_a_double_read_as_CSharp_writes_them_under_a_German_culture_and_take_back_the_text_shown());
+    }
+
     /// <summary>A float's and a double's values read as C# writes them whatever the machine's culture, and Set Value takes
     /// back the text shown. The culture comes from LANG and LC_ALL on macOS and Linux; Windows takes it from the user's
     /// settings, so there the test holds the values to C#'s alone.</summary>
-    [Fact]
-    public async Task A_float_and_a_double_read_as_CSharp_writes_them_under_a_German_culture_and_take_back_the_text_shown()
+    private async Task A_float_and_a_double_read_as_CSharp_writes_them_under_a_German_culture_and_take_back_the_text_shown()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper, environment: new Dictionary<string, string> { ["LANG"] = "de_DE.UTF-8", ["LC_ALL"] = "de_DE.UTF-8" });
         await host
@@ -48,8 +56,7 @@ public class Variables2Tests(ITestOutputHelper testOutputHelper)
         string? Shown(string name) => locals.FirstOrDefault(v => v.Name == name)?.Value;
     }
 
-    [Fact]
-    public async Task A_stop_lists_locals_and_fields_of_every_kind_with_their_values_and_types()
+    private async Task A_stop_lists_locals_and_fields_of_every_kind_with_their_values_and_types()
     {
         bool startSuspended = true;
 
@@ -198,7 +205,7 @@ file static class TestExtensions
             new() { VariablesReference =  0,  Name = "ComputedProperty",            EvaluateName = "this.ComputedProperty",            Value = "246",                                                       Type = "int" },
 			// TODO: Type should be int
 			new() { VariablesReference = 46,  Name = "ThrowingProperty",            EvaluateName = "this.ThrowingProperty",            Value = expectedThrowingPropertyValue,                               Type = "System.InvalidOperationException" },
-            new() { VariablesReference = 47,  Name = "Static members",              Value = "",                                                          Type = "", PresentationHint = new DapPresentationHint("class") },
+            new() { VariablesReference = 47,  Name = "Static members",              Value = "",                                                          Type = "", PresentationHint = new DapPresentationHint(PresentationHintKinds.Class) },
         ];
         List<DapVariable>? thisInstanceVariables = await debugProtocolHost.VariablesAsync(variablesReference);
         Assert.Equal(expectedVariables.Count, thisInstanceVariables.Count);
@@ -208,7 +215,7 @@ file static class TestExtensions
         await debugProtocolHost.AssertMultiDimArrayVariables(thisInstanceVariables.Single(s => s.Name == "MultiDimArrayField").VariablesReference);
     }
 
-    private static readonly DapPresentationHint _multiDimArrayRowPresentationHint = new("virtual");
+    private static readonly DapPresentationHint _multiDimArrayRowPresentationHint = new(PresentationHintKinds.Virtual);
     private static async Task AssertMultiDimArrayVariables(this DebugSession debugProtocolHost, int variablesReference)
     {
         List<DapVariable> expectedVariables =
@@ -270,14 +277,14 @@ file static class TestExtensions
         await debugProtocolHost.AssertIEnumerableMembers(staticMemberVariables.Single(s => s.Name == "StaticEnumerableField").VariablesReference);
     }
 
-    private static readonly DapPresentationHint _arrayElementPresentationHint = new("data");
+    private static readonly DapPresentationHint _arrayElementPresentationHint = new(PresentationHintKinds.Data);
     private static async Task AssertIEnumerableMembers(this DebugSession debugProtocolHost, int variablesReference)
     {
         List<DapVariable>? enumerableMembers = await debugProtocolHost.VariablesAsync(variablesReference);
         List<DapVariable> expectedVariables =
         [
-            new() { VariablesReference = 51, Name = "Raw View", Value = "", Type = "", PresentationHint = new DapPresentationHint("class") },
-            new() { VariablesReference = 52, Name = "Results", Value = "Expanding will force enumeration of the object", Type = "", PresentationHint = new DapPresentationHint("class") },
+            new() { VariablesReference = 51, Name = "Raw View", Value = "", Type = "", PresentationHint = new DapPresentationHint(PresentationHintKinds.Class) },
+            new() { VariablesReference = 52, Name = "Results", Value = "Expanding will force enumeration of the object", Type = "", PresentationHint = new DapPresentationHint(PresentationHintKinds.Class) },
         ];
         Assert.Equal(expectedVariables.Count, enumerableMembers.Count);
         enumerableMembers.ShouldBeEquivalentToDebuggerVariables(expectedVariables);
@@ -306,7 +313,7 @@ file static class TestExtensions
             new() { VariablesReference = 59, Name = "LongTuple",           EvaluateName = "localCompositeValues.LongTuple",           Value = "(1, 2, 3, 4, 5, 6, 7, \"eight\")", Type = "System.Tuple<int, int, int, int, int, int, int, System.Tuple<string>>" },
             new() { VariablesReference = 60, Name = "EmptyTuple",          EvaluateName = "localCompositeValues.EmptyTuple",          Value = "()", Type = "System.ValueTuple" },
             new() { VariablesReference = 61, Name = "Anonymous",           EvaluateName = "localCompositeValues.Anonymous",           Value = "{ Text = \"a\\n\\\"b\\\\c\", Empty = \"\", Missing = null, Nested = (1, \"nested\") }", Type = "<>f__AnonymousType1<string, string, string, System.ValueTuple<int, string>>" },
-            new() { VariablesReference = 62, Name = "FailedMember",        EvaluateName = "localCompositeValues.FailedMember",        Value = "(<error: The name 'DoesNotExist' does not exist in the current context>, 2)", Type = "System.Tuple<DebuggableConsoleApp.InvalidDebuggerDisplay, int>", PresentationHint = new DapPresentationHint(Attributes: ["failedEvaluation"]) },
+            new() { VariablesReference = 62, Name = "FailedMember",        EvaluateName = "localCompositeValues.FailedMember",        Value = "(<error: The name 'DoesNotExist' does not exist in the current context>, 2)", Type = "System.Tuple<DebuggableConsoleApp.InvalidDebuggerDisplay, int>", PresentationHint = new DapPresentationHint(Attributes: [DapAttributes.FailedEvaluation]) },
             new() { VariablesReference = 63, Name = "NullableTuple",       EvaluateName = "localCompositeValues.NullableTuple",       Value = "(4, \"nullable\")", Type = "System.ValueTuple<int, string>?" },
             new() { VariablesReference = 0,  Name = "NullTuple",           EvaluateName = "localCompositeValues.NullTuple",           Value = "null", Type = "System.ValueTuple<int, string>?" },
             new() { VariablesReference = 64, Name = "NullableDebuggerDisplay", EvaluateName = "localCompositeValues.NullableDebuggerDisplay", Value = "display: 5", Type = "DebuggableConsoleApp.NullableDebuggerDisplay?" },

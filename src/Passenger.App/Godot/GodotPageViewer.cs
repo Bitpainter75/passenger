@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Passenger.App.ToolWindows;
 using Passenger.Core;
 using Passenger.Workspace;
 
@@ -21,27 +22,28 @@ public sealed class GodotPageViewer
     /// <summary>The words of the segment that shows the text.</summary>
     public const string TextChoice = "Text";
 
-    private readonly ToggleButton page = new() { Classes = { StyleClasses.Segment }, Content = PageChoice, FontSize = 12, Name = "ShowGodotPage" };
-    private readonly ToggleButton text = new() { Classes = { StyleClasses.Segment }, Content = TextChoice, FontSize = 12, Name = "ShowGodotText" };
-    private readonly TextBlock said = new() { Classes = { StyleClasses.Muted }, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+    /// <summary>The page or the text, the page's key true.</summary>
+    private readonly Segments<bool> shows = new();
+    private readonly TextBlock said = new() { Classes = { StyleClasses.Muted, StyleClasses.Caption }, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly StackPanel content = new() { Classes = { StyleClasses.NotesPage } };
     private GodotPageFile? file;
     private GodotPageFacts? painted;
 
     public GodotPageViewer()
     {
+        shows.Add(true, PageChoice, "ShowGodotPage");
+        shows.Add(false, TextChoice, "ShowGodotText");
         Bar = ToolWindows.ToolBars.OverEditor(new DockPanel
         {
             Margin = new Thickness(Gaps.Normal, 0),
             Children =
             {
                 new Border { [DockPanel.DockProperty] = Dock.Right, Child = said, Margin = new Thickness(Gaps.Wide, 0, 0, 0) },
-                new StackPanel { Orientation = Orientation.Horizontal, Spacing = Gaps.Hair, VerticalAlignment = VerticalAlignment.Center, Children = { page, text } },
+                shows,
             },
         });
         Bar.IsVisible = false;
-        page.Click += (_, _) => Choose(true);
-        text.Click += (_, _) => Choose(false);
+        shows.Chosen += (_, page) => Choose(page);
         Body = new ScrollViewer
         {
             Classes = { StyleClasses.Notes },
@@ -119,8 +121,7 @@ public sealed class GodotPageViewer
         }
         Bar.IsVisible = true;
         Body.IsVisible = file.ShowsPage;
-        page.IsChecked = file.ShowsPage;
-        text.IsChecked = !file.ShowsPage;
+        shows.Choice = file.ShowsPage;
         said.Text = file.IsReading ? "Reading…" : string.Empty;
         if (file.Facts is { } facts && !ReferenceEquals(facts, painted))
         {
@@ -256,7 +257,7 @@ public sealed class GodotPageViewer
         return muted;
     }
 
-    private static Control Empty(string words) => new TextBlock { Classes = { StyleClasses.EmptyText }, Text = words, Margin = new Thickness(Gaps.Normal, Gaps.Tight), HorizontalAlignment = HorizontalAlignment.Left };
+    private static Control Empty(string words) => new EmptyState(words);
 
     /// <summary>What an autoload is (a global the scripts name, or a node), and a link that asks to make it the other.</summary>
     private Control Autoload(string folder, GodotPageAutoload autoload)
@@ -312,7 +313,7 @@ public sealed class GodotPageViewer
     /// <summary>The rows that add an action by the name typed, and an event chosen to an action chosen.</summary>
     private IEnumerable<Control> ActionMaking(GodotPageFacts facts)
     {
-        TextBox named = new() { Name = NewActionName, PlaceholderText = "New action's name" };
+        TextBox named = new() { Name = NewActionName, PlaceholderText = "New action's name", [Avalonia.Automation.AutomationProperties.NameProperty] = "New action's name" };
         yield return Row(named, null, Link(AddActionWords, () => Ask(facts.Folder, GodotPageEdits.AddAction(named.Text ?? string.Empty))));
         if (facts.Actions.Count == 0)
         {
@@ -343,7 +344,7 @@ public sealed class GodotPageViewer
                 numbers.SelectedIndex = 0;
             }
         };
-        TextBox named = new() { Name = LayerNameName, PlaceholderText = "Layer's name", MinWidth = 180 };
+        TextBox named = new() { Name = LayerNameName, PlaceholderText = "Layer's name", MinWidth = 180, [Avalonia.Automation.AutomationProperties.NameProperty] = "Layer's name" };
         return Row(kinds, new StackPanel { Orientation = Orientation.Horizontal, Spacing = Gaps.Normal, Children = { numbers, named } }, Link(NameLayerWords, () =>
         {
             if (kinds.SelectedItem is string kind && numbers.SelectedItem is string number)
@@ -359,7 +360,7 @@ public sealed class GodotPageViewer
     private static ComboBox Choice<T>(string name, IReadOnlyList<T> items, T? chosen, Func<T, string> shown)
         where T : class
     {
-        ComboBox box = new() { Classes = { StyleClasses.Compact }, Name = name, MaxDropDownHeight = 320 };
+        ComboBox box = new ToolDropDown { Name = name, MaxDropDownHeight = 320 };
         ReusedRows.Use(box, () =>
         {
             TextBlock row = new() { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };

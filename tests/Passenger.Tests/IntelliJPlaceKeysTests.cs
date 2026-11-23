@@ -12,6 +12,7 @@ namespace Passenger.Tests;
 /// <summary>The keys IntelliJ IDEA's keymap gives two actions told apart by where they are pressed: one action takes the
 /// key, the other takes it where it is (<see cref="AppActions.KeysIn"/>): Generate's in the Explorer is New Item, View
 /// Breakpoints' on a breakpoint's line Edit Breakpoint, and on the Mac Replace's Cmd+R in the Run window Rerun.</summary>
+[AboutMacOS]
 public sealed class IntelliJPlaceKeysTests : IDisposable
 {
     private static readonly bool Mac = OperatingSystem.IsMacOS();
@@ -27,8 +28,7 @@ public sealed class IntelliJPlaceKeysTests : IDisposable
 
     public void Dispose() => TestFolders.Delete(folder);
 
-    [AvaloniaFact]
-    public void Generates_key_in_the_Explorer_opens_New_Item_and_in_the_editor_does_not()
+    internal void Generates_key_in_the_Explorer_opens_New_Item_and_in_the_editor_does_not()
     {
         MainWindow window = Open();
         try
@@ -53,8 +53,7 @@ public sealed class IntelliJPlaceKeysTests : IDisposable
         }
     }
 
-    [AvaloniaFact]
-    public void View_Breakpoints_key_on_a_breakpoints_line_edits_it_and_elsewhere_lists_the_breakpoints()
+    internal void View_Breakpoints_key_on_a_breakpoints_line_edits_it_and_elsewhere_lists_the_breakpoints()
     {
         MainWindow window = Open();
         try

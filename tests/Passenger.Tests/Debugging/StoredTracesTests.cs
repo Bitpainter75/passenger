@@ -15,15 +15,25 @@ public class StoredTracesTests(ITestOutputHelper testOutputHelper)
 
     private static int Line(string code) => Debuggees.Line("PassengerCases", "Traces.cs", code);
 
+    /// <summary>Each exception's stack trace read from what it stores is what its StackTrace getter writes, through
+    /// runtime-async methods too, and on a busy machine with implicit evaluation off a stop still gives it with its
+    /// lines.</summary>
+    [Fact]
+    public async Task An_exceptions_stack_trace_is_read_from_what_it_stores_as_its_getter_writes_it()
+    {
+        await Flow.StepApartAsync<StoredTracesTests>("each exception's stack trace read from what it stores is what its StackTrace getter writes", () => new StoredTracesTests(testOutputHelper), t => t.Each_exceptions_stack_trace_read_from_what_it_stores_is_what_its_StackTrace_getter_writes());
+        await Flow.StepApartAsync<StoredTracesTests>("a stack trace through runtime async methods is what its getter writes", () => new StoredTracesTests(testOutputHelper), t => t.A_stack_trace_through_runtime_async_methods_is_what_its_getter_writes());
+        await Flow.StepApartAsync<StoredTracesTests>("on a busy machine with implicit evaluation off a stop still gives the stack trace with its lines", () => new StoredTracesTests(testOutputHelper), t => t.On_a_busy_machine_with_implicit_evaluation_off_a_stop_still_gives_the_stack_trace_with_its_lines());
+    }
+
     /// <summary>At each exception's stop, the trace the stop's description gives is what $exception.StackTrace evaluates to,
     /// and $exception's value what its ToString() does; caught, its whole trace, in the caught exception's value and its
     /// StackTrace row, is what e.ToString() and e.StackTrace do: generic methods and types, a nested type, a lambda, a local
     /// function, an iterator (+MoveNext()), an await and its rethrow, a rethrow's end of the earlier trace, hidden and
     /// inlined frames, a fault, an inner exception and parameters by reference, arrays and pointers.</summary>
-    [Fact]
-    public async Task Each_exceptions_stack_trace_read_from_what_it_stores_is_what_its_StackTrace_getter_writes()
+    private async Task Each_exceptions_stack_trace_read_from_what_it_stores_is_what_its_StackTrace_getter_writes()
     {
-        await using DebugSession host = await Launch("traces", "Console.WriteLine(\"traces done\");", "Console.WriteLine($\"caught {e.GetType().Name}\");");
+        await using DebugSession host = await Launch("traces", DebugSession.ScaledEvaluations, "Console.WriteLine(\"traces done\");", "Console.WriteLine($\"caught {e.GetType().Name}\");");
         List<string> compared = await ComparedAsync(host, Line("Console.WriteLine(\"traces done\");"));
         Assert.True(compared.Count(c => c.StartsWith("e:", StringComparison.Ordinal)) == 12 && compared.Count(c => c.StartsWith("thrown", StringComparison.Ordinal)) >= 14,
             $"Traces.Run throws at least 14 exceptions and catches 12, where these were compared: {string.Join("; ", compared)}");
@@ -31,12 +41,11 @@ public class StoredTracesTests(ITestOutputHelper testOutputHelper)
 
     /// <summary>An exception thrown through .NET 11's runtime-async methods, which have no state machines and go on as
     /// continuations: its trace, read from what it stores, is what its getter writes at each stop and once caught.</summary>
-    [Fact]
-    public async Task A_stack_trace_through_runtime_async_methods_is_what_its_getter_writes()
+    private async Task A_stack_trace_through_runtime_async_methods_is_what_its_getter_writes()
     {
         string source = Debuggees.Source("RuntimeAsyncConsoleApp", "Program.cs");
         int caught = Debuggees.Line("RuntimeAsyncConsoleApp", "Console.WriteLine($\"caught {e.GetType().Name}\");");
-        await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
+        await using DebugSession host = DebugSession.ForLaunch(testOutputHelper, environment: DebugSession.ScaledEvaluations);
         await host
             .InitializeAsync()
             .LaunchAsync(Debuggees.Program("RuntimeAsyncConsoleApp"), stopAtEntry: false, justMyCode: true, arguments: ["throws"])
@@ -51,8 +60,7 @@ public class StoredTracesTests(ITestOutputHelper testOutputHelper)
     /// <summary>On a machine kept busy, with implicit evaluation off (an evaluation ran past its time), so no getter or
     /// ToString can run: the stop's description still gives the exception's trace and its inner exception's, each frame at
     /// its line, and Variables' $exception reads as its ToString would, its StackTrace row the same trace.</summary>
-    [Fact]
-    public async Task On_a_busy_machine_with_implicit_evaluation_off_a_stop_still_gives_the_stack_trace_with_its_lines()
+    private async Task On_a_busy_machine_with_implicit_evaluation_off_a_stop_still_gives_the_stack_trace_with_its_lines()
     {
         using CancellationTokenSource done = new(TimeSpan.FromSeconds(60));
         Thread[] busy = [.. Enumerable.Range(0, Math.Max(2, Environment.ProcessorCount / 2)).Select(_ => new Thread(() => Spin(done.Token)) { IsBackground = true })];
@@ -62,7 +70,7 @@ public class StoredTracesTests(ITestOutputHelper testOutputHelper)
         }
         try
         {
-            await using DebugSession host = await Launch("wrapped", "Console.WriteLine(\"wrapped done\");");
+            await using DebugSession host = await Launch("wrapped", null, "Console.WriteLine(\"wrapped done\");");
             StoppedEvent stop = await host.WaitForStoppedEvent();
             // The inner exception's stop, then the wrapping one's.
             stop = await host.ContinueAsync().WaitForStoppedEvent();
@@ -156,9 +164,12 @@ public class StoredTracesTests(ITestOutputHelper testOutputHelper)
         GC.KeepAlive(total);
     }
 
-    private async Task<DebugSession> Launch(string mode, params string[] stops)
+    /// <summary>The cases' program run in <paramref name="mode"/>, stopping at every exception and at the lines of
+    /// <paramref name="stops"/>; the adapter given <paramref name="environment"/> (the run's evaluation limit scaled, for a
+    /// session whose first getter's trace pays the cold cost of loading the readers of symbols and the program's PDB).</summary>
+    private async Task<DebugSession> Launch(string mode, IReadOnlyDictionary<string, string>? environment, params string[] stops)
     {
-        DebugSession host = DebugSession.ForLaunch(testOutputHelper);
+        DebugSession host = DebugSession.ForLaunch(testOutputHelper, environment: environment);
         await host
             .InitializeAsync()
             .LaunchAsync(Debuggees.Program("PassengerCases"), stopAtEntry: false, justMyCode: true, arguments: [mode])

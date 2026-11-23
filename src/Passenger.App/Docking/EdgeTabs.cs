@@ -88,8 +88,7 @@ internal sealed class EdgeTabs : Border
         foreach ((ToolWindow window, Border tab) in tabs)
         {
             tab.Classes.Set(StyleClasses.Active, window == peeked);
-            string? keys = window.Action is { } action ? keymap.ShortcutsFor(action).FirstOrDefault()?.Display() : null;
-            ToolTip.SetTip(tab, keys is null ? window.Title : $"{window.Title} ({keys})");
+            ToolTip.SetTip(tab, ActionTips.Named(window.Title, window.Action is { } action ? KeyWords.Of(keymap, action) : null));
         }
     }
 
@@ -103,7 +102,7 @@ internal sealed class EdgeTabs : Border
         {
             return made;
         }
-        RowIcon icon = new() { Width = 14, Height = 14, DataKey = window.Icon };
+        RowIcon icon = new() { DataKey = window.Icon };
         TextBlock name = new() { Classes = { StyleClasses.TabName }, Text = window.Title, VerticalAlignment = VerticalAlignment.Center };
         Control content = down
             ? new StackPanel { Spacing = Gaps.Small, HorizontalAlignment = HorizontalAlignment.Center, Children = { icon, new LayoutTransformControl { LayoutTransform = new RotateTransform(90), Child = name } } }

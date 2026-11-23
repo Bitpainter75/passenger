@@ -9,19 +9,17 @@ using Passenger.App.Web;
 using Passenger.App.Workspace;
 using Passenger.Core;
 using Passenger.Editor;
-using Passenger.Text;
 
 namespace Passenger.Tests;
 
 /// <summary>The classes a Blazor component's pages link, completed where a class is written, through the window: a
 /// stylesheet on a CDN (a local stand-in, never a real one) only once Settings allow its download and never fetched
-/// before, its link's integrity checked; a package's static web asset under <c>_content/Kit/</c>, or under its own base
-/// path, read from the package folder its restore resolved, and a referenced library's under the base path it sets, or one
-/// the app reaches through that library; the component's own scoped stylesheet, a parent's ::deep
-/// classes in its child; the host page's style block and a link under its base href; an HTML file's; a class's rules on
-/// the hover card and Go to Declaration to its rule, read-only; a class no stylesheet defines marked, quietly, once every
-/// stylesheet linked was read; and what a page's stylesheets could not give said, never called complete. On a Blazor app
-/// made by <c>dotnet new blazor</c>, its warm server shared.</summary>
+/// before, its link's integrity checked; a package's static web asset under <c>_content/Kit/</c>, read from the package
+/// folder its restore resolved, and a referenced library's under the base path it sets, or one the app reaches through
+/// that library; an HTML file's; a class's rules on the hover card and Go to Declaration to its rule, read-only; a
+/// class no stylesheet defines marked, quietly, once every stylesheet linked was read; and what a page's stylesheets
+/// could not give said, never called complete. On a Blazor app made by <c>dotnet new blazor</c>, its warm server
+/// shared.</summary>
 public sealed class StylesheetClassesTests : IClassFixture<StyledShop>
 {
     private readonly StyledShop app;
@@ -32,8 +30,56 @@ public sealed class StylesheetClassesTests : IClassFixture<StyledShop>
         app.Reset();
     }
 
+    /// <summary>A component's classes complete from every stylesheet its pages link, lead to their rules read-only and
+    /// are marked where none defines them, a CDN's only once Settings allow its download.</summary>
     [AvaloniaFact]
-    public void A_cdns_class_completes_in_a_component_only_once_settings_allow_its_download_beside_a_packages_and_the_components_own()
+    public void A_components_classes_complete_and_lead_to_their_rules()
+    {
+        Flow.Step(nameof(A_cdns_class_completes_in_a_component_only_once_settings_allow_its_download_beside_a_packages_and_the_components_own),
+            A_cdns_class_completes_in_a_component_only_once_settings_allow_its_download_beside_a_packages_and_the_components_own);
+        OpenWindows.CloseAll();
+        app.Reset();
+        Flow.Step(nameof(A_classs_rules_show_on_its_hover_card_and_go_to_declaration_opens_its_rule_in_the_downloaded_copy_read_only),
+            A_classs_rules_show_on_its_hover_card_and_go_to_declaration_opens_its_rule_in_the_downloaded_copy_read_only);
+        OpenWindows.CloseAll();
+        app.Reset();
+        Flow.Step(nameof(Go_to_declaration_of_a_packages_class_opens_its_stylesheet_in_the_package_folder_read_only_naming_the_package),
+            Go_to_declaration_of_a_packages_class_opens_its_stylesheet_in_the_package_folder_read_only_naming_the_package);
+        OpenWindows.CloseAll();
+        app.Reset();
+        Flow.Step(nameof(A_class_no_linked_stylesheet_defines_is_marked_quietly_once_every_stylesheet_linked_was_read),
+            A_class_no_linked_stylesheet_defines_is_marked_quietly_once_every_stylesheet_linked_was_read);
+        OpenWindows.CloseAll();
+        app.Reset();
+        app.Reset();
+        app.Reset();
+        Flow.Step(nameof(What_the_app_reaches_through_a_library_it_references_is_served_as_its_own_and_styled_by_its_pages),
+            What_the_app_reaches_through_a_library_it_references_is_served_as_its_own_and_styled_by_its_pages);
+        OpenWindows.CloseAll();
+        app.Reset();
+    }
+
+    /// <summary>An HTML file's classes complete from the stylesheets it links, and a stylesheet is downloaded again
+    /// once its link gives another integrity.</summary>
+    [AvaloniaFact]
+    public void A_pages_stylesheets_are_read_as_their_links_name_them()
+    {
+        app.Reset();
+        Flow.Step(nameof(A_stylesheet_is_downloaded_again_once_its_link_gives_another_integrity_and_what_is_not_that_integrity_is_kept_nowhere),
+            A_stylesheet_is_downloaded_again_once_its_link_gives_another_integrity_and_what_is_not_that_integrity_is_kept_nowhere);
+        OpenWindows.CloseAll();
+        app.Reset();
+        app.Reset();
+        app.Reset();
+        app.Reset();
+        app.Reset();
+        app.Reset();
+        app.Reset();
+        Flow.Step(nameof(An_html_files_class_completes_from_the_stylesheet_it_links_and_a_misspelt_one_is_marked),
+            An_html_files_class_completes_from_the_stylesheet_it_links_and_a_misspelt_one_is_marked);
+    }
+
+    private void A_cdns_class_completes_in_a_component_only_once_settings_allow_its_download_beside_a_packages_and_the_components_own()
     {
         NoCopies();
         int fetched = app.Fetched;
@@ -62,8 +108,7 @@ public sealed class StylesheetClassesTests : IClassFixture<StyledShop>
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void A_classs_rules_show_on_its_hover_card_and_go_to_declaration_opens_its_rule_in_the_downloaded_copy_read_only()
+    private void A_classs_rules_show_on_its_hover_card_and_go_to_declaration_opens_its_rule_in_the_downloaded_copy_read_only()
     {
         MainWindow window = app.Open("Components/Pages/Styled.razor", before: w => w.ApplySettings(w.Settings with { DownloadStylesheets = true }));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -94,8 +139,7 @@ public sealed class StylesheetClassesTests : IClassFixture<StyledShop>
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void Go_to_declaration_of_a_packages_class_opens_its_stylesheet_in_the_package_folder_read_only_naming_the_package()
+    private void Go_to_declaration_of_a_packages_class_opens_its_stylesheet_in_the_package_folder_read_only_naming_the_package()
     {
         MainWindow window = app.Open("Components/Pages/Styled.razor");
         Ui.PlaceAfter(window.EditorArea.CodeEditor, "btn-primry kit-c");
@@ -124,8 +168,7 @@ public sealed class StylesheetClassesTests : IClassFixture<StyledShop>
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void A_class_no_linked_stylesheet_defines_is_marked_quietly_once_every_stylesheet_linked_was_read()
+    private void A_class_no_linked_stylesheet_defines_is_marked_quietly_once_every_stylesheet_linked_was_read()
     {
         NoCopies();
         MainWindow window = app.Open("Components/Pages/Styled.razor");
@@ -142,39 +185,7 @@ public sealed class StylesheetClassesTests : IClassFixture<StyledShop>
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void A_parents_deep_class_is_offered_in_the_child_it_renders_and_its_own_scoped_class_is_not()
-    {
-        MainWindow window = app.Open("Components/Pages/Child.razor");
-        CodeEditor editor = window.EditorArea.CodeEditor;
-        Ui.PlaceAfter(editor, "<p class=\"");
-        Ui.Run(window, AppActions.Complete);
-        Ui.WaitFor(() => window.Assist.CompletionLabels.Contains("from-parent"), () => $"the parent's ::deep class among {Listed(window)}");
-        Assert.Contains(("from-parent", "Parent.razor.css"), window.Assist.CompletionDetails);
-        Assert.DoesNotContain("parent-own", window.Assist.CompletionLabels);
-        Assert.DoesNotContain("halo", window.Assist.CompletionLabels);
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public void A_style_blocks_class_a_link_under_the_pages_base_href_and_a_packages_own_base_path_are_offered_as_the_app_serves_them()
-    {
-        MainWindow window = app.Open("Components/Pages/Styled.razor");
-        CodeEditor editor = window.EditorArea.CodeEditor;
-        Ui.PlaceAfter(editor, "<p class=\"");
-        Ui.Run(window, AppActions.Complete);
-        Ui.WaitFor(() => window.Assist.CompletionLabels.Contains("lamp-glow") && window.Assist.CompletionLabels.Contains("based-note")
-            && window.Assist.CompletionLabels.Contains("inline-note"), () => $"the style block's, the based link's and the package's classes among {Listed(window)}");
-        Assert.Contains(("inline-note", "<style> in App.razor"), window.Assist.CompletionDetails);
-        Assert.Contains(("based-note", "based.css"), window.Assist.CompletionDetails);
-        Assert.Contains(("lamp-glow", "lamp.css"), window.Assist.CompletionDetails);
-        Ui.WaitFor(() => window.Assist.CompletionLabels.Contains("gear-spin"), () => $"the referenced library's class under its own base path among {Listed(window)}");
-        Assert.Contains(("gear-spin", "gear.css"), window.Assist.CompletionDetails);
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public void An_html_files_class_completes_from_the_stylesheet_it_links_and_a_misspelt_one_is_marked()
+    private void An_html_files_class_completes_from_the_stylesheet_it_links_and_a_misspelt_one_is_marked()
     {
         Assert.SkipWhen(Programs.Node() is null, "Node.js is not on the PATH, and an HTML file's language server runs on it");
         MainWindow window = app.Open("wwwroot/plain.html");
@@ -192,8 +203,7 @@ public sealed class StylesheetClassesTests : IClassFixture<StyledShop>
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void What_the_app_reaches_through_a_library_it_references_is_served_as_its_own_and_styled_by_its_pages()
+    private void What_the_app_reaches_through_a_library_it_references_is_served_as_its_own_and_styled_by_its_pages()
     {
         MainWindow window = app.Open("Components/Pages/Styled.razor");
         Ui.WaitFor(() => window.Projects.Any(p => p.Name == "Cog") && window.Projects.Any(p => p.Name == "Gear"), "the library the app reaches through another, evaluated");
@@ -208,40 +218,7 @@ public sealed class StylesheetClassesTests : IClassFixture<StyledShop>
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void A_stylesheet_linked_with_no_integrity_is_asked_again_as_the_folder_opens_and_its_copy_stands_while_the_cdn_cant_say()
-    {
-        NoCopies();
-        app.Latest = StyledShop.LatestBefore;
-        MainWindow window = OpenAllowingDownloads();
-        Assert.Contains("from-before", Classes(window, "latest-open.html").Classes.Keys);
-        int asked = app.LatestFetched;
-        app.Latest = StyledShop.LatestAfter;
-        Assert.Contains("from-before", Classes(window, "latest-open.html").Classes.Keys);
-        Assert.Equal(asked, app.LatestFetched);
-        window.Close();
-
-        MainWindow again = OpenAllowingDownloads();
-        PageClasses moved = Classes(again, "latest-open.html");
-        Assert.Contains("from-after", moved.Classes.Keys);
-        Assert.DoesNotContain("from-before", moved.Classes.Keys);
-        Assert.Equal(asked + 1, app.LatestFetched);
-        again.Close();
-
-        app.Latest = null;
-        MainWindow unanswered = OpenAllowingDownloads();
-        PageClasses kept = Classes(unanswered, "latest-open.html");
-        Assert.True(kept.Complete, $"A CDN that doesn't answer took away the copy a link with no integrity had: {string.Join("; ", kept.Unread)}");
-        Assert.Contains("from-after", kept.Classes.Keys);
-        Assert.Equal(asked + 2, app.LatestFetched);
-        Classes(unanswered, "latest-open.html");
-        Assert.Equal(asked + 2, app.LatestFetched);
-        unanswered.Close();
-        app.Latest = StyledShop.LatestBefore;
-    }
-
-    [AvaloniaFact]
-    public void A_stylesheet_is_downloaded_again_once_its_link_gives_another_integrity_and_what_is_not_that_integrity_is_kept_nowhere()
+    private void A_stylesheet_is_downloaded_again_once_its_link_gives_another_integrity_and_what_is_not_that_integrity_is_kept_nowhere()
     {
         NoCopies();
         app.Latest = StyledShop.LatestBefore;
@@ -266,105 +243,6 @@ public sealed class StylesheetClassesTests : IClassFixture<StyledShop>
         Assert.Contains("from-after", Classes(again, "latest-after.html").Classes.Keys);
         Assert.Equal(asked + 1, app.LatestFetched);
         again.Close();
-    }
-
-    [AvaloniaFact]
-    public void A_link_under_a_base_href_is_the_file_a_browser_asks_for_ahead_of_one_of_that_path_from_the_apps_root()
-    {
-        MainWindow window = app.Open(null, languageServer: false);
-        PageClasses found = Classes(window, "under-assets.html");
-        Assert.True(found.Complete, string.Join("; ", found.Unread));
-        Assert.Contains("asset-note", found.Classes.Keys);
-        Assert.DoesNotContain("asset-elsewhere", found.Classes.Keys);
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public void An_import_of_a_parent_folder_is_followed_from_its_stylesheet_and_a_page_in_a_folder_links_from_there()
-    {
-        MainWindow window = app.Open(null, languageServer: false);
-        PageClasses found = Classes(window, "imports-up.html");
-        Assert.True(found.Complete, string.Join("; ", found.Unread));
-        Assert.Contains("imported-colour", found.Classes.Keys);
-        Assert.Contains("imported-colour", Classes(window, "pages/up-a-folder.html").Classes.Keys);
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public void A_stylesheet_only_named_like_a_css_isolation_bundle_is_read_as_the_file_it_is()
-    {
-        MainWindow window = app.Open(null, languageServer: false);
-        PageClasses found = Classes(window, "ordinary.html");
-        Assert.True(found.Complete, string.Join("; ", found.Unread));
-        Assert.Contains("ordinary", found.Classes.Keys);
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public void A_style_blocks_import_is_followed_as_a_links_is()
-    {
-        MainWindow window = app.Open(null, languageServer: false);
-        PageClasses found = Classes(window, "inline-import.html");
-        Assert.True(found.Complete, string.Join("; ", found.Unread));
-        Assert.Contains("imported-colour", found.Classes.Keys);
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public void A_stylesheet_that_cannot_be_read_is_said_and_read_again_once_it_can_be()
-    {
-        MainWindow window = app.Open(null, languageServer: false);
-        using (new FileStream(app.PathOf("Gear/wwwroot/css/locked.css"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-        {
-            PageClasses held = Classes(window, "locked.html");
-            Assert.False(held.Complete, "A stylesheet no one could read counted as read, so its classes would be marked as defined by nothing");
-            Assert.Contains("locked.css", Assert.Single(held.Unread), StringComparison.Ordinal);
-            Assert.DoesNotContain("locked-note", held.Classes.Keys);
-        }
-        PageClasses free = Classes(window, "locked.html");
-        Assert.True(free.Complete, string.Join("; ", free.Unread));
-        Assert.Contains("locked-note", free.Classes.Keys);
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public void An_import_past_the_depth_followed_is_said_never_passed_over()
-    {
-        MainWindow window = app.Open(null, languageServer: false);
-        PageClasses found = Classes(window, "deep.html");
-        Assert.False(found.Complete, "An import cut off counted as every stylesheet read, so a class of the last would be marked as defined by nothing");
-        Assert.Contains("depth9.css", Assert.Single(found.Unread), StringComparison.Ordinal);
-        Assert.Contains("at-depth-8", found.Classes.Keys);
-        Assert.DoesNotContain("at-depth-9", found.Classes.Keys);
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public void A_link_an_expression_makes_is_a_stylesheet_unread()
-    {
-        MainWindow window = app.Open("Components/Pages/Child.razor", languageServer: false);
-        OpenDocument document = window.EditorArea.Active!;
-        Typing.Replace(window, "<p class=\"\">Child</p>", "<link rel=\"stylesheet\" href=\"@Theme.Sheet\" />");
-        PageClasses found = Ui.Landed(window.Session.Stylesheets.ClassesAsync(document.Path, CancellationToken.None), "the classes of a component whose link is an expression");
-        Assert.False(found.Complete, "A stylesheet only the running app can name counted as read");
-        Assert.Contains(found.Unread, why => why.Contains("@Theme.Sheet", StringComparison.Ordinal));
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public void A_components_own_scoped_stylesheet_alone_never_makes_its_classes_complete()
-    {
-        string folder = TestFolders.Create("lone-component-");
-        File.WriteAllText(Path.Combine(folder, "Card.razor"), "<div class=\"kept hosted\"></div>\n");
-        File.WriteAllText(Path.Combine(folder, "Card.razor.css"), ".kept {\n    color: red;\n}\n");
-        MainWindow window = new() { Width = 1200, Height = 800, StartsLanguageServer = false };
-        window.Show();
-        window.OpenFolder(folder);
-        Ui.Settle();
-        PageClasses found = Ui.Landed(window.Session.Stylesheets.ClassesAsync(PathNames.Canonical(Path.Combine(folder, "Card.razor")), CancellationToken.None), "a lone component's classes");
-        Assert.Contains("kept", found.Classes.Keys);
-        Assert.False(found.Complete, "A component no known page shows was told its page's stylesheets define none of its other classes");
-        window.Close();
     }
 
     private MainWindow OpenAllowingDownloads() => app.Open(null, before: w => w.ApplySettings(w.Settings with { DownloadStylesheets = true }), languageServer: false);

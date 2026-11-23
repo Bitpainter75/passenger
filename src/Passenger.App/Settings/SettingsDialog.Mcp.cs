@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Passenger.App.Mcp;
+using Passenger.App.ToolWindows;
 
 namespace Passenger.App.Settings;
 
@@ -32,7 +33,7 @@ public sealed partial class SettingsDialog
     {
         Add(Declared.McpServer);
 
-        TextBlock none = new() { Classes = { StyleClasses.EmptyText }, Text = "None: a window asks before it lets an agent in" };
+        EmptyState none = new("None: a window asks before it lets an agent in");
         void List()
         {
             AgentFolderList.ItemsSource = Working.AgentFolders.ToArray();
@@ -70,7 +71,7 @@ public sealed partial class SettingsDialog
             Margin = new Thickness(0, Gaps.Wide, 0, 0),
             Children =
             {
-                new TextBlock { Text = "Set up an agent", FontWeight = FontWeight.SemiBold },
+                new TextBlock { Classes = { StyleClasses.PaneTitle }, Text = "Set up an agent" },
                 MutedText.Wrapped("Each runs this copy of Passenger, by its own path, with --mcp-attach. An agent has Passenger's tools from its "
                     + "start; its first call joins the window open on the folder it works in, or opens that folder in Passenger, "
                     + "starting it if need be, in a window you see. That window asks you before it lets the agent in and before "
@@ -120,7 +121,7 @@ public sealed partial class SettingsDialog
         DockPanel head = new();
         DockPanel.SetDock(copy, Dock.Right);
         head.Children.Add(copy);
-        head.Children.Add(new TextBlock { Text = title, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        head.Children.Add(new TextBlock { Classes = { StyleClasses.PaneTitle }, Text = title, VerticalAlignment = VerticalAlignment.Center });
         return Column(new StackPanel
         {
             Spacing = Gaps.Small,

@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
@@ -70,7 +71,7 @@ public sealed partial class NuGetView : DockPanel
 {
     private static readonly TimeSpan Pause = TimeSpan.FromMilliseconds(300);
 
-    private readonly StackPanel tabs = new() { Orientation = Orientation.Horizontal, Spacing = Gaps.Hair, VerticalAlignment = VerticalAlignment.Center };
+    private readonly ToolTabs.Strip<string> tabs = new();
     private readonly ContentControl body = new();
     private readonly DockPanel packages = new();
     private readonly TextBox search;
@@ -78,6 +79,9 @@ public sealed partial class NuGetView : DockPanel
     private readonly CheckBox prerelease;
     private readonly ListBox list;
     private readonly StackPanel details;
+
+    /// <summary>What the list says while it has no rows: none installed, none found, none left by the filters.</summary>
+    private readonly EmptyState listEmpty = new() { IsVisible = false };
     private readonly TextBox log;
     private readonly TextBlock status;
     private readonly Debounce typing;
@@ -103,9 +107,28 @@ public sealed partial class NuGetView : DockPanel
     /// <param name="folder">The folder's packages, which the window lists and changes.</param>
     public NuGetView(FolderPackages folder)
     {
+        tabs.Add(PackagesTab, PackagesTab);
+        tabs.Add(UpdatesTab, UpdatesTab);
+        tabs.Add(SourcesTab, SourcesTab);
+        tabs.Chosen += (_, tab) =>
+        {
+            switch (tab)
+            {
+                case SourcesTab:
+                    ShowSources();
+                    break;
+                case UpdatesTab:
+                    ShowUpdates();
+                    break;
+                default:
+                    ShowPackages();
+                    break;
+            }
+        };
         model = folder;
-        search = new TextBox { Classes = { StyleClasses.Search }, PlaceholderText = "Search packages", VerticalAlignment = VerticalAlignment.Center };
-        chooser = new ComboBox { Classes = { StyleClasses.Compact }, MinWidth = 130, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Small, 0, Gaps.Normal, 0) };
+        search = SearchBox.Of("Search packages");
+        chooser = new ToolDropDown { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Small, 0, Gaps.Normal, 0) };
+        AutomationProperties.SetName(chooser, "Feeds searched");
         ToolTip.SetTip(chooser, "The feeds searched");
         chooser.SelectionChanged += (_, _) =>
         {
@@ -137,8 +160,6 @@ public sealed partial class NuGetView : DockPanel
         (projectSearch, projectFilters, projectsHeader) = MakeProjectsHeader();
         // Inside the search, so the bar's parts keep their room at the window's least width.
         filters.Inside(search);
-        ToolFlow.SetFills(search, new ToolLayout.Fills(140, 260));
-        ToolFlow.SetFills(status, new ToolLayout.Fills(120));
         Border top = ToolBars.Top(new ToolFlow { Margin = new Thickness(Gaps.Normal, Gaps.Hair), Children = { search, chooser, prerelease, refresh, updateAll, status } });
 
         list = new ListBox
@@ -150,21 +171,22 @@ public sealed partial class NuGetView : DockPanel
         details = new StackPanel { Spacing = Gaps.Normal, Margin = new Thickness(ListRow.TextStart, Gaps.Wide) };
         log = new TextBox
         {
+            [AutomationProperties.NameProperty] = "Package changes' output",
             IsReadOnly = true,
             AcceptsReturn = true,
-            FontSize = 11,
+            Classes = { StyleClasses.Code },
             Height = 90,
             BorderThickness = Hairlines.Above,
             Background = Brushes.Transparent,
             IsVisible = false,
             [DockProperty] = Dock.Bottom,
-        }.InCodeFont();
+        };
         log.Bind(TextBox.BorderBrushProperty, log.GetResourceObservable(TokenKeys.Divider));
         DockPanel right = new();
         right.Children.Add(log);
         right.Children.Add(new ScrollViewer { Content = details });
         packages.Children.Add(top);
-        packages.Children.Add(new PaneSplit(list, right, "2*,1,3*"));
+        packages.Children.Add(new PaneSplit(new Panel { Children = { list, listEmpty } }, right, "2*,1,3*"));
 
         Sources = new NuGetSourcesView(this);
         Children.Add(body);
@@ -291,7 +313,7 @@ public sealed partial class NuGetView : DockPanel
     private void EnableActions()
     {
         updateAll.IsEnabled = CanUpdateAll;
-        ToolTip.SetTip(updateAll, $"Update all {updateRows.Count} packages across their projects, including results hidden by search");
+        ToolTip.SetTip(updateAll, $"Update all {Numbers.Said(updateRows.Count)} packages across their projects, including results hidden by search");
         foreach ((Button button, bool putsIn, string? tip) in lineActions)
         {
             ToolButtons.Grey(button, WhyNot(putsIn), tip);
@@ -315,7 +337,13 @@ public sealed partial class NuGetView : DockPanel
     /// <summary>An advisory's link clicked, for the browser.</summary>
     public event EventHandler<Uri>? LinkClicked;
 
-    /// <summary>The Packages and Sources tabs, for the tool window's header.</summary>
+    private const string PackagesTab = "Packages";
+
+    private const string UpdatesTab = "Updates";
+
+    private const string SourcesTab = "Sources";
+
+    /// <summary>The Packages, Updates and Sources tabs, for the tool window's header.</summary>
     public Control Tabs => tabs;
 
     /// <summary>The Sources tab: the nuget.config files in effect and their feeds.</summary>
@@ -350,6 +378,9 @@ public sealed partial class NuGetView : DockPanel
 
     /// <summary>The list the packages are chosen in.</summary>
     public ListBox PackageList => list;
+
+    /// <summary>What the list says while it has no rows, or null while it has some.</summary>
+    public string? ListSays => listEmpty.IsVisible ? listEmpty.Text : null;
 
     public PackageRow? Selected => list.SelectedItem as PackageRow;
 
@@ -513,6 +544,11 @@ public sealed partial class NuGetView : DockPanel
         all = listed;
         rows = Filtered(listed);
         list.ItemsSource = rows;
+        listEmpty.Text = listed.Count > 0 ? "No packages match the filters"
+            : showsUpdates ? (checkingUpdates ? "Checking for updates…" : updateRows.Count > 0 ? "No update matches the search" : "Every package is up to date")
+            : Query.Trim().Length > 0 ? "No package on the feeds matches the search"
+            : "No packages installed: search the feeds to add one";
+        listEmpty.IsVisible = rows.Count == 0;
         if (chosen is not null && rows.FirstOrDefault(r => r.Id.Equals(chosen, StringComparison.OrdinalIgnoreCase)) is { } again)
         {
             list.SelectedIndex = IndexOf(again);
@@ -564,14 +600,15 @@ public sealed partial class NuGetView : DockPanel
             is { Version: { } version, Said: { } said } ? (version, said) : null;
 
     /// <summary>Reads, while the window is shown, whether the versions the rows' projects have are deprecated, and once they
-    /// are known marks the rows the list holds, unless another list took their place or nothing changed.</summary>
+    /// are known marks the rows the list holds, unless another list took their place or nothing changed. A read ended
+    /// already may have ended after the rows were marked, so it is taken as one that ends now.</summary>
     private async Task DeprecatedAsync(IReadOnlyList<PackageRow> found, CancellationTokenSource cancel)
     {
-        if (!IsShown || Asked(found) is not { Length: > 0 } wanted || model.DeprecationsAsync(wanted) is not { IsCompleted: false } reading)
+        if (!IsShown || Asked(found) is not { Length: > 0 } wanted)
         {
             return;
         }
-        await reading;
+        await model.DeprecationsAsync(wanted);
         if (cancel.IsCancellationRequested || asking != cancel)
         {
             return;
@@ -627,15 +664,15 @@ public sealed partial class NuGetView : DockPanel
         string text = $"{Plural.Of(found.Count, "package")} installed";
         if (found.Count(r => r.IsTransitive) is int brought and > 0)
         {
-            text += $", {brought} transitive";
+            text += $", {Numbers.Said(brought)} transitive";
         }
         if (found.Count(r => r.IsVulnerable) is int vulnerable and > 0)
         {
-            text += $", {vulnerable} vulnerable";
+            text += $", {Numbers.Said(vulnerable)} vulnerable";
         }
         if (found.Count(r => r.IsDeprecated) is int deprecated and > 0)
         {
-            text += $", {deprecated} deprecated";
+            text += $", {Numbers.Said(deprecated)} deprecated";
         }
         if (known?.Failed is { Count: > 0 } failed)
         {
@@ -737,31 +774,7 @@ public sealed partial class NuGetView : DockPanel
     private void Show(Control content)
     {
         body.Content = content;
-        tabs.Children.Clear();
-        ToggleButton packagesTab = Tab("Packages", packages);
-        packagesTab.IsChecked = body.Content == packages && !showsUpdates;
-        tabs.Children.Add(packagesTab);
-        ToggleButton updatesTab = new() { Classes = { StyleClasses.PanelTab }, IsChecked = showsUpdates, Content = "Updates" };
-        updatesTab.Click += (_, _) => ShowUpdates();
-        tabs.Children.Add(updatesTab);
-        tabs.Children.Add(Tab("Sources", Sources));
-    }
-
-    private ToggleButton Tab(string title, Control content)
-    {
-        ToggleButton tab = new() { Classes = { StyleClasses.PanelTab }, IsChecked = body.Content == content, Content = title };
-        tab.Click += (_, _) =>
-        {
-            if (content == Sources)
-            {
-                ShowSources();
-            }
-            else
-            {
-                ShowPackages();
-            }
-        };
-        return tab;
+        tabs.Choice = content == Sources ? SourcesTab : showsUpdates ? UpdatesTab : PackagesTab;
     }
 
     private int IndexOf(PackageRow row)
@@ -815,7 +828,8 @@ public sealed partial class NuGetView : DockPanel
         string? vulnerable = row.AuditedVersions.Where(v => known.Of(row.Id, v).Count > 0).OrderByDescending(v => v, VersionOrder.Instance).FirstOrDefault();
         string? fix = vulnerable is null ? null : known.FixedVersion(row.Id, vulnerable, versions);
         ChosenVersion = PickedOf(row) ?? row.UpdateVersion ?? fix ?? versions.FirstOrDefault() ?? row.Version;
-        ComboBox picker = new() { Name = "Versions", ItemsSource = versions, SelectedItem = ChosenVersion, MinWidth = 140 };
+        ComboBox picker = new ToolDropDown { Name = "Versions", ItemsSource = versions, SelectedItem = ChosenVersion, VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(picker, $"Version of {row.Id}");
         StackPanel vulnerabilities = new() { Spacing = Gaps.Normal };
         StackPanel deprecated = new() { Spacing = Gaps.Normal };
         picker.SelectionChanged += (_, _) =>
@@ -835,7 +849,7 @@ public sealed partial class NuGetView : DockPanel
             LineSpacing = Gaps.Normal,
             Children =
             {
-                new TextBlock { Text = row.Id, FontSize = 16, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap },
+                new TextBlock { Classes = { StyleClasses.PageTitle }, Text = row.Id, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap },
                 picker,
             },
         });
@@ -845,13 +859,13 @@ public sealed partial class NuGetView : DockPanel
         }
         if (row.Authors.Length > 0 || row.Downloads > 0)
         {
-            TextBlock by = new() { Text = row.Downloads > 0 ? $"{row.Authors}, {row.Downloads:N0} downloads" : row.Authors, FontSize = 12 };
+            TextBlock by = new() { Classes = { StyleClasses.Caption }, Text = row.Downloads > 0 ? $"{row.Authors}, {Numbers.Said(row.Downloads)} downloads" : row.Authors };
             by.Classes.Add(StyleClasses.Muted);
             details.Children.Add(by);
         }
         if (row.Feeds.Count > 0)
         {
-            TextBlock from = new() { Text = $"In {string.Join(", ", row.Feeds)}", FontSize = 12 };
+            TextBlock from = new() { Classes = { StyleClasses.Caption }, Text = $"In {string.Join(", ", row.Feeds)}" };
             from.Classes.Add(StyleClasses.Muted);
             details.Children.Add(from);
         }
@@ -939,14 +953,15 @@ public sealed partial class NuGetView : DockPanel
     }
 
     /// <summary>Reads, while the window is shown, whether the version chosen in the details is deprecated, and says it once
-    /// known, unless another package or version was chosen meanwhile.</summary>
+    /// known, unless another package or version was chosen meanwhile. A read ended already may have ended after the details
+    /// said what they knew, so it is taken as one that ends now.</summary>
     private async Task ChosenDeprecationAsync(PackageRow row, Panel said, CancellationTokenSource cancel)
     {
-        if (!IsShown || ChosenVersion is not { Length: > 0 } chosen || model.DeprecationsAsync([(row.Id, chosen)]) is not { IsCompleted: false } reading)
+        if (!IsShown || ChosenVersion is not { Length: > 0 } chosen)
         {
             return;
         }
-        await reading;
+        await model.DeprecationsAsync([(row.Id, chosen)]);
         if (!cancel.IsCancellationRequested && Selected == row && ChosenVersion == chosen)
         {
             ShowDeprecated(row, said);
@@ -1019,7 +1034,7 @@ public sealed partial class NuGetView : DockPanel
                 },
             });
         }
-        said.Children.Add(new TextBlock { Text = fix is null ? "No version without a known vulnerability is offered" : $"Fixed in {fix}", FontWeight = FontWeight.SemiBold });
+        said.Children.Add(new TextBlock { Classes = { StyleClasses.Strong }, Text = fix is null ? "No version without a known vulnerability is offered" : $"Fixed in {fix}" });
         Border block = new()
         {
             Name = first ? "Vulnerability" : "ChosenVulnerability",
@@ -1053,7 +1068,7 @@ public sealed partial class NuGetView : DockPanel
             {
                 Orientation = Orientation.Horizontal,
                 Spacing = Gaps.Tight,
-                Children = { new TextBlock { Text = "Use instead:", FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center }, search },
+                Children = { new TextBlock { Classes = { StyleClasses.Strong }, Text = "Use instead:", VerticalAlignment = VerticalAlignment.Center }, search },
             };
             if (deprecation.AlternativeVersions is { } range)
             {
@@ -1098,7 +1113,7 @@ public sealed partial class NuGetView : DockPanel
         (projectsHeader.Parent as Panel)?.Children.Remove(projectsHeader);
         panel.Children.Add(projectsHeader);
         IReadOnlyList<(ProjectModel Project, IReadOnlyList<InstalledVersion> At, IReadOnlyList<TransitiveUse> Brought)> listed = ProjectsListed(row, out int all);
-        projectCount.Text = listed.Count == all ? string.Empty : $"{listed.Count} of {all}";
+        projectCount.Text = listed.Count == all ? string.Empty : $"{Numbers.Said(listed.Count)} of {Numbers.Said(all)}";
         foreach ((ProjectModel project, IReadOnlyList<InstalledVersion> at, IReadOnlyList<TransitiveUse> brought) in listed)
         {
             bool has = at.Count > 0;
@@ -1124,7 +1139,8 @@ public sealed partial class NuGetView : DockPanel
                 string where = several && bad.Framework is { } framework ? $" for {framework}" : string.Empty;
                 mark.Children.Add(Warning($"Known security vulnerability in {bad.Version}{where}, brought in by {string.Join(", ", bad.BroughtBy)}: {gravest.Severity} severity ({gravest.Address})"));
             }
-            TextBlock name = new() { Text = project.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+            ProjectLabel name = new() { VerticalAlignment = VerticalAlignment.Center };
+            name.Show(project);
             ToolFlow.SetFills(name, new ToolLayout.Fills(100, 220));
             ToolFlow line = new()
             {
@@ -1199,9 +1215,9 @@ public sealed partial class NuGetView : DockPanel
     /// list the id is cut, its version and marks kept whole after it.</summary>
     private Control Row()
     {
-        TextBlock version = new() { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Normal, 0, 0, 0) };
+        TextBlock version = new() { Classes = { StyleClasses.Caption }, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Normal, 0, 0, 0) };
         version.Classes.Add(StyleClasses.Muted);
-        RowIcon icon = new() { Width = 14, Height = 14, Margin = new Thickness(Gaps.Small, 0, Gaps.Small, 0) };
+        RowIcon icon = new() { Margin = new Thickness(Gaps.Small, 0, Gaps.Small, 0) };
         icon.DataKey = IconKeys.Package;
         TextBlock id = new() { VerticalAlignment = VerticalAlignment.Center };
         Border transitive = Tagged("transitive");
@@ -1216,7 +1232,7 @@ public sealed partial class NuGetView : DockPanel
         return line.Showing<PackageRow>(row =>
         {
             id.Text = row.Id;
-            id.FontWeight = row.IsInstalled ? FontWeight.SemiBold : FontWeight.Normal;
+            id.Classes.Set(StyleClasses.Strong, row.IsInstalled);
             version.Text = row.MovesTo is { } latest ? $"{row.Version} → {latest}" : row.Version;
             transitive.IsVisible = row.IsTransitive;
             deprecated.IsVisible = row.IsDeprecated;
@@ -1231,9 +1247,9 @@ public sealed partial class NuGetView : DockPanel
     /// <summary>A small tag after a row's words ("transitive").</summary>
     private static Border Tagged(string words)
     {
-        TextBlock text = new() { Text = words, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
-        text.Classes.Add(StyleClasses.Muted);
-        return new Border { Classes = { StyleClasses.Tag }, Margin = new Thickness(Gaps.Small, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, Child = text };
+        Border tag = Tags.Of(words);
+        tag.Margin = new Thickness(Gaps.Small, 0, 0, 0);
+        return tag;
     }
 
     /// <summary>What a deprecated version's tag tells on hover: why, what to use instead, and its owner's own words.</summary>
@@ -1248,7 +1264,7 @@ public sealed partial class NuGetView : DockPanel
     /// <summary>The warning a vulnerable version is marked with, saying what it is.</summary>
     private static RowIcon Warning(string tip)
     {
-        RowIcon warning = new() { Width = 12, Height = 12, VerticalAlignment = VerticalAlignment.Center };
+        RowIcon warning = new() { VerticalAlignment = VerticalAlignment.Center };
         warning.DataKey = IconKeys.Problems;
         warning.ForegroundKey = TokenKeys.Warning;
         ToolTip.SetTip(warning, tip);

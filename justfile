@@ -31,7 +31,7 @@ test filter="" processes="" *args:
 comments *paths:
     python3 -I tools/check-comments.py {{paths}}
 
-# Rewrite TestTimes.json, by which CI deals each system's tests to its shards, from CI runs' results: just test-times RUN...
+# Rewrite TestTimes.json, by which CI deals each system's tests to its shards, from CI runs: just test-times NEWEST [RUN...]
 test-times +runs:
     python3 -I tools/test-shards.py update {{runs}}
 
@@ -83,6 +83,11 @@ container-tools *args:
 [windows]
 container-tools *args:
     $sh = (Get-Command sh -ErrorAction SilentlyContinue).Source; if (-not $sh) { $sh = Join-Path (Split-Path (Split-Path (Get-Command git).Source)) 'bin\sh.exe' }; & $sh tools/container-tools.sh {{args}}
+
+# The Vim that VimTests compares Vim mode with, built from its release into artifacts/vim/<version>/ (tools/vim.sh).
+[unix]
+vim:
+    tools/vim.sh
 
 # Passenger's debug relay for Android (arm64, x64) and iOS (devices, Apple Silicon simulators) into
 # artifacts/debug-relay/<rid>/, which the app carries under debugger/relay/; macOS with Xcode and the Android workload.

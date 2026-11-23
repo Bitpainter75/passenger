@@ -226,6 +226,8 @@ Packages the build or the tests use that no app carries.
 | `NETStandard.Library` | the build: netstandard2.0's library, which Passenger's own analyzers are compiled against | MIT | Copyright (c) .NET Foundation and Contributors |
 | `xunit.v3`, `xunit.v3.assert`, `xunit.v3.common`, `xunit.v3.core.mtp-v1`, `xunit.v3.extensibility.core`, `xunit.v3.mtp-v1`, `xunit.v3.runner.common`, `xunit.v3.runner.inproc.console`, `xunit.analyzers`, `xunit.runner.visualstudio` | the tests | Apache-2.0 | Copyright (C) .NET Foundation |
 | `Avalonia.Headless.XUnit` | the tests on Avalonia's headless platform | MIT | Copyright 2013-2026 © The AvaloniaUI Project |
+| `Reqnroll` | Reqnroll's own argument converter, run in-process by the unit tests as the reference a step's argument conversion is held to; Passenger never carries it | BSD-3-Clause | Copyright © Reqnroll |
+| `Cucumber.HtmlFormatter` | Reqnroll's dependency in the unit tests; Passenger never carries it | MIT | Copyright © Cucumber Ltd |
 | `Avalonia.Fonts.Inter` | Inter 3.019, which `Avalonia.Headless` names and the tests' Avalonia apps take; the app leaves its files out and carries its own Inter (below) | MIT | Copyright 2013-2026 © The AvaloniaUI Project |
 | `Avalonia.Templates` | Avalonia's dotnet new templates, downloaded for the tests' local feed, from which they install them as New Solution does (`AvaloniaApp.Feed`); Passenger never carries them, and installs them only when asked. The package names no licence; its repository's (AvaloniaUI/Avalonia.Templates) is MIT | MIT | Copyright (c) 2023 .NET Foundation and Contributors All Rights Reserved |
 | `CommunityToolkit.Mvvm` | the MVVM Toolkit at the version Avalonia's MVVM template writes, downloaded for the tests' package cache, which an app of theirs restores with its generators; Passenger never carries it | MIT | (c) .NET Foundation and Contributors. All rights reserved. |
@@ -283,9 +285,10 @@ Packages the build or the tests use that no app carries.
 | `Microsoft.Bcl.AsyncInterfaces`, `Microsoft.Win32.Registry` | the test platform's | MIT | © Microsoft Corporation. All rights reserved. |
 | `vpk` | Velopack's packer, a .NET tool at the version `dotnet-tools.json` pins, which builds the Windows installer (`tools/package-win.sh`). It carries others' programs under their own terms for what Passenger's installer does not use or carry: Microsoft's signtool and Azure Artifact Signing client, which sign it only when signing is asked for (the Windows SDK's and Microsoft's terms), WiX (MS-RL) for MSI packages, and zstd (BSD-3-Clause or GPL-2.0) | MIT | Copyright © Velopack Ltd. All rights reserved. |
 
-### The tests' own ESLint and Prettier
+### The tests' own ESLint, Prettier and xterm.js
 
-The npm packages `EslintPrettierTests` put in a test folder's node_modules as a project's own ESLint and Prettier:
+The npm packages `EslintPrettierTests` put in a test folder's node_modules as a project's own ESLint and Prettier, and
+the terminal `TerminalEmulationTests` holds Passenger's terminal to:
 `tests/Passenger.Tests/NodePackages/package.json` pins them and `package-lock.json` everything they bring, each with
 its tarball's sha512, which the tests' build checks as `tools/Passenger.NodePackages` puts them in the tests' output
 (`node-packages/`). No app carries them, and no test fetches them from npm. Each is named by its npm name, with the
@@ -295,6 +298,7 @@ licence its package.json states and the copyright line its licence file (else it
 | Package | In Passenger | Licence | Copyright |
 |---|---|---|---|
 | `eslint` | the project's own ESLint, which Passenger's ESLint support runs through the ESLint language server | MIT | Copyright OpenJS Foundation and other contributors, <www.openjsf.org> |
+| `@xterm/headless` | xterm.js with no screen, the terminal Passenger's own is compared with, output for output | MIT | Copyright (c) 2014-2020 The xterm.js authors; Copyright (c) 2012-2013, Christopher Jeffrey; Copyright (c) 2011 Fabrice Bellard (as its source carries them; it has no licence file) |
 | `prettier`, `prettier2` (Prettier 2.8.8, under npm's alias) | the project's own Prettier, 3 and 2, which Passenger's Prettier runner formats with | MIT | Copyright © James Long and contributors |
 | `@eslint/config-array`, `@eslint/core`, `@eslint/object-schema`, `@eslint/plugin-kit`, `@humanfs/core`, `@humanfs/node`, `@humanfs/types` | eslint's configuration, rules and file system | Apache-2.0 | no copyright line; its author: Nicholas C. Zakas |
 | `@eslint/config-helpers` | eslint's configuration | Apache-2.0 | no copyright line or author; its repository is eslint/rewrite |

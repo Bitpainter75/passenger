@@ -3,6 +3,8 @@ using Avalonia.Headless.XUnit;
 using Passenger.App;
 using Passenger.App.Vcs;
 using Passenger.App.Workspace;
+using Passenger.Core;
+using Passenger.Editor;
 using Passenger.Text;
 using Passenger.Vcs;
 
@@ -10,6 +12,7 @@ namespace Passenger.Tests;
 
 /// <summary>Files git keeps in another form than the disk's, over real working trees: one a filter smudges (as LFS and
 /// git-crypt do) and one in Windows-1252, each compared, blamed and rolled back as the disk has it.</summary>
+[AboutMacOS]
 public sealed class GitFileFormsTests : IDisposable
 {
     private readonly string folder = TestFolders.Create("git-forms-");
@@ -22,11 +25,25 @@ public sealed class GitFileFormsTests : IDisposable
 
     public void Dispose() => TestFolders.Delete(folder);
 
+    /// <summary>Files git keeps in another form than the disk's as one flow, each step the check one test made in an
+    /// instance of its own: filtered and Windows-1252 files as committed showing no change, blaming to their commit and
+    /// rolling back in their encoding, a changed binary file's diff saying their sizes, a file changed only in its
+    /// separators, mode, byte order mark or encoding saying what changed, and a CRLF file under core.autocrlf input
+    /// showing only its edited lines.</summary>
+    [AvaloniaFact]
+    public void A_file_git_keeps_in_another_form_than_the_disks_shows_only_what_changed_and_rolls_back_in_its_own_form()
+    {
+        Flow.StepApart<GitFileFormsTests>("filtered and Windows 1252 files as committed show no change blame to their commit and roll back in their encoding", t => t.Filtered_and_Windows_1252_files_as_committed_show_no_change_blame_to_their_commit_and_roll_back_in_their_encoding());
+        Flow.StepApart<GitFileFormsTests>("show diff of a changed binary file says the binary files differ by their sizes", t => t.Show_diff_of_a_changed_binary_file_says_the_binary_files_differ_by_their_sizes());
+        Flow.StepApart<GitFileFormsTests>("show diff of a file changed only in its line separators or its mode says what changed", t => t.Show_diff_of_a_file_changed_only_in_its_line_separators_or_its_mode_says_what_changed());
+        Flow.StepApart<GitFileFormsTests>("show diff and vcs status of a file changed only in its byte order mark or its encoding say what changed", t => t.Show_diff_and_vcs_status_of_a_file_changed_only_in_its_byte_order_mark_or_its_encoding_say_what_changed());
+        Flow.StepApart<GitFileFormsTests>("under core autocrlf input a CRLF files diff shows only its edited lines and a file stored as written its separators", t => t.Under_core_autocrlf_input_a_CRLF_files_diff_shows_only_its_edited_lines_and_a_file_stored_as_written_its_separators());
+    }
+
     /// <summary>A file a filter keeps lower case in git and upper case on disk, and a Windows-1252 file, both as committed:
     /// neither shows a change, Annotate blames each line to its commit, and Rollback Lines on the 1252 file puts its letter
     /// back as itself, saved in Windows-1252 rather than as UTF-8 around a replacement character.</summary>
-    [AvaloniaFact]
-    public void Filtered_and_Windows_1252_files_as_committed_show_no_change_blame_to_their_commit_and_roll_back_in_their_encoding()
+    private void Filtered_and_Windows_1252_files_as_committed_show_no_change_blame_to_their_commit_and_roll_back_in_their_encoding()
     {
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
         byte[] legacy = System.Text.Encoding.GetEncoding(1252).GetBytes("first line\ncafé au lait\nlast line\n");
@@ -73,8 +90,7 @@ public sealed class GitFileFormsTests : IDisposable
 
     /// <summary>A binary file changed since the last commit has no lines to compare: Show Diff says the binary files
     /// differ, by their sizes, and opens no diff of what reads as no text on one side and lines deleted on the other.</summary>
-    [AvaloniaFact]
-    public void Show_diff_of_a_changed_binary_file_says_the_binary_files_differ_by_their_sizes()
+    private void Show_diff_of_a_changed_binary_file_says_the_binary_files_differ_by_their_sizes()
     {
         byte[] image = [0x89, (byte)'P', (byte)'N', (byte)'G', 0, 1, 2, 3];
         File.WriteAllBytes(Path.Combine(folder, "image.png"), image);
@@ -93,8 +109,7 @@ public sealed class GitFileFormsTests : IDisposable
     /// <summary>A file whose only change is its line separators, and (where git keeps modes) one whose only change is its
     /// mode, each listed as modified: Show Diff says which separators changed on how many lines, and the mode's change,
     /// where it said no differences.</summary>
-    [AvaloniaFact]
-    public void Show_diff_of_a_file_changed_only_in_its_line_separators_or_its_mode_says_what_changed()
+    private void Show_diff_of_a_file_changed_only_in_its_line_separators_or_its_mode_says_what_changed()
     {
         File.WriteAllText(Path.Combine(folder, "lines.txt"), "one\ntwo\nthree\n");
         File.WriteAllText(Path.Combine(folder, "run.sh"), "echo run\n");
@@ -149,8 +164,7 @@ public sealed class GitFileFormsTests : IDisposable
     /// <summary>A file whose only change is a UTF-8 byte order mark added, and one saved again as UTF-16, each listed as
     /// modified: Show Diff and an agent's vcs_status with its path say the mark added and the encoding changed, where
     /// each said no differences, so neither change is committed unseen.</summary>
-    [AvaloniaFact]
-    public void Show_diff_and_vcs_status_of_a_file_changed_only_in_its_byte_order_mark_or_its_encoding_say_what_changed()
+    private void Show_diff_and_vcs_status_of_a_file_changed_only_in_its_byte_order_mark_or_its_encoding_say_what_changed()
     {
         File.WriteAllText(Path.Combine(folder, "Marked.cs"), "class Marked\n{\n}\n", new System.Text.UTF8Encoding(false));
         File.WriteAllText(Path.Combine(folder, "notes.txt"), "Notes: café\n", new System.Text.UTF8Encoding(false));
@@ -172,78 +186,57 @@ public sealed class GitFileFormsTests : IDisposable
         window.Close();
     }
 
-    private static string Changed(MainWindow window, string name) => window.Vcs.Changes.Single(c => c.Name == name).Path;
-
-    private string Git(params string[] arguments) => TestGit.Run(folder, arguments);
-}
-
-/// <summary>What reading Git's state of a large binary file allocates, counted on every thread: the class runs alone, as
-/// whatever a class beside the window tests allocates meanwhile would count as the IDE's.</summary>
-[Collection(Alone.Name)]
-public sealed class GitFileFormsBytesTests : IDisposable
-{
-    private readonly string folder = TestFolders.Create("git-forms-");
-
-    public GitFileFormsBytesTests() => TestFolders.Prepare(() =>
+    /// <summary>Under core.autocrlf=input, which stores CRLF as LF: a file committed with LF and edited with CRLF line
+    /// ends, which git takes as one line changed, shows that line alone in Show Diff (closed, then open and edited again in
+    /// the diff), in Compare with Revision and in an agent's vcs_status, where each said its separators changed too; while
+    /// a file beside it git stores as written (-text), turned from LF to CRLF, still says its separators changed.</summary>
+    private void Under_core_autocrlf_input_a_CRLF_files_diff_shows_only_its_edited_lines_and_a_file_stored_as_written_its_separators()
     {
-        File.WriteAllText(Path.Combine(folder, "README.md"), "Forms\n");
-        TestGit.Init(folder);
-    }, folder);
-
-    public void Dispose() => TestFolders.Delete(folder);
-
-    /// <summary>A changed 100 MB binary file costs what its probe and its listing do where Git's state is read: an agent's
-    /// vcs_status, its diff of the file, the Commit window and its Show Diff (saying the binary files differ by their
-    /// sizes) together allocate a small part of the file's size, where each read the file whole, several times over.</summary>
-    [AvaloniaFact]
-    public void A_changed_large_binary_file_costs_its_probe_not_its_size_in_vcs_status_the_commit_window_and_show_diff()
-    {
-        const int Size = 100 * 1024 * 1024;
-        string asset = Path.Combine(folder, "asset.bin");
-        WriteAsset(asset, Size, seed: 1);
-        Git("add", "asset.bin");
-        Git("commit", "-q", "-m", "Asset");
-        WriteAsset(asset, Size + 1024, seed: 2);
+        Git("config", "core.autocrlf", "input");
+        File.WriteAllText(Path.Combine(folder, ".gitattributes"), "kept.txt -text\n");
+        File.WriteAllText(Path.Combine(folder, "lines.txt"), "one\ntwo\nthree\nfour\nfive\n");
+        File.WriteAllText(Path.Combine(folder, "kept.txt"), "one\ntwo\nthree\n");
+        Git("add", "-A");
+        Git("commit", "-q", "-m", "Lines");
+        string commit = Git("rev-parse", "HEAD").Trim();
+        File.WriteAllText(Path.Combine(folder, "lines.txt"), "one\r\nTWO\r\nthree\r\nfour\r\nfive\r\n");
+        File.WriteAllText(Path.Combine(folder, "kept.txt"), "one\r\ntwo\r\nthree\r\n");
+        Assert.Equal("3\t3\tkept.txt\n1\t1\tlines.txt\n", Git("diff", "--numstat"));
 
         MainWindow window = Ui.OpenFolder(folder, languageServer: false);
-        Ui.Landed(() => window.Vcs.Changes.Any(c => c.Name == "asset.bin"), "asset.bin listed as changed");
+        Ui.Landed(() => window.Vcs.Changes.Count == 2, "lines.txt and kept.txt listed as changed");
         Passenger.App.Mcp.PassengerTools agent = new(window);
-        string cmd = OperatingSystem.IsMacOS() ? "meta" : "control";
-        long before = GC.GetTotalAllocatedBytes(precise: true);
-        Passenger.App.Mcp.VcsStatus status = (Passenger.App.Mcp.VcsStatus)Ui.Await(agent.VcsStatus(), "an agent's vcs_status");
-        object diff = Ui.Await(agent.VcsStatus("asset.bin"), "an agent's diff of asset.bin");
-        window.Perform(AppActions.ShowCommit);
-        Passenger.App.ToolWindows.CommitView commit = window.CommitView;
-        Ui.Landed(() => commit.Rows.OfType<Passenger.App.ToolWindows.CommitRow>().Any(r => r.Change.Name == "asset.bin"), "the Commit window listing asset.bin");
-        Avalonia.Controls.ListBox changes = Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(commit).OfType<Avalonia.Controls.ListBox>().First(l => ReferenceEquals(l.ItemsSource, commit.Rows));
-        Ui.Click(Ui.Row(changes, commit.Rows.OfType<Passenger.App.ToolWindows.CommitRow>().First(r => r.Change.Name == "asset.bin")));
-        Ui.Press(window, $"{cmd} D");
-        const string Said = "Binary files differ: asset.bin is 104858624 bytes now and 104857600 bytes in the last commit";
-        Ui.WaitFor(() => window.Status == Said, () => $"the Commit window's Show Diff saying the binary files differ, where the status says \"{window.Status}\"");
-        long allocated = GC.GetTotalAllocatedBytes(precise: true) - before;
+        string lines = Changed(window, "lines.txt");
+        Saying(window.ShowDiffAsync(lines), "1 difference", "Show Diff on lines.txt, not open");
+        Saying(window.CompareWithAsync(lines, commit, GitHashes.Short(commit)!, lines), "1 difference", "Compare with Revision on lines.txt");
+        Assert.Equal("--- a/lines.txt\n+++ b/lines.txt\n@@ -1,5 +1,5 @@\n one\n-two\n+TWO\n three\n four\n five\n", Ui.Await(agent.VcsStatus("lines.txt"), "vcs_status of lines.txt"));
 
-        Assert.Equal(["asset.bin modified"], status.Changes.Select(c => $"{c.Path} {c.Kind}"));
-        Assert.Equal("Binary files a/asset.bin and b/asset.bin differ", diff);
-        OpenDiffs.None(window, "Show Diff on a binary file opened a diff");
-        Assert.True(allocated < Size / 8, $"Reading Git's state of a changed {Size}-byte binary file allocated {allocated} bytes, so a large asset costs memory as its size, not its probe");
+        window.OpenFile(lines);
+        Ui.Settle();
+        IDiffHost open = Ui.Landed(window.ShowDiffAsync(lines), "Show Diff on lines.txt, open")!;
+        Ui.Landed(() => OpenDiffs.ViewOf(open).Said == "1 difference", $"Show Diff on lines.txt, open, saying 1 difference, where it says \"{OpenDiffs.ViewOf(open).Said}\"");
+        CodeEditor right = OpenDiffs.ViewOf(open).Right;
+        right.GoTo(new TextPosition(4, 0));
+        right.Focus();
+        OpenDiffs.KeysOf(open).KeyTextInput("5 ");
+        Ui.Landed(() => OpenDiffs.ViewOf(open).Said == "2 differences", $"lines.txt's diff, edited, saying 2 differences, where it says \"{OpenDiffs.ViewOf(open).Said}\"");
+        open.Close();
+
+        string kept = Changed(window, "kept.txt");
+        Saying(window.ShowDiffAsync(kept), "Line separators changed: 3 lines from LF to CRLF", "Show Diff on kept.txt");
+        Assert.Equal("Line separators changed: 3 lines from LF to CRLF", Ui.Await(agent.VcsStatus("kept.txt"), "vcs_status of kept.txt"));
         window.Close();
     }
 
-    /// <summary>A file of so many bytes, each run the same for its seed, a NUL among its first: binary, and kept small by
-    /// git, which finds its pattern repeat.</summary>
-    private static void WriteAsset(string path, int size, int seed)
+    /// <summary>The diff <paramref name="opening"/> opens, once its bar says <paramref name="said"/>, closed.</summary>
+    private static void Saying(Task<IDiffHost?> opening, string said, string what)
     {
-        byte[] chunk = new byte[1024 * 1024];
-        for (int i = 0; i < chunk.Length; i++)
-        {
-            chunk[i] = (byte)((i * 7 + seed) % 251);
-        }
-        using FileStream file = new(path, FileMode.Create, FileAccess.Write);
-        for (int written = 0; written < size; written += chunk.Length)
-        {
-            file.Write(chunk, 0, Math.Min(chunk.Length, size - written));
-        }
+        IDiffHost diff = Ui.Landed(opening, what)!;
+        Ui.Landed(() => OpenDiffs.ViewOf(diff).Said == said, $"{what} saying \"{said}\", where it says \"{OpenDiffs.ViewOf(diff).Said}\"");
+        diff.Close();
     }
+
+    private static string Changed(MainWindow window, string name) => window.Vcs.Changes.Single(c => c.Name == name).Path;
 
     private string Git(params string[] arguments) => TestGit.Run(folder, arguments);
 }

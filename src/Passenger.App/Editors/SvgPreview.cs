@@ -4,6 +4,7 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Passenger.App.ToolWindows;
 using Passenger.App.Workspace;
 using Passenger.Core;
 using Passenger.Editor;
@@ -18,12 +19,9 @@ namespace Passenger.App.Editors;
 /// left out and why.</summary>
 public sealed class SvgPreview : DockPanel, IOwnKeys
 {
-    /// <summary>How long typing pauses before the text is drawn again.</summary>
-    private static readonly TimeSpan Pause = TimeSpan.FromMilliseconds(300);
-
     private readonly ZoomedPicture picture = new();
     private readonly TextBlock size = MutedText.Of(string.Empty);
-    private readonly TextBlock problem = new() { Classes = { StyleClasses.EmptyText }, IsVisible = false, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+    private readonly EmptyState problem = new() { IsVisible = false };
     private readonly Banner leftOut = new();
     private readonly Debounce typing;
     private readonly FollowedDocument followed;
@@ -39,7 +37,7 @@ public sealed class SvgPreview : DockPanel, IOwnKeys
         Focusable = true;
         LastChildFill = true;
         Bind(BackgroundProperty, this.GetResourceObservable(TokenKeys.Editor_Background));
-        size.FontSize = 12;
+        size.Classes.Add(StyleClasses.Caption);
         size.Margin = new Thickness(Gaps.Normal, 0);
         size.HorizontalAlignment = HorizontalAlignment.Right;
         problem.Margin = new Thickness(Gaps.Group, Gaps.Normal);
@@ -52,7 +50,7 @@ public sealed class SvgPreview : DockPanel, IOwnKeys
         Children.Add(leftOut);
         Children.Add(problem);
         Children.Add(picture);
-        typing = new Debounce(Pause, DrawAsync);
+        typing = new Debounce(TypingPauses.Previews, DrawAsync);
         followed = FollowedDocument.OfText(OnChanged);
         KeyDown += (_, e) =>
         {
@@ -126,7 +124,7 @@ public sealed class SvgPreview : DockPanel, IOwnKeys
         {
             picture.Picture = read;
             leftOut.Say(read.LeftOut);
-            size.Text = string.Create(CultureInfo.CurrentCulture, $"{read.Size.Width:0.##} × {read.Size.Height:0.##}");
+            size.Text = string.Create(CultureInfo.InvariantCulture, $"{read.Size.Width:0.##} × {read.Size.Height:0.##}");
         }
     }
 }

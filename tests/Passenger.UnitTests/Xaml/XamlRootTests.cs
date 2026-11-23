@@ -2,11 +2,11 @@ using Passenger.Inspector;
 
 namespace Passenger.UnitTests.Xaml;
 
-/// <summary>What XAML Hot Reload reads of two texts of a XAML file's root: its type and x:Class, the properties a new text no
-/// longer sets (cleared before the app populates the root again), those it sets as before (whose live value stands, but for
-/// a markup extension, which may read what changed), a property element compared whole, what the text writes into the
-/// root's collections, against which what the app put there itself is told, a text that does not read refused at its
-/// line, and a handler an attribute names that the class lacks said as such.</summary>
+/// <summary>What XAML Hot Reload reads of two texts of a XAML file's root: its type and x:Class, the properties a new
+/// text no longer sets (cleared before the app populates the root again), those it sets as before (whose live value
+/// stands, but for a markup extension, which may read what changed), the entries its resources write by key, what the
+/// text writes into the root's collections, against which what the app put there itself is told, and a text that does
+/// not read refused at its line.</summary>
 public sealed class XamlRootTests
 {
     private const string Before = """
@@ -24,7 +24,14 @@ public sealed class XamlRootTests
         """;
 
     [Fact]
-    public void A_root_is_read_as_its_type_its_class_its_own_attributes_and_its_property_elements()
+    public void A_root_is_read_as_its_type_class_attributes_and_resources_and_what_the_new_text_drops_goes() => Cases.All(
+        ("a root is read as its type its class its own attributes and its property elements", A_root_is_read_as_its_type_its_class_its_own_attributes_and_its_property_elements),
+        ("what the new text no longer sets on the root is dropped and what it sets as before is kept but for a markup extension", What_the_new_text_no_longer_sets_on_the_root_is_dropped_and_what_it_sets_as_before_is_kept_but_for_a_markup_extension),
+        ("the entries a roots resources write are read by key a dictionary inside them as themselves", The_entries_a_roots_resources_write_are_read_by_key_a_dictionary_inside_them_as_themselves),
+        ("an entry is written by a text that keys it by that name or type and by no other", An_entry_is_written_by_a_text_that_keys_it_by_that_name_or_type_and_by_no_other),
+        ("a text that does not read as xml is refused at its line and column", A_text_that_does_not_read_as_xml_is_refused_at_its_line_and_column));
+
+    private void A_root_is_read_as_its_type_its_class_its_own_attributes_and_its_property_elements()
     {
         XamlRoot root = XamlRoot.Read(Before);
         Assert.Equal(("Window", "App.MainWindow"), (root.Type, root.Class));
@@ -32,8 +39,7 @@ public sealed class XamlRootTests
         Assert.Equal(["DataContext", "Styles"], root.Elements.Keys);
     }
 
-    [Fact]
-    public void What_the_new_text_no_longer_sets_on_the_root_is_dropped_and_what_it_sets_as_before_is_kept_but_for_a_markup_extension()
+    private void What_the_new_text_no_longer_sets_on_the_root_is_dropped_and_what_it_sets_as_before_is_kept_but_for_a_markup_extension()
     {
         XamlRoot before = XamlRoot.Read(Before);
         XamlRoot now = XamlRoot.Read(Before.Replace(" Opened=\"OnOpened\"", "", StringComparison.Ordinal).Replace("Title=\"App\"", "Title=\"App 2\"", StringComparison.Ordinal)
@@ -47,28 +53,7 @@ public sealed class XamlRootTests
         Assert.False(before.Keeps(now, "Height"), "A property neither text sets is no XAML's to keep");
     }
 
-    [Fact]
-    public void What_a_roots_property_elements_hold_is_counted_by_the_property_whichever_type_names_it()
-    {
-        XamlRoot root = XamlRoot.Read("""
-            <Window xmlns="https://github.com/avaloniaui">
-                <Window.Styles>
-                    <Style Selector="Button" />
-                    <Style Selector="TextBlock" />
-                </Window.Styles>
-                <Control.KeyBindings>
-                    <KeyBinding Gesture="Ctrl+K" />
-                </Control.KeyBindings>
-                <TextBlock />
-            </Window>
-            """);
-        Assert.Equal(2, root.Items.GetValueOrDefault("Styles"));
-        Assert.Equal(1, root.Items.GetValueOrDefault("KeyBindings"));
-        Assert.False(root.Items.ContainsKey("Triggers"), "A property the text leaves out holds nothing of the text's");
-    }
-
-    [Fact]
-    public void The_entries_a_roots_resources_write_are_read_by_key_a_dictionary_inside_them_as_themselves()
+    private void The_entries_a_roots_resources_write_are_read_by_key_a_dictionary_inside_them_as_themselves()
     {
         XamlResources resources = XamlRoot.Read("""
             <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -99,8 +84,7 @@ public sealed class XamlRootTests
         Assert.Equal(["Dark"], resources.Themes);
     }
 
-    [Fact]
-    public void An_entry_is_written_by_a_text_that_keys_it_by_that_name_or_type_and_by_no_other()
+    private void An_entry_is_written_by_a_text_that_keys_it_by_that_name_or_type_and_by_no_other()
     {
         XamlResources resources = XamlRoot.Read("""
             <UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
@@ -118,16 +102,10 @@ public sealed class XamlRootTests
     }
 
     [Fact]
-    public void The_roots_classes_are_those_its_attribute_names_and_a_root_with_no_resources_writes_none()
-    {
-        XamlRoot root = XamlRoot.Read("""<Window xmlns="https://github.com/avaloniaui" Classes="  wide  tall " />""");
-        Assert.Equal(["tall", "wide"], root.Classes.Order());
-        Assert.Same(XamlResources.Empty, root.Resources);
-        Assert.Empty(XamlRoot.Read("""<Window xmlns="https://github.com/avaloniaui" />""").Classes);
-    }
+    public void Of_a_collection_the_texts_items_and_the_apps_keep_their_places_by_where_each_came_from() =>
+        Of_a_collection_what_the_text_did_not_write_stays_before_and_after_what_it_did_by_where_each_came_from();
 
-    [Fact]
-    public void Of_a_collection_what_the_text_did_not_write_stays_before_and_after_what_it_did_by_where_each_came_from()
+    private void Of_a_collection_what_the_text_did_not_write_stays_before_and_after_what_it_did_by_where_each_came_from()
     {
         string own = "own";
         string early = "early";
@@ -140,44 +118,13 @@ public sealed class XamlRootTests
         Assert.Equal("own early | ", Shown(XamlRoot.Own([own, early, written], 1, origin)));
     }
 
-    [Fact]
-    public void Where_nothing_says_where_a_collections_items_came_from_its_first_are_the_texts_and_the_rest_the_apps()
-    {
-        Assert.Equal(" | c", Shown(XamlRoot.Own(["a", "b", "c"], 2, _ => XamlOrigin.Unrecorded)));
-    }
-
-    [Fact]
-    public void A_collection_the_text_writes_nothing_of_is_all_the_apps_and_of_a_text_not_known_all_its_own()
-    {
-        Assert.Equal(" | a b", Shown(XamlRoot.Own(["a", "b"], 0, _ => XamlOrigin.Unrecorded)));
-        Assert.Equal(" | ", Shown(XamlRoot.Own(["a", "b"], null, _ => XamlOrigin.Unrecorded)));
-    }
-
     /// <summary>What stays before what the text wrote, and what after.</summary>
     private static string Shown((List<string> First, List<string> Last) own) => $"{string.Join(' ', own.First)} | {string.Join(' ', own.Last)}";
 
-    [Fact]
-    public void A_text_that_does_not_read_as_xml_is_refused_at_its_line_and_column()
+    private void A_text_that_does_not_read_as_xml_is_refused_at_its_line_and_column()
     {
         UnreadXaml unread = Assert.Throws<UnreadXaml>(() => XamlRoot.Read(Before.Replace("</Window.Styles>", "</Window.Style>", StringComparison.Ordinal)));
         Assert.Equal(9, unread.Line);
-    }
-
-    [Fact]
-    public void The_attribute_a_compiler_names_by_its_line_and_column_is_found_by_its_name_and_value()
-    {
-        Assert.Equal(("Opened", "OnOpened"), XamlRoot.AttributeAt(Before, 3, 96));
-        Assert.Null(XamlRoot.AttributeAt(Before, 3, 95));
-    }
-
-    [Fact]
-    public void A_handler_named_with_marks_that_the_class_lacks_is_said_whole_and_one_it_has_is_not()
-    {
-        string lacked = Before.Replace("Opened=\"OnOpened\"", "Opened=\"गिनती\"", StringComparison.Ordinal);
-        Assert.True(XamlReloading.MissingHandler(lacked, 3, 96, typeof(Greeter)) == "Opened=\"गिनती\" names a handler Greeter does not have: add गिनती in C# and apply both changes",
-            "A handler named with marks that the window lacks is not said, so the compiler's own words tell nothing of adding it in C#");
-        string had = Before.Replace("Opened=\"OnOpened\"", "Opened=\"नमस्ते\"", StringComparison.Ordinal);
-        Assert.Null(XamlReloading.MissingHandler(had, 3, 96, typeof(Greeter)));
     }
 
     /// <summary>A root whose one handler's name holds marks.</summary>

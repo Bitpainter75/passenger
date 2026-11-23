@@ -30,6 +30,8 @@ internal static class Program
         {
             return signed;
         }
+        // Before anything reads the state folder, or leaves the folder a relative PASSENGER_SETTINGS is read from.
+        State.StateStore.NameWhole();
         // Before anything of the IDE starts, so a start that fails before its log is set up still leaves why.
         CrashFile.Watch();
         // First, as Velopack asks; an update never installs as a second Passenger starts, which would end the first.
@@ -52,16 +54,20 @@ internal static class Program
             _ = ThemeSource.Repository.Reached;
             _ = Containers.BuildKitChecks.ByDefault;
             _ = SystemMotion.Named;
+            _ = SystemContrast.Named;
             _ = Debugging.BrowserRun.Proxy;
             Mcp.McpProxy.CheckVariable();
             _ = Mcp.McpHost.StartsLanguageServer;
             _ = MainWindow.WatchSaysLater;
             _ = CSharp.CSharpService.SlowLoad;
+            _ = Lsp.RoslynServerFolder.ServerFrom;
+            _ = Editors.TypingPauses.Diagnostics;
             _ = Mcp.AgentCall.Every;
             _ = Mcp.PassengerTools.ServerLimit;
             _ = Run.Devices.DeviceLaunches.EndHold;
             _ = Dap.AdapterEnvironment.EvaluationTimeout;
             _ = Text.TextSearch.Apart;
+            _ = Passenger.Profiler.SessionStarts.Limit;
             _ = Languages.TextMate.TextMateHighlighter.LineTime;
             _ = Waits.Scale;
         }
@@ -84,10 +90,10 @@ internal static class Program
             input?.Dispose();
             return 0;
         }
-        // A screenshot's state is a folder of its own, made so (Apart), unless PASSENGER_SETTINGS names one.
-        if (options.Screenshot is null || State.StateStore.Named is not null)
+        // A screenshot's state is a folder of its own (Apart) unless PASSENGER_SETTINGS names one, fatal where it cannot be made.
+        if ((options.Screenshot is null || State.StateStore.Named is not null) && !State.StateStore.Own() && State.StateStore.Named is not null)
         {
-            State.StateStore.Own();
+            return 2;
         }
         Core.ShellEnvironment.Load();
         if (options.Mcp != McpMode.Attach && options.Screenshot is null)

@@ -17,7 +17,7 @@ namespace Passenger.Tests;
 /// that only the newer framework gives a property: its left half says which framework's build draws it, its right half which
 /// runtime runs that build. One choice of framework per project, the first by default, drives the XAML preview (that
 /// framework's build however the inner builds finished, on its own runtime), XAML's completion and checks (that framework's
-/// C#), and the language server's answers for the project's C# files, from a XAML file's switcher and a C# file's alike, and
+/// C#), and the language server's answers for the project's C# files, chosen in the status bar for a XAML file and a C# file alike, and
 /// is kept with the folder; the XAML file's problems from a build are its framework's. Avalonia's everywhere (<see cref="MultiTargetedXamlTests"/>); WPF's on Windows alone
 /// (<see cref="MultiTargetedWpfPreviewTests"/>).</summary>
 public sealed class MultiTargetedXamlTests : IClassFixture<MultiTargetedXamlTests.Pair>
@@ -36,22 +36,29 @@ public sealed class MultiTargetedXamlTests : IClassFixture<MultiTargetedXamlTest
         app.Reset();
     }
 
+    /// <summary>A multi-targeted project's one framework chosen drives its XAML's preview, completion, checks and C#,
+    /// and is kept; a XAML error of one framework's build is the file's only while that framework is chosen.</summary>
     [AvaloniaFact]
-    public void One_framework_chosen_per_project_drives_the_preview_completion_checks_and_csharp_and_is_kept() =>
+    public void One_framework_chosen_per_project_drives_its_xaml_and_an_error_of_another_frameworks_build_is_not_shown()
+    {
+        Flow.StepApart("one framework chosen per project drives the preview, completion, checks and C#, and is kept", () => new MultiTargetedXamlTests(app), t => t.One_framework_chosen_per_project_drives_the_preview_completion_checks_and_csharp_and_is_kept());
+        Flow.StepApart("a XAML error of one framework's build is the file's only while that framework is chosen", () => new MultiTargetedXamlTests(app), t => t.A_xaml_error_of_one_frameworks_build_is_the_files_only_while_that_framework_is_chosen());
+    }
+
+    private void One_framework_chosen_per_project_drives_the_preview_completion_checks_and_csharp_and_is_kept() =>
         Check(app, "MainWindow.axaml", TestProjects.Framework, Second);
 
     /// <summary>A XAML error only the first framework's build finds (the marker's Note, which the second's C# alone gives it)
     /// is the XAML file's only while that framework is chosen: the build lists it as the first framework's, with the second
     /// chosen the file is marked nowhere and Problems lists nothing of it, and with the first chosen again its line is marked
     /// once more.</summary>
-    [AvaloniaFact]
-    public void A_xaml_error_of_one_frameworks_build_is_the_files_only_while_that_framework_is_chosen()
+    private void A_xaml_error_of_one_frameworks_build_is_the_files_only_while_that_framework_is_chosen()
     {
         app.Rewrite("MainWindow.axaml", AvaloniaWindow.Replace("<local:Marker />", "<local:Marker Note=\"x\" />", StringComparison.Ordinal));
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         OpenDocument document = window.EditorArea.Active!;
-        CodeEditor editor = window.EditorArea.CodeEditor;
-        Ui.WaitFor(() => editor.ContextLabel == TestProjects.Framework, () => $"the XAML file's switcher showing {TestProjects.Framework}, the first framework, chosen (it shows {editor.ContextLabel ?? "nothing"})");
+        Ui.WaitFor(() => window.TargetFrameworkShown == TestProjects.Framework,
+            () => $"the status bar showing {TestProjects.Framework}, the XAML file's first framework, chosen (it shows {window.TargetFrameworkShown ?? "nothing"})");
 
         Ui.Run(window, AppActions.Build);
         Ui.Settle();
@@ -60,11 +67,11 @@ public sealed class MultiTargetedXamlTests : IClassFixture<MultiTargetedXamlTest
             $"The build did not list the Note's error as {TestProjects.Framework}'s alone: {string.Join("; ", inFile.Select(p => $"{p.Project} {p.Framework}: {p.Message}"))}\n{window.Status}");
         Ui.WaitFor(() => document.Markers.Any(m => m.Kind == MarkerKind.Error), $"the Note's line marked while {TestProjects.Framework}, whose build failed on it, is chosen");
 
-        Choose(window, editor, $"Pair ({Second})");
+        Choose(window, $"Pair ({Second})");
         Ui.WaitFor(() => document.Markers.Count == 0 && window.BottomPanel.Problems.FileProblems.Count == 0,
             () => $"the file marked nowhere with {Second}, whose build found nothing in it, chosen: {string.Join("; ", document.Markers.Select(m => m.Message))}");
 
-        Choose(window, editor, $"Pair ({TestProjects.Framework})");
+        Choose(window, $"Pair ({TestProjects.Framework})");
         Ui.WaitFor(() => document.Markers.Any(m => m.Kind == MarkerKind.Error) && window.BottomPanel.Problems.FileProblems.Count > 0,
             $"the Note's line marked again with {TestProjects.Framework} chosen once more");
         window.Close();
@@ -72,7 +79,7 @@ public sealed class MultiTargetedXamlTests : IClassFixture<MultiTargetedXamlTest
 
     /// <summary>The one flow of both dialects, on an app of the frameworks <paramref name="first"/> and <paramref name="second"/>:
     /// the app built, its first framework's output made the older of the two, then the preview, completion and checks seen
-    /// in the first framework, the second chosen in the XAML file's switcher and all three seen to follow it, a C# file of the
+    /// in the first framework, the second chosen in the status bar for the XAML file and all three seen to follow it, a C# file of the
     /// project answered for in it, and the choice found in a new window.</summary>
     internal static void Check(SharedProject app, string xaml, string first, string second)
     {
@@ -83,7 +90,7 @@ public sealed class MultiTargetedXamlTests : IClassFixture<MultiTargetedXamlTest
         MainWindow window = Keeping(app, state, app.PathOf(xaml));
         OpenDocument document = window.EditorArea.Active!;
         CodeEditor editor = window.EditorArea.CodeEditor;
-        Ui.WaitFor(() => editor.ContextLabel == first, () => $"the XAML file's switcher showing {first}, the first framework, chosen (it shows {editor.ContextLabel ?? "nothing"})");
+        Ui.WaitFor(() => window.TargetFrameworkShown == first, () => $"the status bar showing {first}, the XAML file's first framework, chosen (it shows {window.TargetFrameworkShown ?? "nothing"})");
         Assert.Equal([$"{name} ({first})", $"{name} ({second})"], document.ProjectContexts);
 
         Ui.Run(window, AppActions.Build);
@@ -114,10 +121,10 @@ public sealed class MultiTargetedXamlTests : IClassFixture<MultiTargetedXamlTest
         window.KeyTextInput("ote=\"x\"");
         Ui.WaitFor(() => document.Markers.Any(m => m.Message == unknown), $"\"{unknown}\" said of the Note {first}'s C# lacks");
 
-        Choose(window, editor, $"{name} ({second})");
-        Assert.Equal(second, editor.ContextLabel);
+        Choose(window, $"{name} ({second})");
+        Assert.Equal(second, window.TargetFrameworkShown);
         Ui.WaitFor(() => !document.Markers.Any(m => m.Message == unknown), $"the Note known once {second}, whose C# gives it, was chosen");
-        Drawn(window, document, preview, Newer, $"{second}'s build, chosen in the XAML file's switcher");
+        Drawn(window, document, preview, Newer, $"{second}'s build, chosen in the status bar for the XAML file");
         Replace(editor, " Note=\"x\"", string.Empty);
         Ui.PlaceAfter(editor, marker);
         window.KeyTextInput(" ");
@@ -129,12 +136,12 @@ public sealed class MultiTargetedXamlTests : IClassFixture<MultiTargetedXamlTest
         OpenDocument code = window.EditorArea.Active!;
         Ui.WaitFor(() => window.CSharpService?.For(code) is not null && code.ProjectContexts.Count == 2 && code.ProjectContext == $"{name} ({second})",
             () => $"the C# file answered for in {second}, the project's choice (it shows {code.ProjectContext ?? "nothing"} of {code.ProjectContexts.Count})", TimeSpan.FromMinutes(2));
-        Assert.Equal(second, window.EditorArea.CodeEditor.ContextLabel);
+        Assert.Equal(second, window.TargetFrameworkShown);
         window.Close();
 
         MainWindow again = Keeping(app, state, app.PathOf(xaml));
         OpenDocument reopened = again.EditorArea.Active!;
-        Ui.WaitFor(() => again.EditorArea.CodeEditor.ContextLabel == second, $"the next window's switcher showing {second}, the choice kept");
+        Ui.WaitFor(() => again.TargetFrameworkShown == second, $"the next window's status bar showing {second}, the choice kept");
         if (again.PreviewOf(reopened) is null)
         {
             Assert.True(again.Perform(AppActions.XamlPreview), $"XAML Preview could not run: {again.Status}");
@@ -171,12 +178,12 @@ public sealed class MultiTargetedXamlTests : IClassFixture<MultiTargetedXamlTest
         return window;
     }
 
-    /// <summary>Clicks the editor's switcher and the framework in the menu it opens.</summary>
-    private static void Choose(MainWindow window, CodeEditor editor, string context)
+    /// <summary>Clicks the status bar's context widget and the framework in the menu it opens.</summary>
+    private static void Choose(MainWindow window, string context)
     {
-        Rect bounds = editor.ContextSwitcherBounds;
-        Assert.True(bounds.Width > 0, "The editor shows no target framework switcher for a file of a project of two");
-        Ui.Click(editor, bounds.Center);
+        Button widget = Avalonia.Controls.ControlExtensions.FindControl<Button>(window, "TargetFrameworkButton")!;
+        Assert.True(widget.IsEffectivelyVisible, "The status bar shows no target framework for a file of a project of two");
+        Ui.Click(widget);
         Ui.Choose(Assert.IsType<ContextMenu>(window.OpenContextMenu), context);
         Ui.Settle();
     }

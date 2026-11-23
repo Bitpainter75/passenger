@@ -505,10 +505,8 @@ public partial class ManagedDebugger
         }
         ForgetReturnedValues();
         _stepBegan = null;
-        if (EvalStatus.Abandoned.ContainsKey(threadId))
+        if (StepsAfterEvaluation(threadId, type))
         {
-            // A stepper made now would be the given-up evaluation's, ended with it: the step waits for it to return.
-            _stepAfterEvaluation = (threadId, type);
             Continue(clearVariables: true);
             return;
         }
@@ -527,7 +525,8 @@ public partial class ManagedDebugger
         if (_asyncStepper is not null)
         {
             (bool handledByAsyncStepper, bool? useSimpleStepper) = await _asyncStepper.TrySetupAsyncStep(thread, type);
-            if (handledByAsyncStepper && useSimpleStepper is false)
+            // A step out whose ask of its builder is held unfinished goes on as a plain one once that evaluation returns.
+            if ((handledByAsyncStepper && useSimpleStepper is false) || StepsAfterEvaluation(threadId, type))
             {
                 Continue(clearVariables: true);
                 return;
@@ -560,7 +559,7 @@ public partial class ManagedDebugger
         {
             if (matched[i].Kept is { } same)
             {
-                _logger?.Invoke($"Breakpoint {same.Id} at {filePath}:{breakpoints[i].Line} kept as it was, {same.HitCount} hits in");
+                _logger?.Invoke($"Breakpoint {same.Id} at {filePath}:{breakpoints[i].Line} kept as it was, {Numbers.Said(same.HitCount)} hits in");
                 result.Add(same);
                 continue;
             }
@@ -603,7 +602,7 @@ public partial class ManagedDebugger
         {
             if (matched[i].Kept is { } same)
             {
-                _logger?.Invoke($"Function breakpoint {same.Id} on {same.FunctionName} kept as it was, {same.HitCount} hits in");
+                _logger?.Invoke($"Function breakpoint {same.Id} on {same.FunctionName} kept as it was, {Numbers.Said(same.HitCount)} hits in");
                 result.Add(same);
                 continue;
             }
@@ -1175,6 +1174,10 @@ public partial class ManagedDebugger
         {
             return new VariableInfo { Name = named, Value = SymbolDisplay.FormatLiteral(text, quote: true), Type = "string", VariablesReference = 0 };
         }
+        if (result.Void)
+        {
+            return new VariableInfo { Name = named, Value = DapRows.RanWithNoValue, Type = "void", VariablesReference = 0 };
+        }
         VariableInfo row = await ValueRow(named, named, result.Value!, threadId, frameStackDepth, result.Declared);
         if (row.VariablesReference != 0)
         {
@@ -1232,6 +1235,8 @@ public partial class ManagedDebugger
                     _logger?.Invoke($"Error stopping process before terminating it: {stopResult}");
                 }
             }
+            // Taken while it runs: one attached to leaves them as one launched does, ended as it is.
+            Core.RuntimeFiles? left = _launchFiles ?? (_attachedId > 0 && !_throughRelay ? Core.RuntimeFiles.Of(_attachedId) : null);
             int terminated = _process.TryTerminate(0);
             if (terminated < 0)
             {
@@ -1243,10 +1248,9 @@ public partial class ManagedDebugger
                 _logger?.Invoke("The process had not exited 5 s after Terminate");
             }
             // Before the adapter goes, which may be at once: its runtime left its socket, ended as it was.
-            if (_launchExit is { } ended && _launchFiles is { } left)
+            if (left is not null)
             {
-                await ended.WaitAsync(TimeSpan.FromSeconds(5)).Ended().ConfigureAwait(false);
-                left.Remove();
+                await Core.RuntimeFiles.RemoveOnceGoneAsync([left], TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             }
         }
         await EndAsync().ConfigureAwait(false);
@@ -1271,6 +1275,10 @@ public partial class ManagedDebugger
     /// <summary>Lets go of a program attached to, which runs on (stopped first, so no thread is let go amid an event).</summary>
     private async Task LetGoAsync(TimeSpan? within)
     {
+        if (HoldsLetGo)
+        {
+            await HoldUntilEvaluationsEndAsync().ConfigureAwait(false);
+        }
         if (_process is not null && _isAttached && !_exited.IsSet && _process?.TryIsRunning(out bool isRunning) is Cor.S_OK && isRunning)
         {
             int hResult = _process.TryStop(0);

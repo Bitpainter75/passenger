@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -6,6 +7,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using Passenger.App.Docking;
+using Passenger.App.ToolWindows;
 using Passenger.Core;
 using Passenger.Editor;
 using Passenger.Workspace;
@@ -38,12 +40,12 @@ public partial class ExplorerView : UserControl
     /// <summary>How long typing in the filter pauses before the rows follow it.</summary>
     private static readonly TimeSpan FilterPause = TimeSpan.FromMilliseconds(150);
 
-    private readonly TextBox filter = ToolWindows.FilterBox.Of();
+    private readonly TextBox filter = SearchBox.Finding("Filter files");
     private readonly Border filterBar;
     private readonly Debounce filtering;
 
     /// <summary>Under the rows, how many more files a filter matched than the tree shows.</summary>
-    private readonly TextBlock more = new() { Classes = { StyleClasses.EmptyText }, IsVisible = false };
+    private readonly EmptyState more = new() { IsVisible = false };
 
     /// <summary>Filters asked for, numbering each: only the newest one's answer lands.</summary>
     private int asked;
@@ -163,8 +165,8 @@ public partial class ExplorerView : UserControl
         }
     }
 
-    /// <summary>Reads the folder again, keeping the folders that were open open and the chosen row chosen, and the filter
-    /// as it was.</summary>
+    /// <summary>Reads the folder again in the view asked for, keeping the folders that were open open and the chosen row
+    /// chosen, and the filter as it was.</summary>
     public void Refresh()
     {
         static string Key(ExplorerNode row) => (row.Kind == NodeKind.SolutionFolder ? row.SolutionPath : row.Path) ?? $"{row.Owner}/{row.Depth}/{row.Kind}/{row.Name}";
@@ -173,7 +175,7 @@ public partial class ExplorerView : UserControl
         HashSet<string> open = new(Tree.Rows.Where(r => r.IsExpanded).Select(Key), StringComparer.Ordinal);
         string? chosen = Selected is { } selected ? Key(selected) : null;
         ExplorerNode? again = null;
-        Show(Tree.IsSolutionView);
+        Show(viewAsked == ExplorerViewKind.Solution);
         // Down the rows as they open: a folder's rows come in after it, so each folder is reached once its holder is open.
         for (int at = 0; at < Tree.Rows.Count; at++)
         {
@@ -230,11 +232,16 @@ public partial class ExplorerView : UserControl
     /// <summary>The project opened alone, which the Solution view shows at its top.</summary>
     private ProjectModel? project;
 
+    /// <summary>The view asked for, which a read finding no solution shows the folder's files in place of, until a read
+    /// finds one again.</summary>
+    private ExplorerViewKind viewAsked = ExplorerViewKind.Solution;
+
     /// <summary>Shows a workspace in the view asked for: its folder's files, or the Solution view where it has a solution
     /// (or was opened as a project), else its files.</summary>
     public void Load(WorkspaceModel workspace, ExplorerViewKind view)
     {
         folder = workspace.Folder;
+        viewAsked = view;
         Take(workspace);
         Show(solutionView: view == ExplorerViewKind.Solution);
         Rows.IsVisible = true;
@@ -361,9 +368,11 @@ public partial class ExplorerView : UserControl
     public ExplorerViewKind ViewShown => Tree.IsSolutionView ? ExplorerViewKind.Solution : ExplorerViewKind.Files;
 
     /// <summary>Shows a view, its rows made anew and narrowed to the filter's files, the keys kept on the rows if they had
-    /// them; nothing while it shows already, or with no Solution view to switch to.</summary>
+    /// them; nothing while it shows already, or with no Solution view to switch to, the view asked for kept even
+    /// then.</summary>
     public void ShowView(ExplorerViewKind view)
     {
+        viewAsked = view;
         if (folder is null || !HasSolutionView || view == ViewShown)
         {
             return;
@@ -407,9 +416,7 @@ public partial class ExplorerView : UserControl
         {
             return [];
         }
-        MenuItem nesting = new() { Header = "File Nesting…" };
-        nesting.Click += (_, _) => NestingAsked?.Invoke(this, EventArgs.Empty);
-        return [new MenuItem { Header = "Appearance", Items = { nesting } }];
+        return [ToolWindows.ListMenus.Sub("Appearance", ToolWindows.ListMenus.Item("File Nesting…", () => NestingAsked?.Invoke(this, EventArgs.Empty)))];
     }
 
     /// <summary>Gives the tree the keys on its chosen row (the first when none is): the view itself cannot take the
@@ -420,15 +427,7 @@ public partial class ExplorerView : UserControl
         {
             return;
         }
-        if (Rows.SelectedIndex < 0)
-        {
-            Rows.SelectedIndex = 0;
-        }
-        int index = Rows.SelectedIndex;
-        // A row scrolled out of sight, or in a window just shown, has no container until it is laid out in view.
-        Rows.ScrollIntoView(index);
-        Rows.UpdateLayout();
-        Rows.ContainerFromIndex(index)?.Focus();
+        ListKeys.Hold(Rows, chooseFirst: true);
     }
 
     /// <summary>The folder's indexed files by their paths from its root, as the window's index has them now, which the
@@ -509,7 +508,7 @@ public partial class ExplorerView : UserControl
             return;
         }
         Tree.Filter(found.Files);
-        more.Text = $"{found.More:N0} more {Plural.Noun(found.More, "file")} {Plural.Agreeing(found.More, "matches", "match")}: a longer filter narrows them";
+        more.Text = $"{Numbers.Said(found.More)} more {Plural.Noun(found.More, "file")} {Plural.Agreeing(found.More, "matches", "match")}: a longer filter narrows them";
         more.IsVisible = found.More > 0;
         ShowHint();
     }
@@ -638,22 +637,32 @@ public partial class ExplorerView : UserControl
         RowGlyphs glyphs = new();
         glyphs.ChevronPressed += OnChevronPressed;
         TextBlock name = new() { VerticalAlignment = VerticalAlignment.Center };
-        TextBlock detail = new() { Classes = { StyleClasses.Muted }, FontSize = 12, Margin = new Thickness(Gaps.Normal, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-        StackPanel row = new() { Orientation = Orientation.Horizontal, Height = ListRow.Height, Children = { glyphs, name, detail } };
+        // How version control says the file changed, as its name's colour does (ChangedFileRow's letter).
+        TextBlock change = new() { Classes = { StyleClasses.Caption, StyleClasses.Strong }, Margin = new Thickness(Gaps.Small, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        TextBlock detail = new() { Classes = { StyleClasses.Muted, StyleClasses.Caption }, Margin = new Thickness(Gaps.Normal, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        StackPanel row = new() { Orientation = Orientation.Horizontal, Height = ListRow.Height, Children = { glyphs, name, change, detail } };
         return row.Showing<ExplorerNode>(node =>
         {
             row.Margin = node.Indent;
             row.Opacity = node.Opacity;
-            ToolTip.SetTip(row, node.Tip);
+            ToolTip.SetTip(row, node.Hover);
+            AutomationProperties.SetName(row, node.Said);
             glyphs.HasChevron = node.HasChildren;
             glyphs.Turned = node.IsExpanded;
             glyphs.Icon = node.Icon;
             glyphs.IconBrush = node.IconBrush;
             name.Text = node.Name;
-            name.Classes.Set(StyleClasses.VcsModified, node.IsVcsModified);
-            name.Classes.Set(StyleClasses.VcsAdded, node.IsVcsAdded);
-            name.Classes.Set(StyleClasses.VcsUnversioned, node.IsVcsUnversioned);
-            name.Classes.Set(StyleClasses.VcsConflicted, node.IsVcsConflicted);
+            foreach (TextBlock coloured in (TextBlock[])[name, change])
+            {
+                coloured.Classes.Set(StyleClasses.VcsModified, node.IsVcsModified);
+                coloured.Classes.Set(StyleClasses.VcsAdded, node.IsVcsAdded);
+                coloured.Classes.Set(StyleClasses.VcsUnversioned, node.IsVcsUnversioned);
+                coloured.Classes.Set(StyleClasses.VcsConflicted, node.IsVcsConflicted);
+            }
+            change.Text = node.Change is { } kind ? Vcs.ChangedFileRow.LetterOf(kind) : null;
+            change.IsVisible = node.Change is not null;
+            ToolTip.SetTip(change, node.Change is { } said ? Vcs.ChangedFileRow.WordOf(said) : null);
+            AutomationProperties.SetName(change, node.Change is { } named ? Vcs.ChangedFileRow.WordOf(named) : null);
             detail.Text = node.Detail;
         });
     }

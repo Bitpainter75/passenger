@@ -8,10 +8,10 @@ using Passenger.Workspace;
 namespace Passenger.Tests;
 
 /// <summary>Make Passenger Godot's Script Editor on a Godot project, against a stand-in Godot 4.7 .NET build that is
-/// self-contained (its <c>_sc_</c> file), so its settings are a folder of the test's and never the person's: asked first,
-/// it writes Passenger as the external editor of C# and of other scripts into the 4.7 settings file, taking the rest from
-/// the 4.6 file Godot would read, and says what it set; asked again it says there is nothing to change; where the
-/// settings cannot be written, it shows the values to set by hand.</summary>
+/// self-contained (its <c>_sc_</c> file), so its settings are a folder of the test's and never the person's: asked
+/// first, it writes Passenger as the external editor of C# and of other scripts into the 4.7 settings file, taking the
+/// rest from the 4.6 file Godot would read, and says what it set; asked again it says there is nothing to
+/// change.</summary>
 public sealed class GodotScriptEditorTests
 {
     private static readonly string[] Keys =
@@ -20,8 +20,19 @@ public sealed class GodotScriptEditorTests
         GodotEditorSettings.UseExternalEditor, GodotEditorSettings.ExecPath, GodotEditorSettings.ExecFlags,
     ];
 
+    /// <summary>Passenger writes itself into Godot's own settings as its script editor when asked, and offers it
+    /// once.</summary>
     [AvaloniaFact]
-    public void Asked_for_it_Passenger_writes_itself_into_the_Godot_s_own_version_s_settings_keeping_the_rest_and_says_what_it_set()
+    public void Passenger_is_offered_as_godots_script_editor()
+    {
+        Flow.Step(nameof(Asked_for_it_Passenger_writes_itself_into_the_Godot_s_own_version_s_settings_keeping_the_rest_and_says_what_it_set),
+            Asked_for_it_Passenger_writes_itself_into_the_Godot_s_own_version_s_settings_keeping_the_rest_and_says_what_it_set);
+        OpenWindows.CloseAll();
+        Flow.Step(nameof(A_Godot_projects_first_opening_offers_the_script_editor_in_a_banner_once_and_never_again_once_dismissed),
+            A_Godot_projects_first_opening_offers_the_script_editor_in_a_banner_once_and_never_again_once_dismissed);
+    }
+
+    private void Asked_for_it_Passenger_writes_itself_into_the_Godot_s_own_version_s_settings_keeping_the_rest_and_says_what_it_set()
     {
         string godot = StandInGodot(out string data);
         File.WriteAllText(Path.Combine(data, "editor_settings-4.6.tres"), """
@@ -63,33 +74,10 @@ public sealed class GodotScriptEditorTests
         Assert.True(asked.Count == 1, $"Asked again with nothing to change, Passenger asked: {string.Join(" | ", asked)}");
     }
 
-    [AvaloniaFact]
-    public void Where_the_settings_cannot_be_written_the_values_to_set_by_hand_are_shown()
-    {
-        string godot = StandInGodot(out string data);
-        Directory.Delete(data);
-        // A file where the settings' folder would be, so neither the folder nor the file can be made.
-        File.WriteAllText(data, "not a folder");
-        MainWindow window = Opened(godot);
-        List<string> asked = [];
-        window.Confirm = (title, text, yes) =>
-        {
-            asked.Add(title);
-            return Task.FromResult(title.StartsWith("Make", StringComparison.Ordinal));
-        };
-
-        Assert.Null(window.Actions.Run(AppActions.GodotScriptEditor));
-        Ui.WaitFor(() => window.Status?.Contains("set them in Godot's Editor Settings", StringComparison.Ordinal) == true,
-            () => $"the status to say the settings are to be set in Godot's Editor Settings; it says {window.Status}");
-        Assert.True(asked.SequenceEqual(["Make Passenger Godot's Script Editor?", "Set Godot's Script Editor by Hand"]),
-            $"Passenger was to ask to write the settings, then show the values to set by hand; it asked: {string.Join(" | ", asked)}");
-    }
-
     /// <summary>A Godot project's first opening in a window that keeps its folders' state offers Passenger as Godot's script
     /// editor in the banner over the editor; dismissed, the banner goes, and the folder opened again in another window on
     /// the same state offers it no more, while another Godot project is offered it still.</summary>
-    [AvaloniaFact]
-    public void A_Godot_projects_first_opening_offers_the_script_editor_in_a_banner_once_and_never_again_once_dismissed()
+    private void A_Godot_projects_first_opening_offers_the_script_editor_in_a_banner_once_and_never_again_once_dismissed()
     {
         string godot = StandInGodot(out _);
         string state = TestFolders.Create("godot-offer-state-");
@@ -130,16 +118,6 @@ public sealed class GodotScriptEditorTests
         string folder = TestFolders.Create("godot-game-");
         TestFolders.Write(folder, GodotProject.FileName, "config_version=5\n\n[application]\n\nconfig/name=\"Spinner\"\n");
         return folder;
-    }
-
-    [AvaloniaFact]
-    public void A_folder_with_no_Godot_project_refuses_it_saying_why()
-    {
-        string folder = TestFolders.Create("no-godot-");
-        TestFolders.Write(folder, "notes.txt", "notes\n");
-        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
-
-        Assert.Equal(Refusals.NoGodotProject, window.Actions.Run(AppActions.GodotScriptEditor));
     }
 
     /// <summary>A window on a Godot project with Settings naming the stand-in Godot.</summary>

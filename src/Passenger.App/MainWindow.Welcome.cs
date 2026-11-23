@@ -25,14 +25,15 @@ public partial class MainWindow
     /// <summary>What Open Solution's panel offers, and all it offers: the files that open as the workspace.</summary>
     private static readonly FilePickerFileType SolutionsAndProjects = new("Solutions and Projects") { Patterns = [.. WorkspaceModel.OpenedExtensions.Select(e => "*" + e)] };
 
-    /// <summary>Asks the person for a folder, by a title, in the system's own panel, beside the folder opened last.</summary>
-    public Func<string, Task<string?>> PickFolder
+    /// <summary>Asks the person for a folder, by a title, in the system's own panel, starting in the folder given, else beside
+    /// the folder opened last.</summary>
+    public Func<string, string?, Task<string?>> PickFolder
     {
         get => pickFolder ?? PickFolderAsync;
         set => pickFolder = value;
     }
 
-    private Func<string, Task<string?>>? pickFolder;
+    private Func<string, string?, Task<string?>>? pickFolder;
 
     /// <summary>The Welcome screen, which the editor area shows until a folder opens: made as it is first asked for, with the
     /// recent ones, what it says and New Solution's state.</summary>
@@ -96,17 +97,14 @@ public partial class MainWindow
     /// <summary>The Welcome screen's New Solution greys as the action does, saying why on its tip.</summary>
     private void GreyNewSolution(WelcomeView shown)
     {
-        shown.NewSolutionButton.IsEnabled = newSolutionWhyNot is null;
-        ToolTip.SetTip(shown.NewSolutionButton, newSolutionWhyNot);
-        ToolTip.SetShowOnDisabled(shown.NewSolutionButton, true);
+        ToolButtons.Grey(shown.NewSolutionButton, newSolutionWhyNot);
     }
 
-    /// <summary>Opens what File, Open Solution or Open Folder chose (or a recent one, the system's, a new solution or a
-    /// clone): a solution (.sln, .slnx) or C# project (.csproj) as the workspace over its folder, or a folder, here or in
-    /// another window as Settings says or the person answers (<see cref="Asking"/>); a file-based program with no folder
-    /// open, its folder with it in a tab; any other file in a tab here. Null once open or asked where, else why not, which
-    /// the status bar and the Welcome screen say; <paramref name="then"/> is told the window a workspace opened in once
-    /// begun.</summary>
+    /// <summary>Opens what File, Open Solution or Open Folder chose (a recent one, the system's, a new solution, a clone): a
+    /// solution (.sln, .slnx) or C# project (.csproj) as the workspace over its folder, or a folder, here or in another window
+    /// as Settings says or the person answers (<see cref="Asking"/>); a file-based program with no folder open, its folder
+    /// with it in a tab; any other file in a tab here. Null once open or asked where, else why not, said in the status bar
+    /// and on the Welcome screen; <paramref name="then"/> is told the window a workspace opened in once begun.</summary>
     public string? Open(string path, Action<MainWindow>? then = null)
     {
         string full = PathNames.Canonical(path);
@@ -150,18 +148,18 @@ public partial class MainWindow
 
     private async Task OpenPickedFolderAsync()
     {
-        if (await PickFolder("Open Folder") is { } path)
+        if (await PickFolder("Open Folder", null) is { } path)
         {
             Open(path);
         }
     }
 
-    private async Task<string?> PickFolderAsync(string title)
+    private async Task<string?> PickFolderAsync(string title, string? start)
     {
         IReadOnlyList<IStorageFolder> picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
             Title = title,
-            SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(BesideLast()),
+            SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(start ?? BesideLast()),
         });
         return picked.Count == 1 ? picked[0].TryGetLocalPath() : null;
     }
@@ -203,7 +201,7 @@ public partial class MainWindow
         if (windows.Count > 1)
         {
             items.Add(new Separator());
-            items.Add(Heading("Open Solutions"));
+            items.Add(ToolWindows.ListMenus.Heading("Open Solutions"));
             items.AddRange(windows.Select(FlyoutListed));
         }
         IReadOnlyList<(string Title, Action Open)> recent = RecentMenu();
@@ -212,15 +210,13 @@ public partial class MainWindow
             items.Add(new Separator());
             if (windows.Count > 1)
             {
-                items.Add(Heading(MainMenu.RecentSolutions));
+                items.Add(ToolWindows.ListMenus.Heading(MainMenu.RecentSolutions));
             }
-            items.AddRange(recent.Select(r => Command(r.Title, r.Open)));
+            items.AddRange(recent.Select(r => ToolWindows.ListMenus.Item(r.Title, r.Open)));
         }
         ContextMenu menu = new() { ItemsSource = items };
         Open(menu, ProjectButton);
         return menu;
-
-        static MenuItem Heading(string text) => new() { Header = text, IsEnabled = false };
     }
 
     /// <summary>The recent folders, solutions and projects, the newest first, each marked when it is gone from disk; none in
@@ -254,18 +250,27 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>Puts the workspace just opened at the top of the recent ones as what it was opened as (its solution, the
-    /// project opened alone, or the folder without either), by the name the toolbar shows.</summary>
-    private void Remember()
+    /// <summary>Puts the workspace just opened among the recent ones as what it was opened as (its solution, the project
+    /// opened alone, or the folder without either), by the name the toolbar shows, as opened when it was
+    /// <paramref name="asked"/> for (<see cref="AskedAt"/>).</summary>
+    private void Remember(DateTimeOffset asked)
     {
         if (!keepsWorkspace || session.Workspace is not { } workspace)
         {
             return;
         }
         RememberOpen(workspace.OpenedAs);
-        state!.Recent.Set(state.Recent.Value.Opened(workspace.OpenedAs, workspace.Name, DateTimeOffset.UtcNow));
+        state!.Recent.Set(state.Recent.Value.Opened(workspace.OpenedAs, workspace.Name, asked));
         ShowRecent();
     }
+
+    /// <summary>The latest time an open was asked for at in this process (<see cref="AskedAt"/>).</summary>
+    private static DateTimeOffset lastAsked;
+
+    /// <summary>When an open asked for now is kept among the recent ones as opened (<see cref="RecentSolutionsState.Next"/>),
+    /// later than every open asked for before it, so opens that land out of turn (a start's windows reopening at once) keep
+    /// the order they were asked for in, which the next start reopens them in.</summary>
+    private DateTimeOffset AskedAt() => keepsWorkspace ? lastAsked = state!.Recent.Value.Next(DateTimeOffset.UtcNow, lastAsked) : DateTimeOffset.UtcNow;
 
     /// <summary>The recent ones on the Welcome screen, and in the system's lists outside the window
     /// (<see cref="RecentShortcuts"/>), which only a Passenger a person sees sets.</summary>

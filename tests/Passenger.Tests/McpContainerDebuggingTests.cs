@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ModelContextProtocol.Client;
 using Passenger.App.Mcp;
 
@@ -13,11 +14,24 @@ namespace Passenger.Tests;
 [Collection(Alone.Name)]
 public sealed class McpContainerDebuggingTests(ContainerRunDebuggingTests.Tools tools) : McpRig, IClassFixture<ContainerRunDebuggingTests.Tools>
 {
+    /// <summary>An agent debugging containers as one flow, every step needing a Linux container engine and the
+    /// container tools, each in an instance of its own: each service of a compose configuration debugged with its
+    /// container action going through the run, a container configuration's published address answered and its input
+    /// refused, a service marked Don't start started later and taken down by stop, and a start given up on or stopped
+    /// coming down with a run up going with the IDE's end.</summary>
+    [Fact]
+    public async Task An_agents_debug_start_of_a_compose_or_container_configuration_debugs_its_services_and_comes_down_with_it()
+    {
+        await Flow.StepApartAsync("an agents debug start debugs each service of a compose configuration its container action goes through the run and debug attach reaches a program in a container", () => new McpContainerDebuggingTests(tools), t => t.An_agents_debug_start_debugs_each_service_of_a_compose_configuration_its_container_action_goes_through_the_run_and_debug_attach_reaches_a_program_in_a_container());
+        await Flow.StepApartAsync("an agents debug start of a container configuration answers the address published here and refuses its input", () => new McpContainerDebuggingTests(tools), t => t.An_agents_debug_start_of_a_container_configuration_answers_the_address_published_here_and_refuses_its_input());
+        await Flow.StepApartAsync("an agents debug start of a service marked Dont start starts it later in the run and stop takes it down", () => new McpContainerDebuggingTests(tools), t => t.An_agents_debug_start_of_a_service_marked_Dont_start_starts_it_later_in_the_run_and_stop_takes_it_down());
+        await Flow.StepApartAsync("a compose start an agent gives up on or stops comes down and a run up goes with the ides end", () => new McpContainerDebuggingTests(tools), t => t.A_compose_start_an_agent_gives_up_on_or_stops_comes_down_and_a_run_up_goes_with_the_ides_end());
+    }
+
     /// <summary>debug_start of a compose configuration debugs each service; container_action's restart of a debugged one
     /// ends its session, restarts it held and attaches again, so it stops in Main again, and its stop ends the session
     /// before the container goes; then a program in a container Passenger did not start is listed and attached to.</summary>
-    [Fact]
-    public async Task An_agents_debug_start_debugs_each_service_of_a_compose_configuration_its_container_action_goes_through_the_run_and_debug_attach_reaches_a_program_in_a_container()
+    private async Task An_agents_debug_start_debugs_each_service_of_a_compose_configuration_its_container_action_goes_through_the_run_and_debug_attach_reaches_a_program_in_a_container()
     {
         Assert.SkipWhen(tools.WhyNot is not null, tools.WhyNot ?? string.Empty);
         CancellationToken test = TestContext.Current.CancellationToken;
@@ -155,11 +169,60 @@ public sealed class McpContainerDebuggingTests(ContainerRunDebuggingTests.Tools 
         }
     }
 
+    /// <summary>debug_start of a Dockerfile configuration's web app answers once it serves, at the address its container's
+    /// 8080 is published on here, as workspace lists its port, never the one the app says it listens at inside its container,
+    /// and the app answers there; debug_input to it, which reads its input in its container, is refused, saying so.</summary>
+    private async Task An_agents_debug_start_of_a_container_configuration_answers_the_address_published_here_and_refuses_its_input()
+    {
+        Assert.SkipWhen(tools.WhyNot is not null, tools.WhyNot ?? string.Empty);
+        (string shop, _) = ContainerRunsTests.Shop("agentserves");
+        DeleteAtEnd(shop);
+        await using McpClient client = await Start(["--mcp", shop], languageServer: false);
+        string? project = null;
+        try
+        {
+            JsonElement started = await Call(client, McpTools.DebugStart, new() { ["configuration"] = "Web: Dockerfile", ["waitSeconds"] = 180 });
+            JsonElement run = (await Call(client, McpTools.Workspace)).GetProperty("containerRun");
+            project = run.GetProperty("project").GetString();
+            JsonElement web = run.GetProperty("resources").EnumerateArray().Single(r => r.GetProperty("type").GetString() == "Project");
+            Match published = Regex.Match(web.TryGetProperty("ports", out JsonElement ports) ? ports.GetString() ?? string.Empty : string.Empty, @"(\d+)->8080/tcp");
+            Assert.True(published.Success, $"workspace listed the debugged service with no port published for its 8080: {web}");
+            string address = $"http://localhost:{published.Groups[1].Value}";
+            string status = started.GetProperty("status").GetString() ?? string.Empty;
+            Assert.True(started.GetProperty("state").GetString() == "running" && status.EndsWith($", listening at {address}", StringComparison.Ordinal),
+                $"debug_start of a container configuration did not answer the address its 8080 is published on here ({address}): {started.GetRawText()}");
+            using (HttpClient http = new())
+            {
+                Assert.Equal("web 1", await http.GetStringAsync(new Uri(address), TestContext.Current.CancellationToken));
+            }
+
+            string session = web.GetProperty("session").GetString()!;
+            ModelContextProtocol.Protocol.CallToolResult typed = await Result(client, McpTools.DebugInput, new() { ["text"] = "hello" });
+            Assert.True(typed.IsError == true && Text(typed).Contains($"{session}'s Debug console takes no input: the debugger attached to it, so it reads its standard input in its container, ",
+                StringComparison.Ordinal), $"debug_input to a service the debugger attached to in its container did not refuse, saying where it reads its input: {Text(typed)}");
+
+            Assert.Equal("Stopped", Text(await Call(client, McpTools.Stop)));
+            Assert.True(await Waiting.UntilAsync(() => Docker.NoneLeftAsync(project!), TimeSpan.FromMinutes(2), TestContext.Current.CancellationToken),
+                "stop left the configuration's container behind");
+        }
+        finally
+        {
+            await Call(client, McpTools.Stop);
+            if (project is not null)
+            {
+                // The headless IDE's state is not the run's, whose end removes only its own images: these go here.
+                foreach (string image in (await Docker.RunAsync("images", "-q", "--filter", $"label=com.docker.compose.project={project}")).Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    await Docker.RunAsync("rmi", "-f", image);
+                }
+            }
+        }
+    }
+
     /// <summary>A run whose configuration (a Docker Compose project's launch profile) says Don't start web lists it not started;
     /// an agent's debug_start naming it as its resource starts it later in that run, built and held, stopped in its Main,
     /// api left as it runs; and stop takes every container of the project down, web's with the rest.</summary>
-    [Fact]
-    public async Task An_agents_debug_start_of_a_service_marked_Dont_start_starts_it_later_in_the_run_and_stop_takes_it_down()
+    private async Task An_agents_debug_start_of_a_service_marked_Dont_start_starts_it_later_in_the_run_and_stop_takes_it_down()
     {
         Assert.SkipWhen(tools.WhyNot is not null, tools.WhyNot ?? string.Empty);
         CancellationToken test = TestContext.Current.CancellationToken;
@@ -225,8 +288,7 @@ public sealed class McpContainerDebuggingTests(ContainerRunDebuggingTests.Tools 
     /// <summary>An agent's run never replaces the person's own containers of the project, refusing with why; a compose
     /// configuration's debug_start an agent gives up on as its held services come up, and a run it stops as it comes up,
     /// take the run down rather than leaving it up for no one; and a run up as a --mcp IDE's input ends goes with the IDE.</summary>
-    [Fact]
-    public async Task A_compose_start_an_agent_gives_up_on_or_stops_comes_down_and_a_run_up_goes_with_the_ides_end()
+    private async Task A_compose_start_an_agent_gives_up_on_or_stops_comes_down_and_a_run_up_goes_with_the_ides_end()
     {
         Assert.SkipWhen(tools.WhyNot is not null, tools.WhyNot ?? string.Empty);
         CancellationToken test = TestContext.Current.CancellationToken;

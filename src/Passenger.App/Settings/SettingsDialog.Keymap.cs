@@ -28,9 +28,8 @@ public sealed partial class SettingsDialog
     private readonly DockPanel keymapHeader = new() { Margin = new Thickness(0, 0, 0, Gaps.Wide) };
     private readonly TextBlock keymapNote = new() { TextWrapping = TextWrapping.Wrap, IsVisible = false, Classes = { StyleClasses.Muted } };
     private readonly ShortcutPanel filterKeys = new("Second stroke");
+    private readonly FilterChip filterChip = new("Clear Filtering");
     private readonly Popup findPopup = new() { Placement = PlacementMode.BottomEdgeAlignedRight, IsLightDismissEnabled = true };
-    private readonly TextBlock filterText = new() { VerticalAlignment = VerticalAlignment.Center, FontSize = 12 };
-    private readonly Border filterChip = new() { IsVisible = false, Classes = { StyleClasses.Tag }, Padding = new Thickness(Gaps.Normal, Gaps.Hair, Gaps.Tight, Gaps.Hair), VerticalAlignment = VerticalAlignment.Center };
     private readonly Dictionary<KeymapPreset, Keymap> defaults = [];
     private Shortcut? shortcutFilter;
 
@@ -45,13 +44,13 @@ public sealed partial class SettingsDialog
     public ComboBox KeymapChoice { get; } = new FormDropDown { Name = "KeymapChoice" };
 
     /// <summary>Find Actions by Shortcut, the magnifier over a keyboard at the Keymap page's top.</summary>
-    public Button FindByShortcut { get; } = new() { Classes = { StyleClasses.Tool } };
+    public Button FindByShortcut { get; } = ToolButtons.Give(new Button(), KeyboardSearch(), "Find Actions by Shortcut", keys: true);
 
     /// <summary>Find Actions by Shortcut's popup: the keystrokes the page is narrowed to.</summary>
     public ShortcutPanel FindShortcut => filterKeys;
 
     /// <summary>The x on the shortcut the page is narrowed to (Clear Filtering).</summary>
-    public Button ClearFiltering { get; } = new() { Classes = { StyleClasses.TabPin }, Margin = new Thickness(Gaps.Small, 0, 0, 0) };
+    public Button ClearFiltering => filterChip.Clear;
 
     /// <summary>The shortcut the Keymap page is narrowed to, or null while it lists every action.</summary>
     public Shortcut? ShortcutFilter => shortcutFilter;
@@ -149,7 +148,7 @@ public sealed partial class SettingsDialog
 
     /// <summary>What an action's row shows of it: its shortcuts, then its mouse shortcuts.</summary>
     private static string[] ShownOf(Keymap keymap, string action) =>
-        [.. keymap.ShortcutsFor(action).Select(s => s.Display()), .. keymap.MouseShortcutsFor(action).Select(g => g.Display())];
+        [.. keymap.ShortcutsFor(action).Select(KeyWords.Of), .. keymap.MouseShortcutsFor(action).Select(KeyWords.Of)];
 
     /// <summary>An action's name as the page and its dialogs say it: the IDE's, else the editor's for its mouse's own.</summary>
     private string TitleOf(string id) => actions[id]?.Title ?? EditorActions.Gestures.FirstOrDefault(g => g.Id == id).Title ?? id;
@@ -211,30 +210,14 @@ public sealed partial class SettingsDialog
         KeymapChoice.HorizontalAlignment = HorizontalAlignment.Left;
         KeymapChoice.SelectionChanged += (_, _) => ChooseKeymap(KeymapChoices[Math.Max(0, KeymapChoice.SelectedIndex)]);
 
-        Grid icon = new() { Width = 18, Height = 18 };
-        PathIcon keyboard = Glyph(IconKeys.Keyboard);
-        PathIcon magnifier = Glyph(IconKeys.Search);
-        magnifier.Width = magnifier.Height = 10;
-        magnifier.HorizontalAlignment = HorizontalAlignment.Right;
-        magnifier.VerticalAlignment = VerticalAlignment.Bottom;
-        icon.Children.Add(keyboard);
-        icon.Children.Add(magnifier);
-        FindByShortcut.Content = icon;
-        ToolButtons.Tip(FindByShortcut, "Find Actions by Shortcut");
         FindByShortcut.Click += (_, _) => findPopup.IsOpen = true;
+        filterChip.Cleared += (_, _) => ClearShortcutFilter();
 
-        ClearFiltering.Content = Glyph(IconKeys.Close);
-        ((PathIcon)ClearFiltering.Content).Width = ((PathIcon)ClearFiltering.Content).Height = 10;
-        ToolButtons.Tip(ClearFiltering, "Clear Filtering");
-        ClearFiltering.Click += (_, _) => ClearShortcutFilter();
-        filterChip.Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { filterText, ClearFiltering } };
-        filterChip.Bind(Border.BackgroundProperty, filterChip.GetResourceObservable(TokenKeys.Selected));
-
-        TextBlock title = new() { Text = "Find Shortcut", FontWeight = FontWeight.SemiBold };
+        TextBlock title = new() { Classes = { StyleClasses.PaneTitle }, Text = "Find Shortcut" };
         Border popup = new()
         {
-            Width = 320,
-            Padding = new Thickness(Gaps.Wide),
+            Width = PopupFrame.Narrow,
+            Padding = PopupFrame.Inset,
             Classes = { StyleClasses.Popup },
             Child = new StackPanel { Spacing = Gaps.Normal, Children = { title, filterKeys } },
         };
@@ -274,36 +257,29 @@ public sealed partial class SettingsDialog
     private void FillEditShortcuts(string action, ContextMenu menu)
     {
         Keymap current = Current;
-        List<(string Shown, string Notation)> own = [.. current.ShortcutsFor(action).Select(s => (s.Display(), s.Notation())),
-            .. current.MouseShortcutsFor(action).Select(g => (g.Display(), g.Notation()))];
+        List<(string Shown, string Notation)> own = [.. current.ShortcutsFor(action).Select(s => (KeyWords.Of(s), s.Notation())),
+            .. current.MouseShortcutsFor(action).Select(g => (KeyWords.Of(g), g.Notation()))];
         List<Control> items =
         [
-            Item("Add Keyboard Shortcut", () => IdeErrors.Observe(AddKeyboardShortcut(action))),
-            Item("Add Mouse Shortcut", () => IdeErrors.Observe(AddMouseShortcut(action))),
+            ToolWindows.ListMenus.Item("Add Keyboard Shortcut", () => IdeErrors.Observe(AddKeyboardShortcut(action))),
+            ToolWindows.ListMenus.Item("Add Mouse Shortcut", () => IdeErrors.Observe(AddMouseShortcut(action))),
         ];
         if (own.Count > 0)
         {
             items.Add(new Separator());
-            items.AddRange(own.Select(shortcut => Item($"Remove {shortcut.Shown}", () => Rebind(action, [.. own.Where(o => o != shortcut).Select(o => o.Notation)]))));
+            items.AddRange(own.Select(shortcut => ToolWindows.ListMenus.Item($"Remove {shortcut.Shown}", () => Rebind(action, [.. own.Where(o => o != shortcut).Select(o => o.Notation)]))));
         }
         if (own.Count > 2)
         {
             items.Add(new Separator());
-            items.Add(Item("Remove All Shortcuts", () => Rebind(action)));
+            items.Add(ToolWindows.ListMenus.Item("Remove All Shortcuts", () => Rebind(action)));
         }
         if (IsChanged(action, current))
         {
             items.Add(new Separator());
-            items.Add(Item("Reset Shortcuts", () => ResetShortcuts(action)));
+            items.Add(ToolWindows.ListMenus.Item("Reset Shortcuts", () => ResetShortcuts(action)));
         }
         menu.ItemsSource = items;
-
-        static MenuItem Item(string header, Action run)
-        {
-            MenuItem item = new() { Header = header };
-            item.Click += (_, _) => run();
-            return item;
-        }
     }
 
     /// <summary>The row's Edit Shortcuts menu, under what was clicked (the row, or its ⋮): a menu opens only on the
@@ -338,7 +314,7 @@ public sealed partial class SettingsDialog
             {
                 if ((!keepDefaults || !Defaults.ShortcutsFor(other).Contains(theirs)) && Left(other).Keys.Remove(theirs))
                 {
-                    said.Add($"{theirs.Display()} was {TitleOf(other)}'s");
+                    said.Add($"{KeyWords.Of(theirs)} was {TitleOf(other)}'s");
                 }
             }
         }
@@ -346,7 +322,7 @@ public sealed partial class SettingsDialog
         {
             if (from.Conflict(action, gesture) is { } other && (!keepDefaults || !Defaults.MouseShortcutsFor(other).Contains(gesture)) && Left(other).Gestures.Remove(gesture))
             {
-                said.Add($"{gesture.Display()} was {TitleOf(other)}'s");
+                said.Add($"{KeyWords.Of(gesture)} was {TitleOf(other)}'s");
             }
         }
         taken = said;
@@ -390,7 +366,7 @@ public sealed partial class SettingsDialog
                 row.Keys.Children.Clear();
                 foreach (string keys in shown)
                 {
-                    Border box = new() { Classes = { StyleClasses.Box }, Padding = new Thickness(Gaps.Small, 0), Margin = new Thickness(0, Gaps.Hair, Gaps.Tight, Gaps.Hair), Child = new TextBlock { Text = keys, FontSize = 12, VerticalAlignment = VerticalAlignment.Center } };
+                    Border box = new() { Classes = { StyleClasses.Box }, Padding = new Thickness(Gaps.Small, 0), Margin = new Thickness(0, Gaps.Hair, Gaps.Tight, Gaps.Hair), Child = new TextBlock { Classes = { StyleClasses.Caption }, Text = keys, VerticalAlignment = VerticalAlignment.Center } };
                     box.Bind(Border.BackgroundProperty, box.GetResourceObservable(TokenKeys.Selected));
                     row.Keys.Children.Add(box);
                 }
@@ -410,8 +386,7 @@ public sealed partial class SettingsDialog
     private void FilterByShortcut(Shortcut? shortcut)
     {
         shortcutFilter = shortcut;
-        filterText.Text = shortcut?.Display();
-        filterChip.IsVisible = shortcut is not null;
+        filterChip.Words = shortcut is null ? null : KeyWords.Of(shortcut);
         Filter();
         if (shortcut is not null)
         {
@@ -450,11 +425,14 @@ public sealed partial class SettingsDialog
         _ => "Other",
     };
 
-    private static PathIcon Glyph(string key)
+    /// <summary>Find Actions by Shortcut's mark: a keyboard, a glyph's magnifier at its foot.</summary>
+    private static Control KeyboardSearch()
     {
-        PathIcon icon = new();
-        icon.Bind(PathIcon.DataProperty, icon.GetResourceObservable(key));
-        return icon;
+        PathIcon keyboard = new();
+        keyboard.Bind(PathIcon.DataProperty, keyboard.GetResourceObservable(IconKeys.Keyboard));
+        PathIcon magnifier = new() { Classes = { StyleClasses.Small }, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom };
+        magnifier.Bind(PathIcon.DataProperty, magnifier.GetResourceObservable(IconKeys.Search));
+        return new Grid { Width = 18, Height = 18, Children = { keyboard, magnifier } };
     }
 
     private sealed record ActionRow(IdeAction Action, Control Row, TextBlock Title, WrapPanel Keys);

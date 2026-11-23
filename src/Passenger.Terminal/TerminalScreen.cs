@@ -56,9 +56,18 @@ public sealed class TerminalScreen
     /// <summary>Whether the decoder may hold the start of a character: the last bytes it took were not ASCII.</summary>
     private bool utf8Open;
 
+    /// <summary>The last character written, its whole grapheme where it is more than its first code point, and whether
+    /// it came just before what the output has now, so REP has it to repeat.</summary>
     private int lastRune = ' ';
-    private Saved saved;
-    private Saved savedMain;
+    private string? lastGrapheme;
+    private bool repeatable;
+
+    /// <summary>The cursor each screen saved (DECSC), each screen its own.</summary>
+    private Saved savedMain = Saved.Unsaved;
+    private Saved savedAlternate = Saved.Unsaved;
+
+    /// <summary>The main screen's scroll region while the alternate one is shown.</summary>
+    private (int Top, int Bottom) mainMargins;
 
     /// <summary>The kitty keyboard protocol's flags each screen's programs pushed, kept apart as the protocol asks.</summary>
     private readonly KeyboardStack mainKeyboard = new();
@@ -71,6 +80,7 @@ public sealed class TerminalScreen
         main = NewLines(Rows);
         Lines = main;
         bottom = Rows - 1;
+        mainMargins = (top, bottom);
         tabStops = Stops(Columns);
     }
 
@@ -79,6 +89,35 @@ public sealed class TerminalScreen
 
     /// <summary>The program rang the bell.</summary>
     public event Action? Bell;
+
+    /// <summary>A command the shell marked as run ended, with its exit status (OSC 133's D after its C).</summary>
+    public event Action<ShellCommand>? CommandEnded;
+
+    /// <summary>The command at the shell's latest prompt (OSC 133's A), and the one before it; null before any.</summary>
+    public ShellCommand? Command { get; private set; }
+
+    public ShellCommand? CommandBefore { get; private set; }
+
+    /// <summary>Whether the shell marks a command's run (OSC 133's C), so a prompt's command ran only where it says so.</summary>
+    public bool MarksRuns { get; private set; }
+
+    /// <summary>The line the cursor stood on as Enter last went to the program on the main screen, typed, pasted or run;
+    /// null before any, or once a reflow numbered the lines again.</summary>
+    public long? EnteredAt { get; private set; }
+
+    /// <summary>Enter went to the program: on the main screen, its line and its prompt's command are taken as entered.</summary>
+    public void Entered()
+    {
+        if (IsAlternate)
+        {
+            return;
+        }
+        EnteredAt = ScreenTop + CursorRow;
+        if (Command is { } command && command.Prompt <= EnteredAt)
+        {
+            command.Entered = true;
+        }
+    }
 
     public int Columns { get; private set; }
     public int Rows { get; private set; }
@@ -95,6 +134,10 @@ public sealed class TerminalScreen
 
     /// <summary>Whether the arrow keys send their application forms (ESC O A rather than ESC [ A), as vim asks.</summary>
     public bool ApplicationCursorKeys { get; private set; }
+
+    /// <summary>Line feed/new line mode (LNM): a line feed, vertical tab or form feed also returns to the first column, and
+    /// Return sends CR LF.</summary>
+    public bool NewLineMode { get; private set; }
 
     /// <summary>Whether a paste is to be bracketed, so a shell takes it as text rather than typed commands.</summary>
     public bool BracketedPaste { get; private set; }
@@ -264,6 +307,8 @@ public sealed class TerminalScreen
         if (columns != Columns)
         {
             main = Reflow(main, columns, ref mainCursor);
+            // The lines are numbered again, so what was marked by number is forgotten.
+            (Command, CommandBefore, EnteredAt) = (null, null, null);
         }
         int mainRow = mainCursor.Row;
         main = Fit(main, rows, columns, toScrollback: true, ref mainRow);
@@ -278,6 +323,7 @@ public sealed class TerminalScreen
         Rows = rows;
         top = 0;
         bottom = rows - 1;
+        mainMargins = (top, bottom);
         tabStops = Stops(columns);
         if (shown)
         {
@@ -520,18 +566,35 @@ public sealed class TerminalScreen
     /// <summary>A character through the reader of control sequences, which tells the screen what it is or what it ends.</summary>
     private void Process(int rune) => sequences.Take(rune, new Reading(this));
 
-    /// <summary>What the reader finds, acted on by the screen.</summary>
+    /// <summary>What the reader finds, acted on by the screen. Anything but a character written leaves REP nothing to
+    /// repeat, as what precedes it is then no character written.</summary>
     private readonly struct Reading(TerminalScreen screen) : ISequenceActions
     {
         public void Print(int rune) => screen.Print(rune);
 
-        public void Control(int rune) => screen.Control(rune);
+        public void Control(int rune)
+        {
+            screen.repeatable = false;
+            screen.Control(rune);
+        }
 
-        public void Escape(SequenceReader sequence, char final) => screen.Escape(final);
+        public void Escape(SequenceReader sequence, char final)
+        {
+            screen.repeatable = false;
+            screen.Escape(final);
+        }
 
-        public void Csi(SequenceReader sequence, char final) => screen.Csi(final);
+        public void Csi(SequenceReader sequence, char final)
+        {
+            screen.Csi(final);
+            screen.repeatable = false;
+        }
 
-        public void Osc(ReadOnlySpan<char> text) => screen.Osc(text);
+        public void Osc(ReadOnlySpan<char> text)
+        {
+            screen.repeatable = false;
+            screen.Osc(text);
+        }
     }
 
     private void Control(int rune)
@@ -549,6 +612,10 @@ public sealed class TerminalScreen
                 Tab(1);
                 break;
             case 0x0a or 0x0b or 0x0c:
+                if (NewLineMode)
+                {
+                    CursorColumn = 0;
+                }
                 LineFeed();
                 break;
             case 0x0d:
@@ -594,9 +661,13 @@ public sealed class TerminalScreen
         Cell[] cells = Lines[CursorRow].Writing();
         if (insertMode)
         {
-            Array.Copy(cells, CursorColumn, cells, CursorColumn + width, Columns - CursorColumn - width);
+            // The cells the character goes into were pushed on, so nothing of theirs is left to overwrite.
+            PushRight(cells, CursorColumn, width, typed: true);
         }
-        Overwrite(cells, CursorColumn);
+        else
+        {
+            Overwrite(cells, CursorColumn);
+        }
         cells[CursorColumn] = new Cell { Rune = rune, Style = style, Width = (byte)width };
         if (hyperlink is not null)
         {
@@ -604,10 +675,13 @@ public sealed class TerminalScreen
         }
         if (width == 2)
         {
-            Overwrite(cells, CursorColumn + 1);
+            if (!insertMode)
+            {
+                Overwrite(cells, CursorColumn + 1);
+            }
             cells[CursorColumn + 1] = new Cell { Rune = 0, Style = style, Width = 0 };
         }
-        lastRune = rune;
+        (lastRune, lastGrapheme, repeatable) = (rune, null, true);
         if (CursorColumn + width >= Columns)
         {
             CursorColumn = Columns - 1;
@@ -664,7 +738,7 @@ public sealed class TerminalScreen
                     Lines[CursorRow].SetLink(column + i, hyperlink);
                 }
             }
-            lastRune = written.Rune;
+            (lastRune, lastGrapheme, repeatable) = (written.Rune, null, true);
             if (column + take >= Columns)
             {
                 CursorColumn = Columns - 1;
@@ -702,6 +776,7 @@ public sealed class TerminalScreen
         int column = Previous();
         if (column < 0)
         {
+            repeatable = false;
             return;
         }
         TerminalLine line = Lines[CursorRow];
@@ -716,6 +791,27 @@ public sealed class TerminalScreen
             line.Writing()[column].Rune = ' ';
         }
         line.SetGrapheme(column, joined);
+        (lastRune, lastGrapheme, repeatable) = (line.Cells[column].Rune, joined, true);
+    }
+
+    /// <summary>REP: the last character written, its whole grapheme, written again as many times, where it is what came
+    /// just before (ECMA-48 leaves REP after anything else undefined, and it repeats nothing then).</summary>
+    private void Repeat(int count)
+    {
+        if (!repeatable)
+        {
+            return;
+        }
+        (int rune, string? grapheme) = (lastRune, lastGrapheme);
+        for (int i = 0; i < count; i++)
+        {
+            Print(rune);
+            if (grapheme is not null && Previous() is int column and >= 0 && Lines[CursorRow].Cells[column].Rune == rune)
+            {
+                Lines[CursorRow].SetGrapheme(column, grapheme);
+            }
+        }
+        lastGrapheme = grapheme;
     }
 
     /// <summary>The cell the last character went into: before the cursor, or under it while a wrap is pending, the
@@ -753,6 +849,40 @@ public sealed class TerminalScreen
         {
             cells[column + 1] = Cell.Blank(style);
         }
+    }
+
+    /// <summary>Room made at a column for <paramref name="count"/> cells, the row's rest pushed right and off its end, the
+    /// cells at the column left as they were for the caller to write. A wide character is never split: one the column
+    /// would split is blanked first, its second half, pushed on, erased where text is <paramref name="typed"/> in insert
+    /// mode and a blank in its own colours where ICH makes the room; one with half pushed off the end is erased.</summary>
+    private void PushRight(Cell[] cells, int column, int count, bool typed)
+    {
+        if (column > 0 && cells[column].Width == 0)
+        {
+            cells[column - 1] = Cell.Blank(Erasing);
+            cells[column] = Cell.Blank(typed ? Erasing : cells[column].Style);
+        }
+        Array.Copy(cells, column, cells, column + count, Columns - column - count);
+        if (cells[Columns - 1].Width == 2)
+        {
+            cells[Columns - 1] = Cell.Blank(Erasing);
+        }
+    }
+
+    /// <summary>Cells erased from a column up to another, the range taken out to the whole of a wide character either end
+    /// would split.</summary>
+    private void Erase(TerminalLine line, int from, int to)
+    {
+        Cell[] cells = line.Cells;
+        if (from > 0 && from < Columns && cells[from].Width == 0)
+        {
+            from--;
+        }
+        if (to > 0 && to < Columns && cells[to].Width == 0)
+        {
+            to++;
+        }
+        line.Clear(from, to, Erasing);
     }
 
     private void LineFeed()
@@ -828,15 +958,18 @@ public sealed class TerminalScreen
         }
         if (sequences.Only('#') && final == '8')
         {
-            // DECALN: the screen filled with Es, for aligning a display.
+            // DECALN: the screen filled with Es, for aligning a display; the margins go to the screen's edges, the cursor home.
             foreach (TerminalLine line in Lines)
             {
                 Cell[] cells = line.Writing();
                 for (int i = 0; i < Columns; i++)
                 {
-                    cells[i] = new Cell { Rune = 'E', Style = CellStyle.Plain, Width = 1 };
+                    cells[i] = new Cell { Rune = 'E', Style = style, Width = 1 };
                 }
+                line.Wrapped = false;
             }
+            (top, bottom) = (0, Rows - 1);
+            MoveTo(0, 0);
             return;
         }
         if (sequences.Intermediates > 0)
@@ -966,8 +1099,12 @@ public sealed class TerminalScreen
             case 'A':
                 MoveTo(row - Get(0, 1), column, clampToRegion: true);
                 break;
-            case 'B' or 'e':
+            case 'B':
                 MoveTo(row + Get(0, 1), column, clampToRegion: true);
+                break;
+            case 'e':
+                // VPR moves as VPA does, past the scroll region's bottom where it is not origin mode's.
+                MoveTo(row + Get(0, 1), column);
                 break;
             case 'C' or 'a':
                 MoveTo(row, column + Get(0, 1));
@@ -1015,14 +1152,11 @@ public sealed class TerminalScreen
                 ScrollDown(Get(0, 1));
                 break;
             case 'X':
-                Lines[row].Clear(column, column + Get(0, 1), Erasing);
+                Erase(Lines[row], column, column + Get(0, 1));
                 wrapPending = false;
                 break;
             case 'b':
-                for (int i = 0, n = Math.Min(Get(0, 1), Columns * Rows); i < n; i++)
-                {
-                    Print(lastRune);
-                }
+                Repeat(Math.Min(Get(0, 1), Columns * Rows));
                 break;
             case 'c':
                 Reply?.Invoke("\x1b[?62;22c");
@@ -1047,6 +1181,10 @@ public sealed class TerminalScreen
                     {
                         insertMode = final == 'h';
                     }
+                    else if (groups[group, 0] == 20)
+                    {
+                        NewLineMode = final == 'h';
+                    }
                 }
                 break;
             case 'm':
@@ -1063,9 +1201,10 @@ public sealed class TerminalScreen
                 }
                 break;
             case 'r':
+                // A bottom past the screen's last row is its last row: the region is at most the screen.
                 int first = Get(0, 1) - 1;
-                int last = Get(1, Rows) - 1;
-                if (last > first && last < Rows)
+                int last = Math.Min(Get(1, Rows), Rows) - 1;
+                if (last > first)
                 {
                     top = first;
                     bottom = last;
@@ -1104,19 +1243,46 @@ public sealed class TerminalScreen
             case 25:
                 CursorVisible = on;
                 break;
-            case 47 or 1047:
-                Alternate(on, clear: mode == 1047 && on);
+            case 47:
+                ShowAlternate(on);
                 break;
-            case 1049:
+            case 1047:
+                // The alternate screen is cleared as it goes.
+                if (!on && IsAlternate)
+                {
+                    ClearAlternate();
+                }
+                ShowAlternate(on);
+                break;
+            case 1048:
                 if (on)
                 {
-                    savedMain = Capture();
-                    Alternate(true, clear: true);
+                    SaveCursor();
                 }
                 else
                 {
-                    Alternate(false, clear: false);
-                    Restore(savedMain);
+                    RestoreCursor();
+                }
+                break;
+            case 1049:
+                // 1047's switch with 1048's save before it and restore after, the alternate screen cleared as it comes too.
+                if (on)
+                {
+                    SaveCursor();
+                    if (!IsAlternate)
+                    {
+                        ShowAlternate(true);
+                        ClearAlternate();
+                    }
+                }
+                else
+                {
+                    if (IsAlternate)
+                    {
+                        ClearAlternate();
+                        ShowAlternate(false);
+                    }
+                    RestoreCursor();
                 }
                 break;
             case 1000:
@@ -1137,29 +1303,38 @@ public sealed class TerminalScreen
         }
     }
 
-    private void Alternate(bool on, bool clear)
+    /// <summary>The alternate screen shown, or the main one again; a switch to the screen shown changes nothing. The
+    /// alternate comes up with the whole screen its scroll region, and the main one comes back with its own.</summary>
+    private void ShowAlternate(bool on)
     {
+        if (on == IsAlternate)
+        {
+            return;
+        }
         if (on)
         {
-            if (!IsAlternate)
-            {
-                // A program coming to the alternate screen asks for its keys afresh, whatever one left there asked.
-                alternateKeyboard.Clear();
-            }
+            // A program coming to the alternate screen asks for its keys afresh, whatever one left there asked.
+            alternateKeyboard.Clear();
             alternate ??= NewLines(Rows);
-            if (clear)
-            {
-                alternate = NewLines(Rows);
-            }
+            mainMargins = (top, bottom);
             Lines = alternate;
+            (top, bottom) = (0, Rows - 1);
         }
         else
         {
             Lines = main;
+            (top, bottom) = mainMargins;
         }
-        top = 0;
-        bottom = Rows - 1;
         wrapPending = false;
+    }
+
+    /// <summary>The alternate screen erased, as the erase of a whole screen does: its rows blank in the background set.</summary>
+    private void ClearAlternate()
+    {
+        foreach (TerminalLine line in alternate!)
+        {
+            line.Reuse(Columns, Erasing);
+        }
     }
 
     /// <summary>An OSC's text read where it was kept: a string is made only for a title or a folder that is new.</summary>
@@ -1182,6 +1357,10 @@ public sealed class TerminalScreen
             ReadOnlySpan<char> address = split < 0 ? [] : value[(split + 1)..];
             hyperlink = address.IsEmpty ? null : address.SequenceEqual(hyperlink) ? hyperlink : address.ToString();
         }
+        else if (code is "133" && !value.IsEmpty && !IsAlternate)
+        {
+            Mark(value[0], value[1..]);
+        }
         else if (code is "7" && !value.SequenceEqual(place))
         {
             place = value.ToString();
@@ -1192,10 +1371,42 @@ public sealed class TerminalScreen
         }
     }
 
+    /// <summary>A shell's mark (OSC 133): A a prompt begins at the cursor's line, C its command runs, D it ended with the
+    /// status after it (0 where none is given). A second A on a prompt's line before its command ran is the same prompt, and
+    /// a second D for one command, or one for a command never marked as run, is passed over.</summary>
+    private void Mark(char kind, ReadOnlySpan<char> rest)
+    {
+        long line = ScreenTop + CursorRow;
+        switch (kind)
+        {
+            case 'A':
+                if (Command is not { Ran: false, Status: null } same || same.Prompt != line)
+                {
+                    CommandBefore = Command;
+                    Command = new ShellCommand(line);
+                }
+                break;
+            case 'C':
+                Command ??= new ShellCommand(line);
+                Command.Ran = true;
+                MarksRuns = true;
+                break;
+            case 'D' when Command is { Ran: true, Status: null } ended:
+                ReadOnlySpan<char> status = rest.StartsWith(";") ? rest[1..] : [];
+                int end = status.IndexOf(';');
+                ended.Status = int.TryParse(end < 0 ? status : status[..end], System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out int code) ? code : 0;
+                CommandEnded?.Invoke(ended);
+                break;
+        }
+    }
+
+    /// <summary>The cursor put at a row and column, within the scroll region in origin mode. A move <paramref
+    /// name="clampToRegion"/> (CUU, CUD, CNL, CPL) up stops at the region's top unless it starts above it, and one down
+    /// at its bottom unless it starts below it.</summary>
     private void MoveTo(int row, int column, bool clampToRegion = false)
     {
-        int low = originMode || (clampToRegion && CursorRow >= top && CursorRow <= bottom) ? top : 0;
-        int high = originMode || (clampToRegion && CursorRow >= top && CursorRow <= bottom) ? bottom : Rows - 1;
+        int low = originMode || (clampToRegion && CursorRow >= top) ? top : 0;
+        int high = originMode || (clampToRegion && CursorRow <= bottom) ? bottom : Rows - 1;
         CursorRow = Math.Clamp(row, low, high);
         CursorColumn = Math.Clamp(column, 0, Columns - 1);
         wrapPending = false;
@@ -1223,7 +1434,7 @@ public sealed class TerminalScreen
         switch (how)
         {
             case 0:
-                Lines[CursorRow].Clear(column, Columns, Erasing);
+                Erase(Lines[CursorRow], column, Columns);
                 for (int r = CursorRow + 1; r < Rows; r++)
                 {
                     Lines[r] = new TerminalLine(Columns, Erasing);
@@ -1234,7 +1445,7 @@ public sealed class TerminalScreen
                 {
                     Lines[r] = new TerminalLine(Columns, Erasing);
                 }
-                Lines[CursorRow].Clear(0, column + 1, Erasing);
+                Erase(Lines[CursorRow], 0, column + 1);
                 break;
             case 2:
                 for (int r = 0; r < Rows; r++)
@@ -1256,11 +1467,11 @@ public sealed class TerminalScreen
         switch (how)
         {
             case 0:
-                line.Clear(column, Columns, Erasing);
+                Erase(line, column, Columns);
                 line.Wrapped = false;
                 break;
             case 1:
-                line.Clear(0, column + 1, Erasing);
+                Erase(line, 0, column + 1);
                 break;
             case 2:
                 line.Clear(0, Columns, Erasing);
@@ -1308,7 +1519,7 @@ public sealed class TerminalScreen
         int column = Math.Min(CursorColumn, Columns - 1);
         Cell[] cells = Lines[CursorRow].Writing();
         count = Math.Min(count, Columns - column);
-        Array.Copy(cells, column, cells, column + count, Columns - column - count);
+        PushRight(cells, column, count, typed: false);
         Lines[CursorRow].Clear(column, column + count, Erasing);
         wrapPending = false;
     }
@@ -1318,14 +1529,35 @@ public sealed class TerminalScreen
         int column = Math.Min(CursorColumn, Columns - 1);
         Cell[] cells = Lines[CursorRow].Writing();
         count = Math.Min(count, Columns - column);
+        // A wide character the deletion splits goes whole: a first half left before it, or a second half after it.
+        if (column > 0 && cells[column].Width == 0)
+        {
+            cells[column - 1] = Cell.Blank(Erasing);
+        }
+        if (column + count < Columns && cells[column + count].Width == 0)
+        {
+            cells[column + count] = Cell.Blank(Erasing);
+        }
         Array.Copy(cells, column + count, cells, column, Columns - column - count);
         Lines[CursorRow].Clear(Columns - count, Columns, Erasing);
         wrapPending = false;
     }
 
-    private void SaveCursor() => saved = Capture();
+    /// <summary>DECSC: the cursor saved for the screen shown.</summary>
+    private void SaveCursor()
+    {
+        if (IsAlternate)
+        {
+            savedAlternate = Capture();
+        }
+        else
+        {
+            savedMain = Capture();
+        }
+    }
 
-    private void RestoreCursor() => Restore(saved);
+    /// <summary>DECRC: the cursor the screen shown saved, or, with none saved, home in the default colours.</summary>
+    private void RestoreCursor() => Restore(IsAlternate ? savedAlternate : savedMain);
 
     private Saved Capture() => new(CursorRow, CursorColumn, style, originMode, wrapPending, lineDrawing);
 
@@ -1352,7 +1584,14 @@ public sealed class TerminalScreen
         bottom = Rows - 1;
         style = CellStyle.Plain;
         lineDrawing = false;
-        saved = default;
+        if (IsAlternate)
+        {
+            savedAlternate = Saved.Unsaved;
+        }
+        else
+        {
+            savedMain = Saved.Unsaved;
+        }
     }
 
     private void Reset()
@@ -1362,6 +1601,9 @@ public sealed class TerminalScreen
         main = NewLines(Rows);
         alternate = null;
         Lines = main;
+        (savedMain, savedAlternate, mainMargins) = (Saved.Unsaved, Saved.Unsaved, (top, bottom));
+        NewLineMode = false;
+        repeatable = false;
         CursorRow = 0;
         CursorColumn = 0;
         wrapPending = false;
@@ -1403,7 +1645,11 @@ public sealed class TerminalScreen
         0x03C0, 0x2260, 0x00A3, 0x00B7,
     ];
 
-    private readonly record struct Saved(int Row, int Column, CellStyle Style, bool Origin, bool WrapPending, bool LineDrawing);
+    private readonly record struct Saved(int Row, int Column, CellStyle Style, bool Origin, bool WrapPending, bool LineDrawing)
+    {
+        /// <summary>What a restore with nothing saved takes: home, the default colours, origin mode off, ASCII.</summary>
+        public static readonly Saved Unsaved = new(0, 0, CellStyle.Plain, false, false, false);
+    }
 
     /// <summary>A screen's kitty keyboard flags: those set with nothing pushed, under at most <see cref="Most"/> pushed
     /// over them, a push past which drops the oldest; a pop that empties the stack resets every flag.</summary>
@@ -1460,4 +1706,18 @@ public sealed class TerminalScreen
             entries[0] = 0;
         }
     }
+}
+
+/// <summary>A command as the shell marks it (OSC 133): the line its prompt began on, whether the shell said it ran, whether
+/// Enter went to the shell at it, and how it ended once it did.</summary>
+public sealed class ShellCommand(long prompt)
+{
+    public long Prompt { get; } = prompt;
+
+    public bool Ran { get; internal set; }
+
+    public bool Entered { get; internal set; }
+
+    /// <summary>Its exit status, once the shell said it ended; null before.</summary>
+    public int? Status { get; internal set; }
 }

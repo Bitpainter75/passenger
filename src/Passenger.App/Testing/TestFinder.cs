@@ -271,7 +271,7 @@ public sealed class TestFinder
     {
         UiThread.Check();
         // GUT come to a Godot project, or gone from one, makes it a test project, or no longer one.
-        if (changes.Paths.Any(path => godotFolders.Any(folder => PathNames.IsUnder(path, Path.Combine(folder, "addons")))
+        if (changes.Paths.Any(path => godotFolders.Any(folder => PathNames.IsUnder(path, Path.Combine(folder, GodotResPaths.AddonsFolder)))
             && godotFolders.Any(folder => GutScripts.Carried(folder) != Projects.Any(p => p.IsScriptGame && PathNames.Same(p.Folder, folder)))))
         {
             Scan(Folder, every, godotFolders);
@@ -374,7 +374,7 @@ public sealed class TestFinder
 
     /// <summary>The C# files a project compiles from outside its folder (a shared project's, a linked file), as evaluated.</summary>
     public static IEnumerable<string> Elsewhere(ProjectModel project) => (project.Evaluated?.Items ?? [])
-        .Where(i => i.Type == "Compile" && i.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && !PathNames.Within(i.Path, project.Folder))
+        .Where(i => i.Type == MSBuildNames.Compile && i.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && !PathNames.Within(i.Path, project.Folder))
         .Select(i => i.Path);
 
     /// <summary>Whether a method the tree shows is one of these projects' (<see cref="ProjectsOf"/> a file), or they are
@@ -443,7 +443,7 @@ public sealed class TestFinder
                 if (timed && latest.Count > 0)
                 {
                     int tests = latest.Sum(p => told.TryGetValue(p.Path, out ToldTests was) ? was.Tests.Tests.Count : 0);
-                    IdeErrors.Write($"Unit tests: {tests} found in the code of {Core.Plural.Of(latest.Count, "test project")} in {Durations.Said(Stopwatch.GetElapsedTime(began))}, "
+                    IdeErrors.Write($"Unit tests: {Numbers.Said(tests)} found in the code of {Core.Plural.Of(latest.Count, "test project")} in {Durations.Said(Stopwatch.GetElapsedTime(began))}, "
                         + $"{Core.Plural.Of(Parsed - parsedBefore, "file")} parsed");
                 }
             }

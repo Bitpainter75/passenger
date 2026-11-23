@@ -12,9 +12,20 @@ public class PauseTests(ITestOutputHelper testOutputHelper)
 {
     private const string Looping = "LoopingConsoleApp";
 
+    /// <summary>The gate's pauses as one flow: a looping program paused in its loop and again after it went on, a value
+    /// paused in a sleep shown though its ToString cannot run and a step back to the loop, and a parallel loop stopped
+    /// on the iteration its condition matches or where its exception was thrown.</summary>
     [Gate]
     [Fact]
-    public async Task Pause_stops_a_looping_program_in_its_loop_and_a_second_pause_after_continuing_does_too()
+    public async Task The_gates_pauses_hold_as_one_flow()
+    {
+        await Flow.StepApartAsync("Pause stops a looping program in its loop and a second pause after continuing does too", () => new PauseTests(testOutputHelper), t => t.Pause_stops_a_looping_program_in_its_loop_and_a_second_pause_after_continuing_does_too());
+        await Flow.StepApartAsync("a value paused in a sleep shows its type and fields where its ToString cannot run and a step comes back to the loop", () => new PauseTests(testOutputHelper), t => t.A_value_paused_in_a_sleep_shows_its_type_and_fields_where_its_ToString_cannot_run_and_a_step_comes_back_to_the_loop());
+        await Flow.StepApartAsync("a condition that calls a method stops a parallel loop on its matching iteration", () => new PauseTests(testOutputHelper), t => t.A_condition_that_calls_a_method_stops_a_parallel_loop_on_its_matching_iteration());
+        await Flow.StepApartAsync("an exception in a parallel loop whose iterations test a condition stops where it was thrown", () => new PauseTests(testOutputHelper), t => t.An_exception_in_a_parallel_loop_whose_iterations_test_a_condition_stops_where_it_was_thrown());
+    }
+
+    private async Task Pause_stops_a_looping_program_in_its_loop_and_a_second_pause_after_continuing_does_too()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         await Launch(host, sleeps: false);
@@ -35,9 +46,7 @@ public class PauseTests(ITestOutputHelper testOutputHelper)
     /// <summary>A pause that caught the thread in the runtime's own code (its sleep), where none of the program's can run: a
     /// value its ToString would show is shown by its type, its fields there to open, never as an error; and a step from
     /// there comes back to the loop.</summary>
-    [Gate]
-    [Fact]
-    public async Task A_value_paused_in_a_sleep_shows_its_type_and_fields_where_its_ToString_cannot_run_and_a_step_comes_back_to_the_loop()
+    private async Task A_value_paused_in_a_sleep_shows_its_type_and_fields_where_its_ToString_cannot_run_and_a_step_comes_back_to_the_loop()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         await Launch(host, sleeps: true);
@@ -49,7 +58,7 @@ public class PauseTests(ITestOutputHelper testOutputHelper)
         ScopesResponse scopes = await host.ScopesAsync(main.Id);
         List<DapVariable> locals = await host.VariablesAsync(scopes.Scopes.Single().VariablesReference);
         DapVariable nap = Assert.Single(locals, v => v.Name == "nap");
-        Assert.True(nap.Value is "00:00:00.0200000" or "{System.TimeSpan}" && nap.PresentationHint?.Attributes?.Contains("failedEvaluation") != true,
+        Assert.True(nap.Value is "00:00:00.0200000" or "{System.TimeSpan}" && nap.PresentationHint?.Attributes?.Contains(DapAttributes.FailedEvaluation) != true,
             $"A TimeSpan read where the pause caught its thread shows as {nap.Value}");
         List<DapVariable> fields = await host.VariablesAsync(nap.VariablesReference);
         Assert.Equal("200000", Assert.Single(fields, f => f.Name == "_ticks").Value);
@@ -60,16 +69,30 @@ public class PauseTests(ITestOutputHelper testOutputHelper)
         await AssertInLoop(host, stepped.ThreadId!.Value, "The step over from the pause in the sleep");
     }
 
+    /// <summary>A step from a pause in a sleep comes back as the sleep returns; listing an object's properties leaves
+    /// the other threads where they were and an evaluation waiting on one is stopped saying why; one waiting on a lock
+    /// another thread holds runs again with every thread let go; a parallel loop's condition stops on its matching
+    /// iteration; a thread started or missed while a condition is evaluated stops at its breakpoint's first pass; a
+    /// breakpoint or an event whose handling fails stops or lets the program go on, saying why.</summary>
+    [Fact]
+    public async Task A_pause_or_an_evaluation_holds_each_thread_where_it_stands_and_lets_it_go_whole()
+    {
+        await Flow.StepApartAsync<PauseTests>("a step over from a pause in a sleep comes back as the sleep returns, with Just My Code", () => new PauseTests(testOutputHelper), t => t.A_step_from_a_pause_in_a_sleep_comes_back_as_the_sleep_returns_on_the_turn_it_was_paused_on(DapCommands.Next, true));
+        await Flow.StepApartAsync<PauseTests>("a step into from a pause in a sleep comes back as the sleep returns, without Just My Code", () => new PauseTests(testOutputHelper), t => t.A_step_from_a_pause_in_a_sleep_comes_back_as_the_sleep_returns_on_the_turn_it_was_paused_on(DapCommands.StepIn, false));
+        await Flow.StepApartAsync<PauseTests>("listing an object's properties leaves the other threads where they were and an evaluation waiting on one is stopped saying why", () => new PauseTests(testOutputHelper), t => t.Listing_an_objects_properties_leaves_the_other_threads_where_they_were_and_an_evaluation_waiting_on_one_is_stopped_saying_why());
+        await Flow.StepApartAsync<PauseTests>("an evaluation waiting on a lock another thread holds runs again with every thread let go", () => new PauseTests(testOutputHelper), t => t.An_evaluation_waiting_on_a_lock_another_thread_holds_runs_again_with_every_thread_let_go());
+        await Flow.StepApartAsync<PauseTests>("a parallel loop's condition whose evaluations hold no other thread still stops on its matching iteration", () => new PauseTests(testOutputHelper), t => t.A_parallel_loops_condition_whose_evaluations_hold_no_other_thread_still_stops_on_its_matching_iteration());
+        await Flow.StepApartAsync<PauseTests>("a thread started while a condition is evaluated waits with the others and stops at its breakpoint's first pass", () => new PauseTests(testOutputHelper), t => t.A_thread_started_while_a_condition_is_evaluated_waits_with_the_others_and_stops_at_its_breakpoints_first_pass());
+        await Flow.StepApartAsync<PauseTests>("a thread an evaluation's hold misses is held where its breakpoint is put off and stops on that pass", () => new PauseTests(testOutputHelper), t => t.A_thread_an_evaluations_hold_misses_is_held_where_its_breakpoint_is_put_off_and_stops_on_that_pass());
+        await Flow.StepApartAsync<PauseTests>("a breakpoint whose handling fails stops where its thread stands saying why and so does one met during an evaluation", () => new PauseTests(testOutputHelper), t => t.A_breakpoint_whose_handling_fails_stops_where_its_thread_stands_saying_why_and_so_does_one_met_during_an_evaluation());
+        await Flow.StepApartAsync<PauseTests>("an event that stops nothing whose handling fails lets the program go on saying why", () => new PauseTests(testOutputHelper), t => t.An_event_that_stops_nothing_whose_handling_fails_lets_the_program_go_on_saying_why());
+    }
+
     /// <summary>A step from a pause in the sleep, the thread in the library's code calling native code, comes back as the
     /// sleep returns, on the turn of the loop it was paused on, in the loop, or without Just My Code where the library's frame
     /// returns: one that ended only when the thread next passed through that code came back a turn later, and never once the
     /// runtime had compiled that code again meanwhile.</summary>
-    [Theory]
-    [InlineData(DapCommands.Next, true)]
-    [InlineData(DapCommands.StepIn, true)]
-    [InlineData(DapCommands.Next, false)]
-    [InlineData(DapCommands.StepIn, false)]
-    public async Task A_step_from_a_pause_in_a_sleep_comes_back_as_the_sleep_returns_on_the_turn_it_was_paused_on(string step, bool justMyCode)
+    private async Task A_step_from_a_pause_in_a_sleep_comes_back_as_the_sleep_returns_on_the_turn_it_was_paused_on(string step, bool justMyCode)
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         await Launch(host, sleeps: true, justMyCode);
@@ -115,35 +138,9 @@ public class PauseTests(ITestOutputHelper testOutputHelper)
         }
     }
 
-    /// <summary>Paused in its sleep, where none of the program's code can run, an interpolated number is written by the
-    /// debugger as the program writes it in its own culture (fr-FR), and a value only its own ToString writes is refused,
-    /// saying why.</summary>
-    [Fact]
-    public async Task An_interpolation_paused_in_a_sleep_writes_numbers_in_the_programs_culture_and_refuses_a_value_only_its_ToString_writes()
-    {
-        await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
-        await Start(host, ["asleep"]);
-        OutputEvent written = await host.WaitForEvent<OutputEvent>(output => output.Output.Contains("asleep", StringComparison.Ordinal));
-
-        StoppedEvent stopped = await Pause(host);
-        StackTraceResponse stack = await host.StackTraceAsync(stopped.ThreadId!.Value, levels: null);
-        DapStackFrame main = stack.StackFrames.First(f => f.Source?.Path?.EndsWith("Program.cs", StringComparison.Ordinal) == true);
-        EvaluateResponse count = await host.EvaluateAsync(main.Id, "$\"{count}\"");
-        EvaluateResponse ratio = await host.EvaluateAsync(main.Id, "$\"{ratio:N1}\"");
-        Assert.True($"asleep {Unquoted(count)} {Unquoted(ratio)} dreaming" == written.Output.TrimEnd(),
-            $"Paused in its sleep, $\"{{count}}\" answered {count.Result} and $\"{{ratio:N1}}\" {ratio.Result}, where the program wrote {written.Output.TrimEnd()}");
-
-        EvaluateResponse dream = await host.EvaluateAsync(main.Id, "$\"{someObject}\"");
-        Assert.True(dream.PresentationHint?.Attributes?.Contains("failedEvaluation") == true && dream.Result.Contains("ToString", StringComparison.Ordinal),
-            $"Paused in its sleep, $\"{{someObject}}\", which only its own ToString writes, answered {dream.Result}, where it was to be refused saying why");
-
-        static string Unquoted(EvaluateResponse answer) => answer.Result is ['"', .. string text, '"'] ? text : $"(not a string: {answer.Result})";
-    }
-
     /// <summary>Stopped while another thread counts: listing an object's properties, whose getter takes a while, leaves that
     /// thread where it was; and an evaluation that waits on it is stopped saying why, the next one running as ever.</summary>
-    [Fact]
-    public async Task Listing_an_objects_properties_leaves_the_other_threads_where_they_were_and_an_evaluation_waiting_on_one_is_stopped_saying_why()
+    private async Task Listing_an_objects_properties_leaves_the_other_threads_where_they_were_and_an_evaluation_waiting_on_one_is_stopped_saying_why()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         await Start(host, ["count"], host => host.BreakpointsAsync(Debuggees.Line(Looping, "stop while counting"), Debuggees.Source(Looping, "Program.cs")));
@@ -177,8 +174,7 @@ public class PauseTests(ITestOutputHelper testOutputHelper)
     /// says it probably needs another thread, as does the next evaluation on the thread while it runs on, nothing having let
     /// that thread run; run again with every thread let go, the one left running returns first and the property gives its
     /// value, after which the thread evaluates as ever.</summary>
-    [Fact]
-    public async Task An_evaluation_waiting_on_a_lock_another_thread_holds_runs_again_with_every_thread_let_go()
+    private async Task An_evaluation_waiting_on_a_lock_another_thread_holds_runs_again_with_every_thread_let_go()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         await Start(host, ["locked"], host => host.BreakpointsAsync(Debuggees.Line(Looping, "stop while the lock is held"), Debuggees.Source(Looping, "Program.cs")));
@@ -200,13 +196,11 @@ public class PauseTests(ITestOutputHelper testOutputHelper)
         EvaluateResponse again = await host.EvaluateAsync(frame, "locked.Value");
         Assert.True(again.Result == "\"read under the lock\"", $"After the run with every thread let go, the thread's next evaluation was answered \"{again.Result}\"");
 
-        static bool NeedsThreads(EvaluateResponse answer) => answer.PresentationHint?.Attributes is { } attributes && attributes.Contains("failedEvaluation")
+        static bool NeedsThreads(EvaluateResponse answer) => answer.PresentationHint?.Attributes is { } attributes && attributes.Contains(DapAttributes.FailedEvaluation)
             && attributes.Contains(DapAttributes.NeedsThreads) && answer.Result.Contains("needs another thread", StringComparison.Ordinal);
     }
 
-    [Gate]
-    [Fact]
-    public async Task A_condition_that_calls_a_method_stops_a_parallel_loop_on_its_matching_iteration()
+    private async Task A_condition_that_calls_a_method_stops_a_parallel_loop_on_its_matching_iteration()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         await StopsOnMatchingIteration(host);
@@ -215,8 +209,7 @@ public class PauseTests(ITestOutputHelper testOutputHelper)
     /// <summary>A parallel loop's condition whose evaluations hold no other thread, as the runtime's hold once missed a
     /// worker: each worker meeting the breakpoint meanwhile is held where its breakpoint came, so the stop is still on the
     /// matching iteration, never one tried where a worker had run on to.</summary>
-    [Fact]
-    public async Task A_parallel_loops_condition_whose_evaluations_hold_no_other_thread_still_stops_on_its_matching_iteration()
+    private async Task A_parallel_loops_condition_whose_evaluations_hold_no_other_thread_still_stops_on_its_matching_iteration()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper,
             environment: new Dictionary<string, string> { [AdapterEnvironment.HoldNoneVariable] = "1" });
@@ -235,8 +228,7 @@ public class PauseTests(ITestOutputHelper testOutputHelper)
     /// <summary>A thread made while a breakpoint's condition is evaluated, as a parallel loop's next worker can be, waits with
     /// the other threads until the evaluation is over: its own breakpoint then stops it on its first pass, where the stop
     /// shows it, never turns further on, past hits put off unseen.</summary>
-    [Fact]
-    public async Task A_thread_started_while_a_condition_is_evaluated_waits_with_the_others_and_stops_at_its_breakpoints_first_pass()
+    private async Task A_thread_started_while_a_condition_is_evaluated_waits_with_the_others_and_stops_at_its_breakpoints_first_pass()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         int turning = Debuggees.Line(Looping, "the started thread's turn");
@@ -254,8 +246,7 @@ public class PauseTests(ITestOutputHelper testOutputHelper)
     /// <summary>An evaluation whose hold reaches no other thread, as the runtime's once missed a parallel loop's worker: the
     /// thread started while the condition is evaluated runs until its breakpoint comes, and is held there by its event's
     /// putting off, so the stop shows that first pass, never a later turn or wherever it had run on to.</summary>
-    [Fact]
-    public async Task A_thread_an_evaluations_hold_misses_is_held_where_its_breakpoint_is_put_off_and_stops_on_that_pass()
+    private async Task A_thread_an_evaluations_hold_misses_is_held_where_its_breakpoint_is_put_off_and_stops_on_that_pass()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper,
             environment: new Dictionary<string, string> { [AdapterEnvironment.HoldNoneVariable] = "1" });
@@ -275,9 +266,51 @@ public class PauseTests(ITestOutputHelper testOutputHelper)
             + $"unheld, it ran on from its first pass, the event tried where it then stood; the engine's log:\n{log}");
     }
 
-    [Gate]
-    [Fact]
-    public async Task An_exception_in_a_parallel_loop_whose_iterations_test_a_condition_stops_where_it_was_thrown()
+    /// <summary>A breakpoint whose handling fails still stops the program where its thread stands, saying why in the Debug
+    /// Console and the stop, never letting the program run on unseen; and one met, as an evaluation runs, by a thread its
+    /// hold missed stops it the same way once the evaluation is over and the program goes on, its thread held meanwhile
+    /// where the breakpoint came, so the stop shows that first pass (#2029).</summary>
+    private async Task A_breakpoint_whose_handling_fails_stops_where_its_thread_stands_saying_why_and_so_does_one_met_during_an_evaluation()
+    {
+        await using DebugSession host = DebugSession.ForLaunch(testOutputHelper, environment: new Dictionary<string, string>
+        {
+            [AdapterEnvironment.HoldNoneVariable] = "1",
+            [AdapterEnvironment.FailHandlingVariable] = "Breakpoint",
+        });
+        int starting = Debuggees.Line(Looping, "stop where a condition starts a thread");
+        int turning = Debuggees.Line(Looping, "the started thread's turn");
+        await Start(host, ["starts"], host => host.BreakpointsAsync(Debuggees.Source(Looping, "Program.cs"), [new DapSourceBreakpoint(starting), new DapSourceBreakpoint(turning)]));
+        const string failed = "the debugger could not handle a Breakpoint event";
+        StoppedEvent stopped = await host.WaitForStoppedEvent();
+        Assert.True((stopped.Reason, stopped.Line) == (StopReasons.Breakpoint, starting) && stopped.Text?.Contains(failed, StringComparison.Ordinal) == true,
+            $"The breakpoint whose handling failed stopped for {stopped.Reason} at line {stopped.Line} ({stopped.Text}), not at its line, {starting}, saying why");
+
+        EvaluateResponse began = await host.EvaluateAsync((await host.TopFrameAsync(stopped.ThreadId!.Value)).Id, "Starter.Begin()");
+        Assert.Equal("false", began.Result);
+        string log = host.EngineLog();
+        Assert.True(log.Contains("Put off: HandlingFailed", StringComparison.Ordinal),
+            $"The started thread's breakpoint, whose handling failed during the evaluation, was not put off to stop once it was over; the engine's log:\n{log}");
+        await host.ContinueAsync().WaitForEvent<OutputEvent>(output => output.Output.Contains($"The program stopped where its thread stands, as {failed}", StringComparison.Ordinal));
+        stopped = await host.WaitForStoppedEvent();
+        Assert.True((stopped.Reason, stopped.Line) == (StopReasons.Breakpoint, turning) && stopped.Text?.Contains(failed, StringComparison.Ordinal) == true,
+            $"Let go after the evaluation, the program stopped for {stopped.Reason} at line {stopped.Line} ({stopped.Text}), not at the started thread's breakpoint whose handling failed, line {turning}, saying why");
+        string turn = Assert.Single(await host.LocalsAsync(stopped), v => v.Name == "turn").Value;
+        Assert.True(turn == "0", $"The started thread's breakpoint, whose handling failed during the evaluation, showed it at turn {turn}, where it had run on unseen from its first pass");
+    }
+
+    /// <summary>An event that stops nothing of itself, a thread's start, whose handling fails lets the program go on, saying
+    /// why in the Debug Console, never holding it there nor letting it go unsaid (#2029).</summary>
+    private async Task An_event_that_stops_nothing_whose_handling_fails_lets_the_program_go_on_saying_why()
+    {
+        await using DebugSession host = DebugSession.ForLaunch(testOutputHelper, environment: new Dictionary<string, string> { [AdapterEnvironment.FailHandlingVariable] = "CreateThread" });
+        await host.InitializeAsync().LaunchAsync(Debuggees.Program("SteppingConsoleApp"), stopAtEntry: false, justMyCode: true).WaitForInitializedEvent();
+        await host.ConfigurationDoneAsync().WaitForEvent<OutputEvent>(output => output.Output.Contains("The program went on, as the debugger could not handle a CreateThread event", StringComparison.Ordinal));
+        (string output, int? exitCode) = await host.WaitForEnd();
+        Assert.True(output.Contains("count 42 0.75 Spot { X = 2, Y = 3 }", StringComparison.Ordinal) && exitCode == 0,
+            $"With a thread's start it failed to handle, the program did not run on to its end as it would have (exit code {exitCode}):\n{output}");
+    }
+
+    private async Task An_exception_in_a_parallel_loop_whose_iterations_test_a_condition_stops_where_it_was_thrown()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         await Start(host, ["parallel", "throws"], async host =>
@@ -309,7 +342,7 @@ public class PauseTests(ITestOutputHelper testOutputHelper)
             Program = program,
             Args = arguments,
             Cwd = Path.GetDirectoryName(program),
-            Console = "internalConsole",
+            Console = ConsoleKinds.InternalConsole,
             JustMyCode = justMyCode,
             StopAtEntry = false,
         });

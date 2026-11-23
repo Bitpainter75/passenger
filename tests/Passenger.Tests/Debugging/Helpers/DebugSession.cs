@@ -32,6 +32,10 @@ public sealed class DebugSession : IAsyncDisposable
     private readonly string engineLog;
     private readonly bool ownLog;
 
+    /// <summary>Where this session's part of the engine's log begins: a log kept for every session has the earlier ones'
+    /// above it, which a test reading what its own session did must not take for its own.</summary>
+    private readonly long engineLogStart;
+
     private DebugSession(ITestOutputHelper output, Process? debuggee, bool terminateDebuggee, string? symbolCache = null, IReadOnlyDictionary<string, string>? environment = null)
     {
         this.debuggee = debuggee;
@@ -45,6 +49,7 @@ public sealed class DebugSession : IAsyncDisposable
         string? kept = Environment.GetEnvironmentVariable(Passenger.Dap.AdapterEnvironment.EngineLogVariable) is { Length: > 0 } named ? named : null;
         ownLog = kept is null;
         engineLog = kept ?? Path.Combine(TestRun.Root, $"engine-{Guid.NewGuid():N}.log");
+        engineLogStart = kept is not null && File.Exists(kept) ? new FileInfo(kept).Length : 0;
         // The symbols it decompiles go where the run's IDE keeps them (its state folder's), unless a test names a folder.
         string symbols = symbolCache ?? Passenger.App.Debugging.DebugSession.SymbolCache;
         List<string> arguments = [AdapterFlags.Interpreter, AdapterFlags.EngineLogging + engineLog, AdapterFlags.SymbolCache + symbols];
@@ -199,12 +204,68 @@ public sealed class DebugSession : IAsyncDisposable
     /// <summary>Whether the adapter has ended within the time given (scaled), its input still open.</summary>
     public bool Ended(TimeSpan within) => adapter.WaitForExit(within.Scaled());
 
-    /// <summary>The engine's own log as written so far.</summary>
+    /// <summary>Whether the engine is decompiling an assembly's symbols, by its log: begun and not yet said to have made
+    /// them or none. A stop in code without symbols, Just My Code off, comes only once that ends.</summary>
+    private bool Decompiling()
+    {
+        string log = EngineLog();
+        return Count(log, " for its symbols, off the engine's lock") > Count(log, " made its symbols in ") + Count(log, " made none in ");
+
+        static int Count(string log, string said)
+        {
+            int count = 0;
+            for (int at = log.IndexOf(said, StringComparison.Ordinal); at >= 0; at = log.IndexOf(said, at + said.Length, StringComparison.Ordinal))
+            {
+                count++;
+            }
+            return count;
+        }
+    }
+
+    /// <summary>The time a wait for the adapter's events has, from its start (<see cref="EventLimit"/>), begun again where it
+    /// runs out while the engine decompiles symbols (<see cref="Decompiling"/>), the IDE's work the stop waits for.</summary>
+    private sealed class EventWait(DebugSession session) : IDisposable
+    {
+        private CancellationTokenSource limit = Limited();
+
+        /// <summary>The next event, or null once the wait's time has run out with no decompile under way.</summary>
+        public async Task<(string Name, JsonElement Body)?> NextAsync()
+        {
+            while (true)
+            {
+                try
+                {
+                    return await session.events.Reader.ReadAsync(limit.Token);
+                }
+                catch (OperationCanceledException) when (!TestContext.Current.CancellationToken.IsCancellationRequested)
+                {
+                    if (!session.Decompiling())
+                    {
+                        return null;
+                    }
+                    limit.Dispose();
+                    limit = Limited();
+                }
+            }
+        }
+
+        public void Dispose() => limit.Dispose();
+
+        private static CancellationTokenSource Limited()
+        {
+            CancellationTokenSource made = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            made.CancelAfter(EventLimit);
+            return made;
+        }
+    }
+
+    /// <summary>The engine's own log of this session as written so far.</summary>
     public string EngineLog()
     {
         try
         {
             using FileStream file = new(engineLog, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            file.Seek(Math.Min(engineLogStart, file.Length), SeekOrigin.Begin);
             using StreamReader reader = new(file);
             return reader.ReadToEnd();
         }
@@ -270,8 +331,10 @@ public sealed class DebugSession : IAsyncDisposable
         {
             DapStackFrame top = await TopFrameAsync(stop.ThreadId!.Value);
             ScopesResponse scopes = await ScopesAsync(top.Id);
-            Assert.True(scopes.Scopes.Count == 1,
-                $"The stopped thread's top frame, {top.Name} at line {top.Line}, has {scopes.Scopes.Count} scopes, so Variables shows it nothing. {Heard()}");
+            if (scopes.Scopes.Count != 1)
+            {
+                Assert.Fail($"The stopped thread's top frame, {top.Name} at line {top.Line}, has {scopes.Scopes.Count} scopes, so Variables shows it nothing. {Heard()}");
+            }
             return await VariablesAsync(scopes.Scopes[0].VariablesReference);
         }
         catch (DapException failed)
@@ -444,20 +507,12 @@ public sealed class DebugSession : IAsyncDisposable
     /// meanwhile: for a step after which the program is to run on to its end.</summary>
     public async Task<(StoppedEvent? Stop, string Output)> WaitForStopOrEnd()
     {
-        using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        limit.CancelAfter(EventLimit);
+        using EventWait wait = new(this);
         StringBuilder output = new();
         while (true)
         {
-            (string Name, JsonElement Body) next;
-            try
-            {
-                next = await events.Reader.ReadAsync(limit.Token);
-            }
-            catch (OperationCanceledException) when (!TestContext.Current.CancellationToken.IsCancellationRequested)
-            {
-                throw new TimeoutException($"Neither a stop nor the session's end came in {EventLimit.TotalSeconds:0} s. {Heard()}");
-            }
+            (string Name, JsonElement Body) next = await wait.NextAsync()
+                ?? throw new TimeoutException($"Neither a stop nor the session's end came in {EventLimit.TotalSeconds:0} s. {Heard()}");
             if (next.Name == DapEvents.Terminated)
             {
                 return (null, output.ToString());
@@ -477,21 +532,13 @@ public sealed class DebugSession : IAsyncDisposable
     /// from the events to the session's end.</summary>
     public async Task<(string Output, int? ExitCode)> WaitForEnd()
     {
-        using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        limit.CancelAfter(EventLimit);
+        using EventWait wait = new(this);
         StringBuilder output = new();
         int? exitCode = null;
         while (true)
         {
-            (string Name, JsonElement Body) next;
-            try
-            {
-                next = await events.Reader.ReadAsync(limit.Token);
-            }
-            catch (OperationCanceledException) when (!TestContext.Current.CancellationToken.IsCancellationRequested)
-            {
-                throw new TimeoutException($"The session had not ended after {EventLimit.TotalSeconds:0} s. {Heard()}");
-            }
+            (string Name, JsonElement Body) next = await wait.NextAsync()
+                ?? throw new TimeoutException($"The session had not ended after {EventLimit.TotalSeconds:0} s. {Heard()}");
             if (next.Name == DapEvents.Terminated)
             {
                 return (output.ToString(), exitCode);
@@ -537,19 +584,11 @@ public sealed class DebugSession : IAsyncDisposable
             : typeof(T) == typeof(BreakpointEvent) ? DapEvents.Breakpoint
             : typeof(T) == typeof(OutputEvent) ? DapEvents.Output
             : throw new ArgumentException($"Only stops, breakpoint changes and output are queued, not {typeof(T).Name}");
-        using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        limit.CancelAfter(EventLimit);
+        using EventWait wait = new(this);
         while (true)
         {
-            (string Name, JsonElement Body) next;
-            try
-            {
-                next = await events.Reader.ReadAsync(limit.Token);
-            }
-            catch (OperationCanceledException) when (!TestContext.Current.CancellationToken.IsCancellationRequested)
-            {
-                throw new TimeoutException($"No {name} event came in {EventLimit.TotalSeconds:0} s. {Heard()}");
-            }
+            (string Name, JsonElement Body) next = await wait.NextAsync()
+                ?? throw new TimeoutException($"No {name} event came in {EventLimit.TotalSeconds:0} s. {Heard()}");
             if (next.Name == DapEvents.Terminated)
             {
                 throw new InvalidOperationException($"The session ended while a {name} event was awaited. {Heard()}");
@@ -627,7 +666,8 @@ public sealed class DebugSession : IAsyncDisposable
         }
     }
 
-    /// <summary>What the adapter said last and how the engine's log ends: the cause of a wait that failed.</summary>
+    /// <summary>What the adapter said last and how the engine's log ends: the cause of a wait that failed. On macOS it samples
+    /// the adapter and the program for a second each (<see cref="Stacks"/>), so only a test that has failed asks for it.</summary>
     private string Heard()
     {
         string said;

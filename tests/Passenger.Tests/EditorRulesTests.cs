@@ -9,6 +9,7 @@ namespace Passenger.Tests;
 /// gutter's other columns through <see cref="IGutterColumn"/> without knowing what they show, so a new kind of mark
 /// changes the IDE and never the editor; and it runs no action of the IDE's, which the IDE's keymap binds.</summary>
 [Collection(Beside.Name)]
+[SameOnEverySystem]
 public sealed partial class EditorRulesTests
 {
     /// <summary>Words of the debugger's, the tests' and version control's, as a name in the editor would carry them.</summary>
@@ -52,6 +53,27 @@ public sealed partial class EditorRulesTests
         Assert.True(found.Count == 0, $"Passenger.Editor names {found.Count} things of the IDE's actions, so a change to one changes the editor: bind the "
             + $"IDE's action in AppActions' keymaps, a gesture of the mouse too, and have the editor report what is pressed:\n{string.Join("\n", found)}");
     }
+
+    /// <summary>What the editor keeps from frame to frame (a shape, a label, a row's hints) it keeps in one FrameKept, which
+    /// lets go of what no row on screen took as each frame begins: no other field of the editor's is a table of values each
+    /// kept with the frame that last took it.</summary>
+    [Fact]
+    public void What_the_editor_keeps_from_frame_to_frame_is_kept_in_one_place()
+    {
+        Assembly editor = typeof(CodeEditor).Assembly;
+        Type home = editor.GetType("Passenger.Editor.FrameKept`2", throwOnError: true)!;
+        const BindingFlags Declared = BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+        List<string> found = [.. editor.GetTypes().Where(type => type != home)
+            .SelectMany(type => type.GetFields(Declared).Where(field => Stamped(field.FieldType)).Select(field => $"{type.FullName}.{field.Name}"))];
+        Assert.True(found.Count == 0, $"Passenger.Editor keeps {found.Count} tables of what a frame drew beside FrameKept, whose own rule of what to let go "
+            + $"can drift from it, keeping what no row on screen draws or dropping what one does: keep them in a FrameKept:\n{string.Join("\n", found)}");
+    }
+
+    /// <summary>Whether a field's type is a dictionary whose values are tuples holding a long, as a frame's number is kept.</summary>
+    private static bool Stamped(Type type) =>
+        type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>)
+        && type.GetGenericArguments()[1] is { IsGenericType: true, Namespace: "System" } value && value.Name.StartsWith("ValueTuple`", StringComparison.Ordinal)
+        && value.GetGenericArguments().Contains(typeof(long));
 
     /// <summary>The editor's declarations and references whose names hold any of these words, each as where it is and the
     /// word.</summary>

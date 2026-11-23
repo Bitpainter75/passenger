@@ -70,7 +70,8 @@ theme, whose own they are.
 A file that leaves out `ButtonHover`, `ButtonPressed` or `AccentPressed`, a button's grounds under the pointer and
 pressed, has them worked out in each variant from its own colours, as Passenger's themes work them out: a plain button's
 are its `Hover` and `Selected` laid over its `Button`, and the default button's pressed goes as far past its `AccentHover`
-as that is from its `Accent`.
+as that is from its `Accent`. One that leaves out `Debug` or `TitleBar.Debug`, the Debug button's own colours, draws it in
+its own `Icon` and `TitleBar.Icon`.
 
 ### Its background picture
 
@@ -387,12 +388,17 @@ until then, and one that cannot be fetched is said, never dropped from your sett
 
 ## Passenger's themes
 
-Passenger carries its own theme, `Tokens.axaml`, and beside it Cubicle in its built-in source
-(`src/Passenger.App/Theme/BuiltIn`): square, dense and calm, a blue accent on cool greys, its own default layout and a
-smaller code size, to show what a theme can set. Harbour, the ten generated themes and the Reef code colour scheme live in
+Passenger carries its own theme, `Tokens.axaml`, and beside it two in its built-in source
+(`src/Passenger.App/Theme/BuiltIn`): Cubicle, square, dense and calm, a blue accent on cool greys, its own default layout
+and a smaller code size, to show what a theme can set; and High Contrast, every word at WCAG AAA's 7:1 on what it is read
+on, marks and edges at 4.5:1 and stronger rules, comments in italics, which Passenger shows in the chosen theme's place,
+dark or light as the system is, while the system asks for high contrast (a Windows contrast theme, macOS's Increase
+contrast, GNOME's High Contrast) and Settings | Accessibility | Use High Contrast while the system asks for it is on;
+Settings | Accessibility | Colours of states lays a colour-blind safe palette (blue, orange, vermilion and purple, after Okabe
+and Ito) over any theme for tests' results, changes and signatures, worked out from its grounds to read as its own do. Harbour, the ten generated themes and the Reef code colour scheme live in
 Passenger's themes repository, whose copy the tests carry in `tests/Passenger.Tests/Themes`. Harbour.json and Reef.json
-are written by hand; Cubicle and the ten are written by `tools/themes.py` from its palettes (`just themes FOLDER`, the ten
-into a checkout of the repository or the tests' copy, Cubicle into the built-in source), so change a palette there rather
+are written by hand; Cubicle, High Contrast and the ten are written by `tools/themes.py` from its palettes (`just themes
+FOLDER`, the ten into a checkout of the repository or the tests' copy, the two into the built-in source), so change a palette there rather
 than its file. The same recipe draws the repository's pictures (`tools/theme-pictures.py`, into its `pictures/`) from plain
 geometry and seeded randomness, and three of the ten, Nocturne, Slate and Nightjar, are laid over VS Code themes by their
 Open VSX ids (Dracula Theme, One Dark Pro and Night Owl), giving their shapes, fonts, pictures and layouts over the base's
@@ -401,4 +407,5 @@ colours; the tests lay those over their own small VS Code theme, Lantern, as the
 Each colour in `Tokens.axaml` says what it is read on: `read:Text` the grounds its words stand on, `read:Mark` those an
 icon, a focus ring or the caret does, and `read:Edge` those a field's or a check box's edge stands between, or `read:None`
 why it needs none (what cannot be used now, a colour a program in the terminal asks for). Passenger's own themes are held
-to WCAG 2.2 AA on those grounds, text at 4.5:1 and marks and edges at 3:1, and `themes.py` writes its themes to them.
+to WCAG 2.2 AA on those grounds, text at 4.5:1 and marks and edges at 3:1, High Contrast's text to AAA's 7:1, and
+`themes.py` writes its themes to them.

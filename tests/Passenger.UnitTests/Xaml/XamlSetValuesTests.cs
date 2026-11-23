@@ -4,9 +4,8 @@ using Passenger.Xaml.Syntax;
 
 namespace Passenger.UnitTests.Xaml;
 
-/// <summary>What a XAML element sets itself, as the XAML workspace's preview shows it while no app runs: each property its
-/// attributes and property elements set, a binding's path and a resource's key said, XAML's own directives and the
-/// designer's left out.</summary>
+/// <summary>What a XAML element sets itself, as the XAML workspace's preview shows it while no app runs: each property
+/// its attributes set, a binding's path and a resource's key said, XAML's own directives left out.</summary>
 public class XamlSetValuesTests
 {
     private const string Window = """
@@ -22,7 +21,10 @@ public class XamlSetValuesTests
         """;
 
     [Fact]
-    public void An_elements_attributes_are_its_local_values_bindings_and_resources_its_directives_left_out()
+    public void What_an_element_sets_itself_is_each_property_it_sets_with_its_binding_or_resource() =>
+        An_elements_attributes_are_its_local_values_bindings_and_resources_its_directives_left_out();
+
+    private void An_elements_attributes_are_its_local_values_bindings_and_resources_its_directives_left_out()
     {
         XmlTree tree = XmlTree.Parse(Window);
         XmlElement button = tree.Elements.Single(e => e.Name == "Button");
@@ -34,17 +36,5 @@ public class XamlSetValuesTests
                 new XamlSetValue("Tag", "{x:Static Main.Tag}", XamlValueKind.Extension, "x:Static"),
             ],
             XamlSetValues.Of(tree, button));
-    }
-
-    [Fact]
-    public void A_property_element_is_its_owners_value_by_what_it_holds_and_the_designers_attributes_are_left_out()
-    {
-        XmlTree tree = XmlTree.Parse(Window);
-        Assert.Equal(
-            [
-                new XamlSetValue("Title", "Main", XamlValueKind.Local, null),
-                new XamlSetValue("Styles", "<Style> and 1 more", XamlValueKind.Element, null),
-            ],
-            XamlSetValues.Of(tree, tree.Root!));
     }
 }

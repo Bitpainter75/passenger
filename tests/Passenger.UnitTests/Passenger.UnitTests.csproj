@@ -22,6 +22,8 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
     <!-- The JSON-RPC conversations Passenger.Lsp's formatter is held to, played in memory. -->
     <PackageReference Include="StreamJsonRpc" />
+    <!-- Reqnroll's argument converter, run in-process as the reference StepConversions is held to. -->
+    <PackageReference Include="Reqnroll" />
     <ProjectReference Include="../../src/Passenger.Core/Passenger.Core.csproj" />
     <ProjectReference Include="../../src/Passenger.Agents/Passenger.Agents.csproj" />
     <ProjectReference Include="../../src/Passenger.Dap/Passenger.Dap.csproj" />
@@ -99,16 +101,17 @@
     <Compile Include="../../src/Passenger.App/Packages/PackageFolders.cs" Link="App/PackageFolders.cs" />
   </ItemGroup>
 
-  <!-- Which projects the Migrations window offers dotnet ef, from the projects and their C# files' text alone, and the names
-       of EF Core's packages it reads, compiled in since their project is the app's. -->
+  <!-- Which projects the Migrations window offers dotnet ef, from the projects and their C# files' text alone, the folders it
+       offers Add Migration, and the names of EF Core's packages it reads, compiled in since their project is the app's. -->
   <ItemGroup>
     <Compile Include="../../src/Passenger.App/Migrations/EfTargets.cs" Link="App/EfTargets.cs" />
+    <Compile Include="../../src/Passenger.App/Migrations/EfOutputFolders.cs" Link="App/EfOutputFolders.cs" />
     <Compile Include="../../src/Passenger.App/Migrations/EfRestore.cs" Link="App/EfRestore.cs" />
   </ItemGroup>
 
   <!-- What a theme file says, read from its JSON alone against a table of tokens, a theme source as its words name it, a
-       VS Code colour theme read and made a Passenger theme, and Open VSX's answers, compiled in since their project is the
-       app's. -->
+       VS Code colour theme read and made a Passenger theme, Open VSX's answers and what a system says of high contrast,
+       compiled in since their project is the app's. -->
   <ItemGroup>
     <Compile Include="../../src/Passenger.App/Theme/ThemeFiles.cs" Link="App/ThemeFiles.cs" />
     <Compile Include="../../src/Passenger.App/Theme/ThemeFiles.Beyond.cs" Link="App/ThemeFiles.Beyond.cs" />
@@ -120,6 +123,7 @@
     <Compile Include="../../src/Passenger.App/Theme/ThemeJson.cs" Link="App/ThemeJson.cs" />
     <Compile Include="../../src/Passenger.App/Theme/ThemeSources.cs" Link="App/ThemeSources.cs" />
     <Compile Include="../../src/Passenger.App/Theme/ThemeColours.cs" Link="App/ThemeColours.cs" />
+    <Compile Include="../../src/Passenger.App/Theme/ContrastAsked.cs" Link="App/ContrastAsked.cs" />
     <Compile Include="../../src/Passenger.App/Theme/ThemePalettes.cs" Link="App/ThemePalettes.cs" />
     <Compile Include="../../src/Passenger.App/Theme/VsCodeThemes.cs" Link="App/VsCodeThemes.cs" />
     <Compile Include="../../src/Passenger.App/Theme/VsCodeScopes.cs" Link="App/VsCodeScopes.cs" />
@@ -274,11 +278,12 @@
     <Compile Include="../../src/Passenger.Languages/CSharp/TypeHints.cs" Link="Languages/TypeHints.cs" />
   </ItemGroup>
 
-  <!-- A C# card's code from the server's parts and the editor's kinds for their token types, compiled in since their
-       project's editor brings Avalonia. -->
+  <!-- A C# card's code from the server's parts and the editor's kinds for their token types, and a card's signature laid
+       out a parameter a line, compiled in since their project's editor brings Avalonia. -->
   <ItemGroup>
     <Compile Include="../../src/Passenger.Languages/CSharp/ServerCode.cs" Link="Languages/ServerCode.cs" />
     <Compile Include="../../src/Passenger.Languages/CSharp/SemanticKinds.cs" Link="Languages/SemanticKinds.cs" />
+    <Compile Include="../../src/Passenger.Languages/SignatureLines.cs" Link="Languages/SignatureLines.cs" />
   </ItemGroup>
 
   <!-- What an MSBuild file's elements say, read from its markup alone, compiled in since its project is the app's. -->
@@ -349,8 +354,8 @@
 
   <!-- How a language server's messages are followed for the protocol trace, from their bytes alone, how a test host's
        conversation is written, whether two of its URIs name one document, from their paths, what an HTML server is
-       sent of Razor's files, against a stand-in, and how a completion answer is read, from its JSON alone, compiled in
-       since their project carries the servers. -->
+       sent of Razor's files, against a stand-in, how a completion answer is read, from its JSON alone, and a text's
+       lines as the server counts them, against Roslyn's own, compiled in since their project carries the servers. -->
   <ItemGroup>
     <Compile Include="../../src/Passenger.Lsp/TracedStream.cs" Link="Lsp/TracedStream.cs" />
     <Compile Include="../../src/Passenger.Lsp/EnvelopeFormatter.cs" Link="Lsp/EnvelopeFormatter.cs" />
@@ -360,7 +365,9 @@
     <Compile Include="../../src/Passenger.Lsp/RazorHtmlCopies.cs" Link="Lsp/RazorHtmlCopies.cs" />
     <Compile Include="../../src/Passenger.Lsp/LanguageServerFailed.cs" Link="Lsp/LanguageServerFailed.cs" />
     <Compile Include="../../src/Passenger.Lsp/Protocol.cs" Link="Lsp/Protocol.cs" />
+    <Compile Include="../../src/Passenger.Lsp/ServerLines.cs" Link="Lsp/ServerLines.cs" />
     <Compile Include="../../src/Passenger.Roslyn.Extension/CompletionPriorities.cs" Link="Lsp/CompletionPriorities.cs" />
+    <Compile Include="../../src/Passenger.Roslyn.Extension/CompletionKinds.cs" Link="Lsp/CompletionKinds.cs" />
     <Compile Include="../../src/Passenger.Roslyn.Extension/CompletionOrder.cs" Link="Lsp/CompletionOrder.cs" />
   </ItemGroup>
 
@@ -611,5 +618,9 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="Passenger.TestTables" />
+    <!-- The ways one test holds many checks, a table of rows and a flow of steps (tests/Shared), linked into both test
+         projects. -->
+    <Compile Include="../Shared/*.cs" LinkBase="Shared" />
   </ItemGroup>
 </Project>

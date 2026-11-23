@@ -123,7 +123,9 @@ public partial class MainWindow
         string said = lines == 0
             ? $"Every line of {document.Name} outside its strings already indents with {kind}"
             : $"Converted the indentation of {Core.Plural.Of(lines, "line")} of {document.Name} to {kind}, {(tabs ? "a tab" : Core.Plural.Of(document.Indentation.Options.Size, "space"))} a level";
-        status.Text = inStrings == 0 ? said : $"{said}; {Core.Plural.Of(inStrings, "line")} inside strings left as {Core.Plural.Agreeing(inStrings, "it is", "they are")}";
+        said = inStrings == 0 ? said : $"{said}; {Core.Plural.Of(inStrings, "line")} inside strings left as {Core.Plural.Agreeing(inStrings, "it is", "they are")}";
+        status.Text = said;
+        ActionWork.Tell(true, said);
     }
 
     private void ChooseIndent(OpenDocument document, IndentOptions? options)
@@ -144,12 +146,7 @@ public partial class MainWindow
         string current = document.EncodingName;
         MenuItem Item(FileEncoding encoding) => MenuChoice.Of(encoding.Name, encoding.Name == current,
             () => IdeErrors.Observe(ChooseEncodingAsync(document, encoding)));
-        MenuItem more = new() { Header = "More" };
-        foreach (FileEncoding encoding in FileEncoding.More)
-        {
-            more.Items.Add(Item(encoding));
-        }
-        List<Control> items = [.. FileEncoding.First.Select(Item), new Separator(), more];
+        List<Control> items = [.. FileEncoding.First.Select(Item), new Separator(), ToolWindows.ListMenus.Sub("More", FileEncoding.More.Select(Item))];
         Open(new ContextMenu { ItemsSource = items }, EncodingButton);
     }
 

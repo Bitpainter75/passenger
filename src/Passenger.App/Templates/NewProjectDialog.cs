@@ -19,6 +19,10 @@ namespace Passenger.App.Templates;
 /// AppHost's name, null for none.</summary>
 public sealed record ProjectTarget(string Solution, string? Folder, IReadOnlyList<string> Projects, string? AppHost = null);
 
+/// <summary>A row of New Project's list: the heading over a group (Recent, All templates), a family, or under Recent one of
+/// a family's Types something was made from lately.</summary>
+public sealed record TemplateRow(string? Heading, TemplateFamily? Family = null, ProjectTemplate? Recent = null);
+
 /// <summary>What Create made, canonical: New Solution's solution (null for Add New Project's), the projects, the folder it
 /// made them in, and how the first is to run, set up once it is open.</summary>
 public sealed record CreatedProjects(string? Solution, IReadOnlyList<string> Projects, string Folder, ProjectSetup Setup)
@@ -69,7 +73,7 @@ public sealed class NewProjectDialog : IdeWindow
     /// runs there and its global.json decides what it can make.</summary>
     private string readFrom;
     private readonly Passenger.Editor.Debounce followFolder;
-    private readonly TextBox search = new() { Classes = { StyleClasses.Search }, PlaceholderText = "Search", Margin = new Thickness(Gaps.Normal, Gaps.Normal, Gaps.Normal, Gaps.Small) };
+    private readonly TextBox search = Passenger.App.SearchBox.Of("Search templates");
     private readonly ListBox list;
     private readonly TextBlock loading;
     private readonly ComboBox typeChooser = new FormDropDown();
@@ -77,36 +81,36 @@ public sealed class NewProjectDialog : IdeWindow
     private readonly TextBlock heading;
     private readonly TextBlock description;
     private readonly TextBlock windowsNote = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, Gaps.Tight, 0, 0), IsVisible = false };
-    private readonly TextBox solutionName = new() { Classes = { StyleClasses.Search } };
-    private readonly TextBox projectName = new() { Classes = { StyleClasses.Search } };
-    private readonly TextBox directory = new() { Classes = { StyleClasses.Search } };
+    private readonly TextBox solutionName = new();
+    private readonly TextBox projectName = new();
+    private readonly TextBox directory = new();
     private readonly CheckBox sameDirectory = new() { Content = "Put solution and project in the same directory" };
     private readonly ComboBox format = new FormDropDown();
 
     /// <summary>Whether what the dialog says is a read of the templates that failed, which a later read takes back.</summary>
     private bool readFailed;
-    private readonly TextBlock formatNote = new() { Classes = { StyleClasses.Muted }, FontSize = 12, TextWrapping = TextWrapping.Wrap, IsVisible = false };
+    private readonly TextBlock formatNote = FormRows.Note();
     private readonly Control projectRow;
     private readonly Control sameRow;
+    private readonly BrowseRow folderRow;
     private readonly Control? formatRow;
-    private readonly TextBlock where = new() { Classes = { StyleClasses.Muted }, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock where = FormRows.Note();
     private readonly ComboBox framework = new FormDropDown();
-    private readonly TextBlock frameworkNote = new() { Classes = { StyleClasses.Muted }, FontSize = 12, TextWrapping = TextWrapping.Wrap };
-    private readonly Control frameworkNoteRow;
+    private readonly TextBlock frameworkNote = FormRows.Note();
 
     /// <summary>The framework the person picked for the template chosen, which a Godot game listed again keeps; null for none.</summary>
     private string? picked;
     private readonly ComboBox language = new FormDropDown();
     private readonly Control languageRow;
     private readonly TemplateOptions options = new();
-    private readonly TextBlock command = new() { Classes = { StyleClasses.Muted }, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock command = FormRows.Note();
     private readonly Control details;
     private readonly Control offer;
     private readonly TextBlock offerText = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly TextBlock offerCommand = new() { Classes = { StyleClasses.Muted }, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock offerCommand = new() { Classes = { StyleClasses.Muted, StyleClasses.Caption }, TextWrapping = TextWrapping.Wrap };
     private readonly Button install = new() { Content = "Install", Classes = { StyleClasses.Primary }, MinWidth = 80, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly OutputView installOutput = new(toolbar: false) { Height = 220, IsVisible = false };
-    private readonly ProgressBar bar = new() { IsIndeterminate = true, Height = 4, MinHeight = 4, Width = 160, VerticalAlignment = VerticalAlignment.Center };
+    private readonly ProgressBar bar = new() { IsIndeterminate = true, Width = 160 };
     private readonly TextBlock progress = new() { Classes = { StyleClasses.Muted }, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
     private readonly StackPanel working;
     private readonly TextBlock problem = new() { TextWrapping = TextWrapping.Wrap, IsVisible = false, VerticalAlignment = VerticalAlignment.Center };
@@ -114,11 +118,10 @@ public sealed class NewProjectDialog : IdeWindow
     /// <summary>Copies the command the problem shown asks the person to run themselves, shown while there is one.</summary>
     private readonly CopyButton copyCommand = new("Copy Command") { IsVisible = false, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Normal, 0, 0, 0) };
     private readonly Button create = DialogFooter.Default("Create");
-    private readonly Button browse = new() { Content = "Browse…", Margin = new Thickness(Gaps.Normal, 0, 0, 0) };
     private readonly ComboBox setup = new FormDropDown();
     private readonly ComboBoxItem[] setups = [.. Enum.GetValues<ProjectSetup>().Select(s => new ComboBoxItem { Content = SetupName(s) })];
-    private readonly TextBlock setupNote = new() { Classes = { StyleClasses.Muted }, FontSize = 12, TextWrapping = TextWrapping.Wrap };
-    private readonly Button installSetup = new() { Classes = { StyleClasses.Link }, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Left, IsVisible = false };
+    private readonly TextBlock setupNote = FormRows.Note();
+    private readonly Button installSetup = new() { Classes = { StyleClasses.Link, StyleClasses.Caption }, HorizontalAlignment = HorizontalAlignment.Left, IsVisible = false };
     private readonly Control setupRow;
 
     /// <summary>The set-up chosen last, in any dialog, which the next service made offers.</summary>
@@ -145,6 +148,9 @@ public sealed class NewProjectDialog : IdeWindow
     private TemplateCatalog? catalog;
     private IReadOnlyList<TemplateFamily> families = [];
     private IReadOnlyList<TemplateFamily> listed = [];
+
+    /// <summary>The list's rows as shown: Recent's and its heading where there are any, then the families listed.</summary>
+    private IReadOnlyList<TemplateRow> rows = [];
     private TemplateFamily? family;
     private ProjectTemplate? template;
 
@@ -183,8 +189,10 @@ public sealed class NewProjectDialog : IdeWindow
     /// <param name="target">The solution a project is added to; null for New Solution.</param>
     /// <param name="containers">Why no container can be set up here, asked off the window's thread; null for no question.</param>
     /// <param name="godot">The Godot Settings names for a Godot game, its command line; null for the one found.</param>
-    public NewProjectDialog(string folder, ProjectTarget? target, Task<string?>? containers = null, string? godot = null)
+    /// <param name="recent">The templates something was made from lately, the newest first (<see cref="Recent"/>).</param>
+    public NewProjectDialog(string folder, ProjectTarget? target, Task<string?>? containers = null, string? godot = null, IReadOnlyList<string>? recent = null)
     {
+        Recent = recent ?? [];
         followFolder = new Passenger.Editor.Debounce(TimeSpan.FromMilliseconds(400), FollowFolderAsync);
         godotFound = BackgroundWork.Run(() => GodotLaunch.Found(godot));
         runtimes = BackgroundWork.Run(() => DotnetMachine.Read().Installation?.Runtimes ?? []);
@@ -193,7 +201,7 @@ public sealed class NewProjectDialog : IdeWindow
         FormRows.Scope(this);
         this.target = target;
         Title = target is null ? "New Solution" : "New Project";
-        Width = 920;
+        Width = DialogWidths.Workspace;
         Height = 640;
         MinWidth = 720;
         MinHeight = 480;
@@ -202,25 +210,27 @@ public sealed class NewProjectDialog : IdeWindow
         list = new ListBox
         {
             Classes = { StyleClasses.Tree },
-            // The chosen family's band as wide as the search field above, its name where the field's text starts.
+            // The chosen family's band as wide as the search field above, its name in line with the field's magnifier.
             Padding = new Thickness(Gaps.Normal, 0),
         };
         ReusedRows.Use(list, Item);
+        ListRow.Headings(list, item => item is TemplateRow { Heading: not null });
         list.SelectionChanged += (_, _) =>
         {
-            if (!setting && list.SelectedItem is TemplateFamily chosen)
+            if (!setting && list.SelectedItem is TemplateRow { Family: { } chosen } row)
             {
-                ChooseFamily(chosen, named.GetValueOrDefault(chosen.Name));
+                ChooseFamily(chosen, row.Recent ?? named.GetValueOrDefault(chosen.Name));
             }
         };
         search.TextChanged += (_, _) => Filter(searched: true);
-        ListKeys.Search(search, list);
+        ListKeys.Search(search, list, choosable: i => rows[i].Heading is null);
         loading = new TextBlock { Classes = { StyleClasses.Muted }, Text = "Loading templates…", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(Gaps.Wide) };
         DockPanel leftPanel = new();
+        search.Margin = new Thickness(Gaps.Normal, Gaps.Normal, Gaps.Normal, Gaps.Small);
         DockPanel.SetDock(search, Dock.Top);
         leftPanel.Children.Add(search);
         leftPanel.Children.Add(new Panel { Children = { list, loading } });
-        Border left = new() { Width = 260, BorderThickness = Hairlines.After, Child = leftPanel };
+        Border left = new() { Width = TemplateList.Width, BorderThickness = Hairlines.After, Child = leftPanel };
         left.Bind(Border.BorderBrushProperty, left.GetResourceObservable(TokenKeys.Divider));
         ReusedRows.Use(typeChooser, TypeItem);
         typeChooser.SelectionChanged += (_, _) =>
@@ -230,13 +240,12 @@ public sealed class NewProjectDialog : IdeWindow
                 ChooseType(chosen);
             }
         };
-        typeRow = Row("Type:", typeChooser);
+        typeRow = Row("Type", typeChooser);
 
-        heading = new TextBlock { FontSize = 16, FontWeight = FontWeight.SemiBold };
+        heading = new TextBlock { Classes = { StyleClasses.PageTitle } };
         description = new TextBlock { Classes = { StyleClasses.Muted }, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, Gaps.Tight, 0, 0) };
         directory.Text = folder;
-        browse.Click += (_, _) => IdeErrors.Observe(BrowseAsync());
-        Grid folderRow = BrowseRow.Of(directory, browse);
+        folderRow = BrowseRow.Of(directory, BrowseAsync);
         solutionName.TextChanged += (_, _) => NameChanged(solution: true);
         projectName.TextChanged += (_, _) => NameChanged(solution: false);
         directory.TextChanged += (_, _) =>
@@ -261,25 +270,25 @@ public sealed class NewProjectDialog : IdeWindow
         language.SelectionChanged += (_, _) => Retarget();
 
         StackPanel fields = new() { Spacing = FormRows.Between };
-        projectRow = Row("Project name:", projectName);
+        projectRow = Row("Project name", projectName);
         sameRow = Row(null, sameDirectory);
         if (target is null)
         {
             format.HorizontalAlignment = HorizontalAlignment.Left;
-            formatRow = Row("Solution format:", new StackPanel { Spacing = Gaps.Small, Children = { format, formatNote } });
-            fields.Children.Add(Row("Solution name:", solutionName));
+            formatNote.IsVisible = false;
+            formatRow = Row("Solution format", format, [formatNote]);
+            fields.Children.Add(Row("Solution name", solutionName));
             fields.Children.Add(projectRow);
-            fields.Children.Add(Row("Solution directory:", folderRow));
+            fields.Children.Add(Row("Solution directory", folderRow, [where]));
             fields.Children.Add(sameRow);
             fields.Children.Add(formatRow);
         }
         else
         {
             fields.Children.Add(projectRow);
-            fields.Children.Add(Row("Project directory:", folderRow));
+            fields.Children.Add(Row("Project directory", folderRow, [where]));
         }
-        fields.Children.Add(Row(null, where));
-        languageRow = Row("Language:", language);
+        languageRow = Row("Language", language);
         setup.ItemsSource = setups;
         setup.SelectionChanged += (_, _) =>
         {
@@ -289,13 +298,12 @@ public sealed class NewProjectDialog : IdeWindow
                 ShowSetup();
             }
         };
-        setupRow = Row("Set up:", setup);
-        frameworkNoteRow = Row(null, frameworkNote);
-        frameworkNoteRow.IsVisible = false;
+        setupRow = Row("Set up", setup);
+        frameworkNote.IsVisible = false;
         details = new StackPanel
         {
             Spacing = FormRows.Between,
-            Children = { Row("Target framework:", framework), frameworkNoteRow, languageRow, options.Panel, setupRow, Row(null, new StackPanel { Spacing = Gaps.Tight, Children = { setupNote, installSetup } }), options.Folded, Row(null, command) },
+            Children = { Row("Target framework", framework, [frameworkNote]), languageRow, options.Panel, setupRow, Row(null, new StackPanel { Spacing = Gaps.Tight, Children = { setupNote, installSetup } }), options.Folded, Row(null, command) },
         };
         options.Changed += ShowCommand;
         install.Click += (_, _) => IdeErrors.Observe(InstallAsync());
@@ -399,6 +407,16 @@ public sealed class NewProjectDialog : IdeWindow
     /// <summary>The families listed, those the search finds.</summary>
     public IReadOnlyList<TemplateFamily> Listed => listed;
 
+    /// <summary>The templates something was made from lately, by the name each is known by (<see cref="KnownBy"/>), the
+    /// newest first: what the list shows under Recent, as the search finds them.</summary>
+    public IReadOnlyList<string> Recent { get; }
+
+    /// <summary>The list's rows as shown, headings and all.</summary>
+    public IReadOnlyList<TemplateRow> Rows => rows;
+
+    /// <summary>The list's row chosen: a family's, or one under Recent; null for none.</summary>
+    public TemplateRow? ChosenRow => list.SelectedItem as TemplateRow;
+
     /// <summary>Every template the dialog offers, family by family: those installed, and the known packages' kinds dotnet
     /// new has not got (<see cref="ProjectTemplate.Pack"/>).</summary>
     public IReadOnlyList<ProjectTemplate> Templates => [.. families.SelectMany(f => f.Types)];
@@ -410,9 +428,13 @@ public sealed class NewProjectDialog : IdeWindow
     public ProjectTemplate? Chosen => template;
 
     /// <summary>The list's row for a family, by its name, for a click on it; null when it is not listed.</summary>
-    public Control? FamilyRow(string name)
+    public Control? FamilyRow(string name) => RowAt(rows.ToList().FindIndex(r => r.Recent is null && r.Family?.Name == name));
+
+    /// <summary>The list's row under Recent for a template, by its name, for a click on it; null when it is not listed.</summary>
+    public Control? RecentRow(string name) => RowAt(rows.ToList().FindIndex(r => r.Recent?.Name == name));
+
+    private Control? RowAt(int at)
     {
-        int at = listed.ToList().FindIndex(f => f.Name == name);
         if (at < 0)
         {
             return null;
@@ -560,7 +582,7 @@ public sealed class NewProjectDialog : IdeWindow
 
     /// <summary>What the dialog says under the framework: a C# Godot game's newest .NET that its Godot builds and runs here,
     /// where older than Passenger's; null where it says nothing.</summary>
-    public string? FrameworkNote => frameworkNoteRow.IsVisible ? frameworkNote.Text : null;
+    public string? FrameworkNote => frameworkNote.IsVisible ? frameworkNote.Text : null;
 
     /// <summary>What Create made, once it closed the dialog; null until then, and when given up.</summary>
     public CreatedProjects? Created { get; private set; }
@@ -1283,8 +1305,9 @@ public sealed class NewProjectDialog : IdeWindow
         Filter(searched: false);
     }
 
-    /// <summary>Lists the families the search finds. A search typed opens the family chosen, or else the first found, on
-    /// the Type it names; a read shown keeps the Type chosen, else its family, else takes the first.</summary>
+    /// <summary>Lists the families the search finds, under Recent the templates made from lately that it finds. A search
+    /// typed opens the family chosen, or else the first row found, on the Type it names; a read shown keeps the Type
+    /// chosen, else its family, else takes the first row, the newest of Recent where it has any.</summary>
     private void Filter(bool searched)
     {
         string[] words = Query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -1303,18 +1326,32 @@ public sealed class NewProjectDialog : IdeWindow
             }
         }
         listed = found;
-        string? key = lastChosen is null ? null : KnownBy(lastChosen);
-        int at = searched || key is null ? -1 : found.FindIndex(f => f.Types.Any(t => KnownBy(t) == key));
-        if (at < 0 && lastChosen is not null)
+        List<TemplateRow> shown = [];
+        if (RecentRows(words) is { Count: > 0 } recent)
         {
-            at = found.FindIndex(f => f.Name == lastChosen.Family);
+            shown.Add(new TemplateRow(RecentHeading));
+            shown.AddRange(recent);
+            shown.Add(new TemplateRow(AllHeading));
         }
-        if (at < 0 && found.Count > 0)
+        int first = shown.Count;
+        shown.AddRange(found.Select(f => new TemplateRow(null, f)));
+        string? key = lastChosen is null ? null : KnownBy(lastChosen);
+        // A read shown keeps a row of Recent chosen as that row, rather than its family's.
+        int at = !searched && key is not null && (list.SelectedItem as TemplateRow)?.Recent is { } recentWas && KnownBy(recentWas) == key
+            ? shown.FindIndex(r => r.Recent is { } type && KnownBy(type) == key)
+            : -1;
+        if (at < 0)
         {
-            at = 0;
+            at = searched || key is null ? -1 : found.FindIndex(f => f.Types.Any(t => KnownBy(t) == key));
+            if (at < 0 && lastChosen is not null)
+            {
+                at = found.FindIndex(f => f.Name == lastChosen.Family);
+            }
+            at = at >= 0 ? first + at : found.Count > 0 ? shown.FindIndex(r => r.Family is not null) : -1;
         }
         setting = true;
-        list.ItemsSource = found;
+        rows = shown;
+        list.ItemsSource = shown;
         list.SelectedIndex = at;
         setting = false;
         if (catalog is not null)
@@ -1327,10 +1364,30 @@ public sealed class NewProjectDialog : IdeWindow
             ChooseFamily(null, null);
             return;
         }
-        TemplateFamily chosen = found[at];
+        TemplateFamily chosen = shown[at].Family!;
         ProjectTemplate? kept = key is null ? null : chosen.Types.FirstOrDefault(t => KnownBy(t) == key);
-        ChooseFamily(chosen, searched ? named.GetValueOrDefault(chosen.Name) ?? kept : kept);
+        ChooseFamily(chosen, shown[at].Recent ?? (searched ? named.GetValueOrDefault(chosen.Name) ?? kept : kept));
         list.ScrollIntoView(at);
+    }
+
+    private const string RecentHeading = "Recent";
+
+    private const string AllHeading = "All templates";
+
+    /// <summary>The rows under Recent: each template made from lately that the dialog offers and the search finds (by its
+    /// family's name or its own names), in its family, the newest first.</summary>
+    private List<TemplateRow> RecentRows(IReadOnlyList<string> words)
+    {
+        List<TemplateRow> found = [];
+        foreach (string key in Recent)
+        {
+            if (families.SelectMany(f => f.Types.Where(t => KnownBy(t) == key).Select(t => new TemplateRow(null, f, t))).FirstOrDefault() is { Family: { } family, Recent: { } type } row
+                && new TemplateFamily(family.Name, [type]).Matches(words, out _))
+            {
+                found.Add(row);
+            }
+        }
+        return found;
     }
 
     /// <summary>A family chosen, on a Type: the one given, else the one last chosen in it, else its first; the chooser
@@ -1356,7 +1413,7 @@ public sealed class NewProjectDialog : IdeWindow
     }
 
     /// <summary>What a Type is known by across reads: its short name, which a package's kind keeps once installed.</summary>
-    private static string KnownBy(ProjectTemplate type) => type.ShortName.ToLowerInvariant();
+    internal static string KnownBy(ProjectTemplate type) => type.ShortName.ToLowerInvariant();
 
     /// <summary>A Type chosen: its names (unless the person typed their own), languages (the one chosen kept where it has
     /// it), frameworks and options, or for one not installed, the offer of its package.</summary>
@@ -1432,7 +1489,7 @@ public sealed class NewProjectDialog : IdeWindow
             : GodotWhyNot() ?? (template.GodotGame && !ScriptGame ? GodotTargets?.WhyNot(Framework) : null);
         windowsNote.IsVisible = windowsNote.Text is not null;
         frameworkNote.Text = GodotDotnetSaid();
-        frameworkNoteRow.IsVisible = frameworkNote.Text is not null;
+        frameworkNote.IsVisible = frameworkNote.Text is not null;
         // A GDScript game is its folder alone: no project to name, nor a solution's format.
         projectRow.IsVisible = !template.IsSolution && !ScriptGame;
         sameRow.IsVisible = target is null && !template.IsSolution && !ScriptGame;
@@ -1462,7 +1519,7 @@ public sealed class NewProjectDialog : IdeWindow
         setup.SelectedIndex = (int)offered;
         setting = was;
         setup.IsEnabled = why is null && creating is null && installing is null;
-        setupRow.Opacity = why is null ? 1 : 0.55;
+        ListRow.Dim(setupRow, why is not null);
         setupNote.Text = why ?? Said(offered) ?? string.Join("; ", ((string?[])[noContainers, noAspire]).OfType<string>());
         setupNote.IsVisible = setupNote.Text.Length > 0;
         installSetup.Content = aspire is null ? null : $"Install {aspire.Id}";
@@ -1473,10 +1530,7 @@ public sealed class NewProjectDialog : IdeWindow
     /// <summary>A set-up greyed with why, said on hover, or offered given null.</summary>
     private void Greyed(ProjectSetup kind, string? why)
     {
-        ComboBoxItem item = setups[(int)kind];
-        item.IsEnabled = why is null;
-        ToolTip.SetTip(item, why);
-        ToolTip.SetShowOnDisabled(item, true);
+        ToolButtons.Grey(setups[(int)kind], why);
     }
 
     /// <summary>The package of Aspire's templates where an Aspire set-up makes its AppHost and ServiceDefaults from them
@@ -1655,7 +1709,7 @@ public sealed class NewProjectDialog : IdeWindow
         install.IsEnabled = !busy;
         installSetup.IsEnabled = !busy;
         list.IsEnabled = !busy;
-        foreach (Control field in (Control[])[search, typeChooser, solutionName, projectName, directory, browse, sameDirectory, format, framework, language, options.Panel, options.Folded, setup])
+        foreach (Control field in (Control[])[search, typeChooser, solutionName, projectName, directory, folderRow.Browse, sameDirectory, format, framework, language, options.Panel, options.Folded, setup])
         {
             field.IsEnabled = !busy;
         }
@@ -1666,20 +1720,36 @@ public sealed class NewProjectDialog : IdeWindow
         }
     }
 
-    /// <summary>A row for whichever family the list hands its container: its name, its Types on hover, and "Not installed"
-    /// for one none of whose Types is, or "Windows only" for one whose every Type's app runs only on Windows.</summary>
+    /// <summary>A row for whichever row the list hands its container: a group's heading; a family's name, its Types on hover,
+    /// and "Not installed" for one none of whose Types is, or "Windows only" for one whose every Type's app runs only on
+    /// Windows; or under Recent a template's own name, marked so for itself.</summary>
     private static Control Item()
     {
         (DockPanel named, TextBlock name, TextBlock mark) = TemplateList.Named();
         Border item = TemplateList.Row(named);
-        return item.Showing<TemplateFamily>(row =>
+        TextBlock heading = ListRow.Heading();
+        Panel shown = new() { Children = { heading, item } };
+        return shown.Showing<TemplateRow>(each =>
         {
-            string types = row.Types.Count > 1 ? $": {string.Join(", ", row.Types.Select(t => t.TypeName))}" : row.Name == row.Types[0].Name ? string.Empty : $": {row.Types[0].Name}";
-            bool windows = row.Types.All(t => t.WindowsOnly is not null);
-            ToolTip.SetTip(item, row.NotInstalled ? $"{row.Name}{types}, from {row.Types[0].Pack!.Named}, which is not installed"
-                : windows ? $"{row.Name}{types}: they build here but run only on Windows" : $"{row.Name}{types}");
-            name.Text = row.Name;
-            Mark(mark, row.NotInstalled ? NotInstalled : windows ? WindowsOnly : null);
+            heading.IsVisible = each.Heading is not null;
+            item.IsVisible = each.Family is not null;
+            heading.Text = each.Heading;
+            if (each is { Family: { } row, Recent: { } type })
+            {
+                ToolTip.SetTip(item, type.Pack is not null ? $"{type.Name}, from {type.Pack.Named}, which is not installed" : $"{row.Name}: {type.Name}");
+                name.Text = type.Name;
+                Mark(mark, type.Pack is not null ? NotInstalled : type.WindowsOnly is not null ? WindowsOnly : null);
+            }
+            else if (each.Family is { } family)
+            {
+                string types = family.Types.Count > 1 ? $": {string.Join(", ", family.Types.Select(t => t.TypeName))}"
+                    : family.Name == family.Types[0].Name ? string.Empty : $": {family.Types[0].Name}";
+                bool windows = family.Types.All(t => t.WindowsOnly is not null);
+                ToolTip.SetTip(item, family.NotInstalled ? $"{family.Name}{types}, from {family.Types[0].Pack!.Named}, which is not installed"
+                    : windows ? $"{family.Name}{types}: they build here but run only on Windows" : $"{family.Name}{types}");
+                name.Text = family.Name;
+                Mark(mark, family.NotInstalled ? NotInstalled : windows ? WindowsOnly : null);
+            }
         });
     }
 
@@ -1715,7 +1785,7 @@ public sealed class NewProjectDialog : IdeWindow
         return rule;
     }
 
-    private static Control Row(string? label, Control editor) => TemplateOptions.Row(label, editor);
+    private static Control Row(string? label, Control editor, IReadOnlyList<TextBlock>? notes = null) => TemplateOptions.Row(label, editor, notes);
 
     private async Task BrowseAsync()
     {

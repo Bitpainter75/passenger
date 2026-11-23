@@ -14,9 +14,53 @@ namespace Passenger.Tests;
 /// Rider's keys: typing help, Enter, several carets, the line commands, comments and the clipboard.</summary>
 public sealed class EditingBehaviourTests
 {
+    /// <summary>Editing, the gate's checks as one flow: carets cloned down the lines type together and undo as one, a
+    /// typed word undoes and redoes in one change, thousands of keys keep an Undo history within its bound, Select Next
+    /// Occurrence takes the word and each copy, three lines joined around a blank one give one line, the comment chords
+    /// add and take away comments, Copy with nothing selected takes the line, and an Option drag chooses a column that
+    /// typing fills.</summary>
     [Gate]
     [AvaloniaFact]
-    public void Carets_cloned_down_the_lines_type_together_and_undo_as_one()
+    public void Carets_undo_selections_and_line_commands_edit_as_a_person_expects()
+    {
+        Flow.StepApart<EditingBehaviourTests>("caret's cloned down the lines type together and undo as one", t => t.Carets_cloned_down_the_lines_type_together_and_undo_as_one());
+        Flow.StepApart<EditingBehaviourTests>("undoing a typed word takes it back in one change and redoing makes it again in one", t => t.Undoing_a_typed_word_takes_it_back_in_one_change_and_redoing_makes_it_again_in_one());
+        Flow.StepApart<EditingBehaviourTests>("thousands of keys keep an undo history within its bound that still undoes their newest thousands of steps", t => t.Thousands_of_keys_keep_an_undo_history_within_its_bound_that_still_undoes_their_newest_thousands_of_steps());
+        Flow.StepApart<EditingBehaviourTests>("select next occurrence picks the word then each copy and typing replaces them all", t => t.Select_next_occurrence_picks_the_word_then_each_copy_and_typing_replaces_them_all());
+        Flow.StepApart<EditingBehaviourTests>("joining three selected lines whose middle one is only spaces gives one line and leaves the next alone", t => t.Joining_three_selected_lines_whose_middle_one_is_only_spaces_gives_one_line_and_leaves_the_next_alone());
+        Flow.StepApart<EditingBehaviourTests>("the comment chords add and remove comments and the toggle undoes itself", t => t.The_comment_chords_add_and_remove_comments_and_the_toggle_undoes_itself());
+        Flow.StepApart<EditingBehaviourTests>("copy with nothing selected takes the line and paste puts it back above", t => t.Copy_with_nothing_selected_takes_the_line_and_paste_puts_it_back_above());
+        Flow.StepApart<EditingBehaviourTests>("option drag selects a column and typing fills every row", t => t.Option_drag_selects_a_column_and_typing_fills_every_row());
+    }
+
+    /// <summary>What is typed is drawn, the gate's checks as one flow: a word being typed keeps its colour before and
+    /// after the reparse, a key draws the editor once, brackets take turns in three colours by depth, a selection from
+    /// a line's start leaves the line above unpainted, and an input method's window opens on the caret's line and
+    /// follows it, press and hold puts the accent chosen at every caret, and a composition moves the text after it
+    /// aside.</summary>
+    [Gate]
+    [AvaloniaFact]
+    public void What_is_typed_is_drawn_once_in_its_colours_and_an_input_method_writes_where_the_caret_is()
+    {
+        Flow.StepApart<EditingBehaviourTests>("a word being typed keeps its colour before the reparse lands and after", t => t.A_word_being_typed_keeps_its_colour_before_the_reparse_lands_and_after());
+        Flow.StepApart<EditingBehaviourTests>("a key draws the editor once and a parse that changes a colour on screen draws it", t => t.A_key_draws_the_editor_once_and_a_parse_that_changes_a_colour_on_screen_draws_it());
+        Flow.StepApart<EditingBehaviourTests>("brackets take turns in three colours by how deeply they nest and a comparison is not one", t => t.Brackets_take_turns_in_three_colours_by_how_deeply_they_nest_and_a_comparison_is_not_one());
+        Flow.StepApart<EditingBehaviourTests>("a selection from the start of a line leaves the line above it unpainted", t => t.A_selection_from_the_start_of_a_line_leaves_the_line_above_it_unpainted());
+        Flow.StepApart<EditingBehaviourTests>("the input method's window opens on the caret's line below a fold and far along a long line and follows the caret", t => t.The_input_methods_window_opens_on_the_carets_line_below_a_fold_and_far_along_a_long_line_and_follows_the_caret());
+        Flow.StepApart<EditingBehaviourTests>("press and hold replaces the letter held with the accent chosen at every caret", t => t.Press_and_hold_replaces_the_letter_held_with_the_accent_chosen_at_every_caret());
+        Flow.StepApart<EditingBehaviourTests>("a composition moves the text after it aside rather than covering it and goes in as typed", t => t.A_composition_moves_the_text_after_it_aside_rather_than_covering_it_and_goes_in_as_typed());
+    }
+
+    /// <summary>Occurrences taken from a caret leave longer names holding the word alone, and a brace typed above the
+    /// one Enter wrote types over it unless a block around lacks its own.</summary>
+    [AvaloniaFact]
+    public void Words_and_braces_typed_go_where_a_person_means()
+    {
+        Flow.StepApart<EditingBehaviourTests>("occurrences of a word taken from a caret leave longer names holding it alone", t => t.Occurrences_of_a_word_taken_from_a_caret_leave_longer_names_holding_it_alone());
+        Flow.StepApart<EditingBehaviourTests>("a brace typed above the one enter wrote types over it unless a block around lacks its own", t => t.A_brace_typed_above_the_one_enter_wrote_types_over_it_unless_a_block_around_lacks_its_own());
+    }
+
+    private void Carets_cloned_down_the_lines_type_together_and_undo_as_one()
     {
         EditorRig rig = new("one\ntwo\nthree");
         rig.Press("control shift DOWN");
@@ -31,9 +75,7 @@ public sealed class EditingBehaviourTests
     /// <summary>A word typed undoes and redoes as one change, so whatever follows the text (the anchors, folds, colours,
     /// the language server) hears of it once rather than once a key; the typing help's closer and the step over it go
     /// with the word.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Undoing_a_typed_word_takes_it_back_in_one_change_and_redoing_makes_it_again_in_one()
+    private void Undoing_a_typed_word_takes_it_back_in_one_change_and_redoing_makes_it_again_in_one()
     {
         EditorRig rig = new("first\n");
         rig.PlaceCaret(5);
@@ -58,9 +100,7 @@ public sealed class EditingBehaviourTests
     /// <summary>Thousands of keys keep an undo history no larger than its bound, however many more are typed: no version
     /// of the text a key made stays held for its undo, and the newest steps, thousands of them, still undo one at a time
     /// back to the text the oldest kept began from and redo to the last.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Thousands_of_keys_keep_an_undo_history_within_its_bound_that_still_undoes_their_newest_thousands_of_steps()
+    private void Thousands_of_keys_keep_an_undo_history_within_its_bound_that_still_undoes_their_newest_thousands_of_steps()
     {
         StringBuilder lines = new();
         for (int i = 0; i < 1500; i++)
@@ -119,9 +159,7 @@ public sealed class EditingBehaviourTests
         Assert.True(rig.Text == initial[..caret] + typed + initial[caret..], "Redoing every step did not give back the text the keys left");
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Select_next_occurrence_picks_the_word_then_each_copy_and_typing_replaces_them_all()
+    private void Select_next_occurrence_picks_the_word_then_each_copy_and_typing_replaces_them_all()
     {
         EditorRig rig = new("total = total + total");
         rig.PlaceCaret(2);
@@ -133,8 +171,7 @@ public sealed class EditingBehaviourTests
         Assert.Equal("sum = sum + sum", rig.Text);
     }
 
-    [AvaloniaFact]
-    public void Occurrences_of_a_word_taken_from_a_caret_leave_longer_names_holding_it_alone()
+    private void Occurrences_of_a_word_taken_from_a_caret_leave_longer_names_holding_it_alone()
     {
         EditorRig rig = new("_value value values value");
         rig.PlaceCaret(9);
@@ -149,9 +186,7 @@ public sealed class EditingBehaviourTests
         Assert.True(rig.Text == "_value sum values sum", $"Select All Occurrences from a caret in amount, typing sum, left {rig.Text}");
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Joining_three_selected_lines_whose_middle_one_is_only_spaces_gives_one_line_and_leaves_the_next_alone()
+    private void Joining_three_selected_lines_whose_middle_one_is_only_spaces_gives_one_line_and_leaves_the_next_alone()
     {
         EditorRig rig = new("        Start();\n        \n        Stop();\n    }");
         rig.PlaceCaret(0);
@@ -165,9 +200,7 @@ public sealed class EditingBehaviourTests
         Assert.Equal("        Start();\n        \n        Stop();\n    }", rig.Text);
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void The_comment_chords_add_and_remove_comments_and_the_toggle_undoes_itself()
+    private void The_comment_chords_add_and_remove_comments_and_the_toggle_undoes_itself()
     {
         EditorRig rig = new("    Run();\n    Stop();");
         rig.Press("meta A");
@@ -182,9 +215,7 @@ public sealed class EditingBehaviourTests
         Assert.Equal("    Run();\n    Stop();", rig.Text);
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Copy_with_nothing_selected_takes_the_line_and_paste_puts_it_back_above()
+    private void Copy_with_nothing_selected_takes_the_line_and_paste_puts_it_back_above()
     {
         EditorRig rig = new("first\nsecond");
         rig.PlaceCaret(8);
@@ -195,9 +226,7 @@ public sealed class EditingBehaviourTests
         Assert.Equal(new TextPosition(2, 2), rig.Editor.CaretPosition);
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Option_drag_selects_a_column_and_typing_fills_every_row()
+    private void Option_drag_selects_a_column_and_typing_fills_every_row()
     {
         EditorRig rig = new("abc\ndef\nghi");
         Point from = rig.Editor.PointOf(1) + new Point(1, 4);
@@ -211,9 +240,7 @@ public sealed class EditingBehaviourTests
         Assert.Equal("aXc\ndXf\ngXi", rig.Text);
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_word_being_typed_keeps_its_colour_before_the_reparse_lands_and_after()
+    private void A_word_being_typed_keeps_its_colour_before_the_reparse_lands_and_after()
     {
         string source = "class Numbers\n{\n    int Twice(int value) => value * 2;\n}\n";
         (Passenger.App.MainWindow window, Passenger.Editor.CodeEditor editor) = OpenCSharp(source);
@@ -232,9 +259,7 @@ public sealed class EditingBehaviourTests
     /// and a parse that changes nothing on screen draws nothing. A parse that does change a colour on screen draws it:
     /// a word typed becomes a keyword. The caret's blink draws the editor too, whenever a key's wait for its work
     /// outlasts 530 ms (a loaded machine's): its frames are not the key's.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_key_draws_the_editor_once_and_a_parse_that_changes_a_colour_on_screen_draws_it()
+    private void A_key_draws_the_editor_once_and_a_parse_that_changes_a_colour_on_screen_draws_it()
     {
         StringBuilder text = new("class Numbers\n{\n");
         for (int i = 0; i < 40; i++)
@@ -264,9 +289,7 @@ public sealed class EditingBehaviourTests
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Brackets_take_turns_in_three_colours_by_how_deeply_they_nest_and_a_comparison_is_not_one()
+    private void Brackets_take_turns_in_three_colours_by_how_deeply_they_nest_and_a_comparison_is_not_one()
     {
         const string source = "class C\n{\n    bool M(List<int> xs)\n    {\n        return Call(xs[0], 1 < 2);\n    }\n}\n";
         (Passenger.App.MainWindow window, Passenger.Editor.CodeEditor editor) = OpenCSharp(source);
@@ -285,9 +308,7 @@ public sealed class EditingBehaviourTests
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_selection_from_the_start_of_a_line_leaves_the_line_above_it_unpainted()
+    private void A_selection_from_the_start_of_a_line_leaves_the_line_above_it_unpainted()
     {
         EditorRig rig = new("first\nsecond\nthird\nfourth\nfifth\n");
         rig.PlaceCaret(rig.Text.IndexOf("second", StringComparison.Ordinal));
@@ -304,9 +325,7 @@ public sealed class EditingBehaviourTests
             $"The line above the selection is {above} past its end, the selection's {selected}, not the editor's {plain}: the selection reaches back over the line break before it");
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void The_input_methods_window_opens_on_the_carets_line_below_a_fold_and_far_along_a_long_line_and_follows_the_caret()
+    private void The_input_methods_window_opens_on_the_carets_line_below_a_fold_and_far_along_a_long_line_and_follows_the_caret()
     {
         StringBuilder text = new();
         for (int i = 0; i < 40; i++)
@@ -356,9 +375,7 @@ public sealed class EditingBehaviourTests
         Assert.True(cursor.X > 0 && cursor.X < rig.Editor.Bounds.Width, $"The input method's window would open at x {cursor.X}, outside the editor's {rig.Editor.Bounds.Width}");
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Press_and_hold_replaces_the_letter_held_with_the_accent_chosen_at_every_caret()
+    private void Press_and_hold_replaces_the_letter_held_with_the_accent_chosen_at_every_caret()
     {
         EditorRig rig = new("caf\ncaf\n");
         rig.PlaceCaret(3);
@@ -375,9 +392,7 @@ public sealed class EditingBehaviourTests
         Assert.All(rig.Editor.Selections.Items, s => Assert.True(s.IsEmpty && rig.Text[s.Caret - 1] == 'é', $"A caret was left at {s.Caret}, not after an accent"));
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_composition_moves_the_text_after_it_aside_rather_than_covering_it_and_goes_in_as_typed()
+    private void A_composition_moves_the_text_after_it_aside_rather_than_covering_it_and_goes_in_as_typed()
     {
         EditorRig rig = new("let = 1;\n");
         rig.PlaceCaret(3);
@@ -451,8 +466,7 @@ public sealed class EditingBehaviourTests
     /// <summary>In C#, a '}' typed on a line of its own above the '}' that '{' and Enter wrote types over it, the line it was
     /// typed on taken away, so the block keeps one brace; where a block around it lacks its own '}', the parse pairs the
     /// written one with the block typed in, and the '}' typed is the one the code lacks, put in.</summary>
-    [AvaloniaFact]
-    public void A_brace_typed_above_the_one_enter_wrote_types_over_it_unless_a_block_around_lacks_its_own()
+    private void A_brace_typed_above_the_one_enter_wrote_types_over_it_unless_a_block_around_lacks_its_own()
     {
         EditorRig rig = new("class C\n{\n    void M()\n    \n}\n");
         rig.Editor.Highlighter = new Passenger.Languages.CSharp.CSharpHighlighter(rig.Document);

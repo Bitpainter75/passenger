@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
 using System.Text;
 using Passenger.Core;
 
@@ -17,6 +16,20 @@ public static class RoslynServerFolder
 
     /// <summary>Where the app carries the server.</summary>
     public static string Carried => Path.Combine(AppContext.BaseDirectory, "roslyn");
+
+    /// <summary>The variable naming, by its full path, a folder to run the server from in place of <see cref="Carried"/>: a
+    /// test's stand-in for an app whose server is missing or broken.</summary>
+    [IdentifierHome]
+    public const string ServerVariable = "PASSENGER_ROSLYN_SERVER";
+
+    /// <summary>Where the server Passenger runs is: <see cref="Carried"/>, or the folder <see cref="ServerVariable"/> names;
+    /// a value that is no full path is fatal as Passenger starts, as a malformed flag is.</summary>
+    public static string ServerFrom => Environment.GetEnvironmentVariable(ServerVariable) switch
+    {
+        null or "" => Carried,
+        { } named when Path.IsPathFullyQualified(named) => named,
+        { } other => throw new FormatException($"{ServerVariable} is \"{other}\": it names a folder by its full path, or is unset"),
+    };
 
     /// <summary>The variable a program on macOS and Linux takes its temporary folder from.</summary>
     public const string TemporaryVariable = "TMPDIR";
@@ -106,9 +119,9 @@ public static class RoslynServerFolder
     /// carried folder: under the cache's roslyn/, made if this build has none yet (an APFS clone on macOS, else a plain
     /// copy, either made in a temporary folder renamed into place, so a Passenger starting meanwhile never runs half a
     /// copy), copies of other builds left unused for a day removed. Null where it runs from the carried folder.</summary>
-    internal static async Task<string?> CopyAsync(string? stateCache, CancellationToken cancel)
+    internal static async Task<string?> CopyAsync(string from, string? stateCache, CancellationToken cancel)
     {
-        string carried = PathNames.Canonical(Carried);
+        string carried = PathNames.Canonical(from);
         // A file added inside a macOS app bundle breaks its seal.
         if (stateCache is null || (!(OperatingSystem.IsMacOS() && MacBundles.Holds(carried)) && CanWrite(carried)))
         {
@@ -190,7 +203,7 @@ public static class RoslynServerFolder
             FileInfo each = new(Path.Combine(carried, file));
             listed.Append(file).Append('\0').Append(each.Length).Append('\0').Append(each.LastWriteTimeUtc.Ticks).Append('\n');
         }
-        string hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(listed.ToString())))[..12];
+        string hash = FileNames.Hash(listed.ToString(), 12);
         return $"{new string([.. version.Select(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' ? c : '-')])}-{hash}";
     }
 

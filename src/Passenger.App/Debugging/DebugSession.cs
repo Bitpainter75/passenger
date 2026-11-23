@@ -104,6 +104,12 @@ public sealed class DebugSession
     /// <summary>How many stops the adapter has told of, the one paused at now the last.</summary>
     public int Stops => stops;
 
+    /// <summary>Whether an attached agent set the program going last (its start, a resume, a step or a pause came from an
+    /// agent's tool call, an action it ran or its input into Passenger's windows), so the stop it comes to is the agent's.</summary>
+    public bool AgentDrives { get; private set; } = AgentsFlow;
+
+    private static bool AgentsFlow => AgentAsks.Beside || AgentAsks.Inputting;
+
     /// <summary>The stop last taken, shown again when the continue or step that left it is refused.</summary>
     private StoppedEvent? stoppedAt;
     private volatile bool killed;
@@ -246,6 +252,7 @@ public sealed class DebugSession
             return Task.CompletedTask;
         }
         Quiet = false;
+        AgentDrives = AgentsFlow;
         JoinBreakpoints();
         Task sending = SendChangedAsync();
         Sending(sending);
@@ -393,7 +400,7 @@ public sealed class DebugSession
     /// <paramref name="output"/> on the connection's thread, in order; with <paramref name="runInTerminal"/> it runs in the
     /// terminal it starts, its output there. <paramref name="starting"/> is handed the session as it begins, so Stop can end
     /// it while it starts; with <paramref name="elsewhere"/> the program is on another machine.</summary>
-    public static Task<DebugSession> LaunchAsync(Run.LaunchPlan plan, BreakpointStore breakpoints, BuiltLines lines, Action<string> log, Action<OutputEvent> output,
+    public static Task<DebugSession> LaunchAsync(Run.LaunchPlan plan, BreakpointStore breakpoints, IReadOnlyList<string> own, BuiltLines lines, Action<string> log, Action<OutputEvent> output,
         Func<RunInTerminalArguments, Task<Run.TerminalRun>>? runInTerminal = null, Func<string, int, string?, int?, int?>? columns = null, bool hotReload = false,
         Action<DebugSession>? starting = null, bool elsewhere = false, AdapterPlace? place = null)
     {
@@ -403,12 +410,13 @@ public sealed class DebugSession
             Args = plan.Arguments,
             Cwd = place?.ToProgram(plan.WorkingDirectory) ?? plan.WorkingDirectory,
             Env = runInTerminal is null ? ToolWindows.ConsoleSink.TellColours(plan.Environment) : plan.Environment,
-            Console = runInTerminal is null ? "internalConsole" : "integratedTerminal",
+            Console = runInTerminal is null ? ConsoleKinds.InternalConsole : ConsoleKinds.IntegratedTerminal,
             JustMyCode = true,
             StopAtEntry = false,
             HotReload = hotReload,
             Presentations = Godot.GodotValues.Presentations,
             Carried = Carried,
+            Own = own,
             Unseen = plan.OnOwnDesktop ? true : null,
         }, breakpoints, lines, log, output, runInTerminal, columns, starting, elsewhere, place);
     }
@@ -418,13 +426,14 @@ public sealed class DebugSession
     /// <paramref name="hotReload"/> the program was started held for the debugger with DOTNET_MODIFIABLE_ASSEMBLIES=debug,
     /// so its code may change as a launch's may; with <paramref name="elsewhere"/> it is not on this machine, and with
     /// <paramref name="place"/> the adapter runs where it is (a container's, its process id that container's).</summary>
-    public static Task<DebugSession> AttachAsync(int processId, BreakpointStore breakpoints, BuiltLines lines, Action<string> log, Action<OutputEvent> output,
+    public static Task<DebugSession> AttachAsync(int processId, BreakpointStore breakpoints, IReadOnlyList<string> own, BuiltLines lines, Action<string> log, Action<OutputEvent> output,
         Func<string, int, string?, int?, int?>? columns = null, Action<DebugSession>? starting = null, bool hotReload = false, bool elsewhere = false, AdapterPlace? place = null,
         bool quiet = false) =>
         StartAsync(OwnAdapter(place, elsewhere), place is null ? $"process {processId}" : $"process {processId} in {place.Where}", DapCommands.Attach,
             new AttachArguments
             {
                 ProcessId = processId, JustMyCode = true, HotReload = hotReload ? true : null, Presentations = Godot.GodotValues.Presentations, Carried = Carried,
+                Own = own,
             },
             breakpoints, lines, log, output, null, columns, starting, elsewhere, place, quiet);
 
@@ -432,13 +441,14 @@ public sealed class DebugSession
     /// waiting for it there: the relay's local address and token, and the build's copies of the app's assemblies, with the
     /// store's breakpoints (none where <paramref name="quiet"/>, Run's for Hot Reload alone); <paramref name="starting"/> is
     /// handed the session as it begins.</summary>
-    public static Task<DebugSession> AttachThroughRelayAsync(string program, Run.Devices.RelaySession relay, BreakpointStore breakpoints, BuiltLines lines, Action<string> log,
+    public static Task<DebugSession> AttachThroughRelayAsync(string program, Run.Devices.RelaySession relay, BreakpointStore breakpoints, IReadOnlyList<string> own,
+        BuiltLines lines, Action<string> log,
         Action<OutputEvent> output, Func<string, int, string?, int?, int?>? columns = null, Action<DebugSession>? starting = null, bool hotReload = false, bool quiet = false) =>
         StartAsync(OwnAdapter(null, elsewhere: true), program, DapCommands.Attach,
             new AttachArguments
             {
                 Relay = relay.Address, RelayModules = relay.Modules, RelayToken = relay.Token, JustMyCode = true, HotReload = hotReload ? true : null,
-                Presentations = Godot.GodotValues.Presentations, Carried = Carried,
+                Presentations = Godot.GodotValues.Presentations, Carried = Carried, Own = own,
             },
             breakpoints, lines, log, output, null, columns, starting, elsewhere: true, place: null, quiet);
 
@@ -463,7 +473,7 @@ public sealed class DebugSession
             Args = plan.Arguments,
             Cwd = plan.WorkingDirectory,
             Env = plan.Environment,
-            Console = runInTerminal is null ? "internalConsole" : "integratedTerminal",
+            Console = runInTerminal is null ? ConsoleKinds.InternalConsole : ConsoleKinds.IntegratedTerminal,
             Unseen = plan.OnOwnDesktop ? true : null,
         }, breakpoints, lines, log, output, runInTerminal, columns, starting, elsewhere: false, place: null, engine: engine);
 
@@ -596,6 +606,7 @@ public sealed class DebugSession
         UiThread.Check();
         if (State == DebugState.Running && disconnected is null)
         {
+            AgentDrives = AgentsFlow;
             await connection.RequestAsync(DapCommands.Pause, new ThreadArguments(0));
         }
     }
@@ -1023,6 +1034,7 @@ public sealed class DebugSession
             return;
         }
         int stop = stops;
+        AgentDrives = AgentsFlow;
         SetState(DebugState.Running);
         // Sent with the request, never awaited before it: the adapter takes the two in turn, ahead of the stop's reads.
         Task placed = before?.Invoke() ?? Task.CompletedTask;
@@ -1176,10 +1188,11 @@ public sealed class DebugSession
         Signatures.Of([.. breakpoints.In(path).Where(b => b.Enabled).Select(b => Signatures.Of(
             lines.IsBuilt(path, b.Line) ? $"{lines.ToBuilt(path, b.Line)}" : $"new {b.Line}", b.Attribute, b.Column ?? b.AttributeColumn, b.Condition, b.HitCondition, b.LogMessage, b.Suspend))]);
 
-    /// <summary>The exception breakpoints that are on, as the protocol's exception options; none while muted, so no exception
-    /// stops the program, not even one left unhandled.</summary>
+    /// <summary>The exception breakpoints that are on, as the protocol's exception options, but those whose scenarios never stop
+    /// (<see cref="ExceptionBreakpoint.Inactive"/>), which no debugger is to stop at; none while muted, so no exception stops
+    /// the program, not even one left unhandled.</summary>
     private List<(ExceptionBreakpoint Breakpoint, DapExceptionOptions Option)> ExceptionOptions() => breakpoints.Muted ? [] :
-        [.. breakpoints.Exceptions.Where(e => e.Enabled).Select(e => (e, new DapExceptionOptions(
+        [.. breakpoints.Exceptions.Where(e => e.Enabled && e.Inactive is null).Select(e => (e, new DapExceptionOptions(
             e.Type is { } type ? [new DapExceptionPathSegment(["CLR"]), new DapExceptionPathSegment([type])] : [new DapExceptionPathSegment(["CLR"])],
             e.Scenarios.HasFlag(ExceptionScenarios.HandledInUserCode) ? DapBreakModes.Always
                 : e.Scenarios.HasFlag(ExceptionScenarios.HandledInExternalCode) ? DapBreakModes.UserUnhandled : DapBreakModes.Unhandled)

@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media;
 using Avalonia.Styling;
@@ -26,8 +27,17 @@ public sealed class ThemeLooksTests : IDisposable
         TestFolders.Delete(themes);
     }
 
+    /// <summary>A theme added from a file keeps its picture over the editor and colours its languages' code its own
+    /// way, and its margins move the editor's text and size the headers and footers, as one flow, each step the check
+    /// one test made in an instance of its own.</summary>
     [AvaloniaFact]
-    public void A_theme_added_from_a_file_keeps_its_picture_draws_it_over_the_editor_and_colours_its_languages_code_its_own_way()
+    public void A_themes_picture_language_colours_and_margins_are_drawn_where_it_gives_them()
+    {
+        Flow.StepApart<ThemeLooksTests>("a theme added from a file keeps its picture draws it over the editor and colours its languages code its own way", t => t.A_theme_added_from_a_file_keeps_its_picture_draws_it_over_the_editor_and_colours_its_languages_code_its_own_way());
+        Flow.StepApart<ThemeLooksTests>("a themes margins move the editors text and size the tool windows header and a dialogs footer", t => t.A_themes_margins_move_the_editors_text_and_size_the_tool_windows_header_and_a_dialogs_footer());
+    }
+
+    private void A_theme_added_from_a_file_keeps_its_picture_draws_it_over_the_editor_and_colours_its_languages_code_its_own_way()
     {
         File.WriteAllText(Path.Combine(folder, "One.cs"), "public class One { }\n");
         File.WriteAllText(Path.Combine(folder, "one.json"), "{ \"one\": true }\n");
@@ -81,8 +91,7 @@ public sealed class ThemeLooksTests : IDisposable
         }
     }
 
-    [AvaloniaFact]
-    public void A_themes_margins_move_the_editors_text_and_size_the_tool_windows_header_and_a_dialogs_footer()
+    private void A_themes_margins_move_the_editors_text_and_size_the_tool_windows_header_and_a_dialogs_footer()
     {
         File.WriteAllText(Path.Combine(folder, "One.cs"), "public class One { }\n");
         MainWindow window = new() { Width = 1200, Height = 800, StateFolder = settings };
@@ -118,7 +127,6 @@ public sealed class ThemeLooksTests : IDisposable
         }
     }
 
-    /// <summary>The keyword colour an editor finds where it is, its own resources first.</summary>
     private static Color Keyword(Control editor) =>
         editor.TryFindResource(TokenKeys.Syntax_Keyword, editor.ActualThemeVariant, out object? found) && found is ISolidColorBrush brush ? brush.Color : default;
 }

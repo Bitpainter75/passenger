@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -24,7 +25,7 @@ public sealed class AgentView : DockPanel
     private readonly Action<Uri> browse;
     private readonly Action<string> open;
     private readonly Func<string?> folder;
-    private readonly Dictionary<AgentChat, ToggleButton> tabs = [];
+    private readonly ToolTabs.Strip<AgentChat> tabs = new();
     private readonly StackPanel entries = new() { Name = "AgentEntries", Spacing = Gaps.Wide, Margin = new Thickness(Gaps.Wide, Gaps.Normal) };
     private readonly ScrollViewer scroll;
     private readonly EmptyState empty = new();
@@ -48,21 +49,10 @@ public sealed class AgentView : DockPanel
         this.browse = browse;
         this.open = open;
         Chat = chosen;
-        StackPanel strip = new() { Orientation = Orientation.Horizontal, Spacing = Gaps.Hair, VerticalAlignment = VerticalAlignment.Center };
         foreach (AgentChat chat in chats)
         {
-            ToggleButton tab = ToolTabs.Tab(chat.Program.Name, chat == chosen);
-            tab.Name = $"agent{chat.Program.Kind}Tab";
-            string action = actionOf(chat);
-            ActionButtons.Mark(tab, action);
-            tab.Click += (_, _) =>
-            {
-                // The action chooses it; a click on the open tab leaves it open.
-                tab.IsChecked = chat == Chat;
-                request(action);
-            };
-            tabs[chat] = tab;
-            strip.Children.Add(tab);
+            ToggleButton tab = tabs.Add(chat, chat.Program.Name, name: $"agent{chat.Program.Kind}Tab");
+            ActionButtons.Mark(tab, actionOf(chat));
             chat.Renewed += (_, _) =>
             {
                 if (chat == Chat)
@@ -72,7 +62,14 @@ public sealed class AgentView : DockPanel
             };
         }
         Button renew = ToolButtons.Of(AppActions.AgentNew, IconKeys.Add, "New Conversation", request);
-        Children.Add(ToolBars.Top(new ToolFlow { Margin = new Thickness(Gaps.Normal, Gaps.Hair), Children = { strip, renew } }));
+        tabs.Choice = chosen;
+        // The action chooses the tab; the strip has already marked the one pressed.
+        tabs.Chosen += (_, chat) =>
+        {
+            tabs.Choice = Chat;
+            request(actionOf(chat));
+        };
+        Children.Add(ToolBars.Top(new ToolFlow { Margin = new Thickness(Gaps.Normal, Gaps.Hair), Children = { tabs, renew } }));
 
         prompt = new TextBox
         {
@@ -82,6 +79,7 @@ public sealed class AgentView : DockPanel
             MaxHeight = 140,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        AutomationProperties.SetName(prompt, "Prompt");
         prompt.AddHandler(KeyDownEvent, OnPromptKey, RoutingStrategies.Tunnel);
         send = ToolButtons.Of(AppActions.AgentSend, IconKeys.Send, "Send", request);
         stop = ToolButtons.Of(AppActions.AgentStop, IconKeys.Stop, "Stop", request);
@@ -146,10 +144,7 @@ public sealed class AgentView : DockPanel
     /// <summary>Draws what stands outside the transcript again: the tabs, Send or Stop, the box's and the empty words.</summary>
     public void Refresh()
     {
-        foreach ((AgentChat chat, ToggleButton tab) in tabs)
-        {
-            tab.IsChecked = chat == Chat;
-        }
+        tabs.Choice = Chat;
         AgentTranscript transcript = Chat.Transcript;
         stop.IsVisible = transcript.Working;
         send.IsVisible = !transcript.Working;
@@ -212,9 +207,9 @@ public sealed class AgentView : DockPanel
             Classes = { StyleClasses.Framed },
             Padding = new Thickness(Gaps.Normal, Gaps.Small),
             Tag = $"You: {person.Text}",
-            Child = new SelectableTextBlock { Text = person.Text, TextWrapping = TextWrapping.Wrap },
+            Child = new SelectableWords { Text = person.Text, TextWrapping = TextWrapping.Wrap },
         },
-        WordsEntry { Done: false } words => new SelectableTextBlock { Text = words.Text, TextWrapping = TextWrapping.Wrap, Tag = Said(words) },
+        WordsEntry { Done: false } words => new SelectableWords { Text = words.Text, TextWrapping = TextWrapping.Wrap, Tag = Said(words) },
         WordsEntry words => Message(words),
         ToolEntry tool => Tool(tool),
         AskEntry ask => Ask(ask),
@@ -235,17 +230,15 @@ public sealed class AgentView : DockPanel
     {
         RowIcon state = new()
         {
-            Width = 12,
-            Height = 12,
             Margin = new Thickness(0, 0, Gaps.Normal, 0),
             VerticalAlignment = VerticalAlignment.Center,
             DataKey = tool.State switch { ToolState.Running => IconKeys.TestRunning, ToolState.Done => IconKeys.TestPassed, _ => IconKeys.TestFailed },
             ForegroundKey = tool.State switch { ToolState.Running => TokenKeys.Test_Running, ToolState.Done => TokenKeys.Test_Passed, _ => TokenKeys.Test_Failed },
         };
-        TextBlock title = new() { Text = tool.Title, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Gaps.Normal, 0) };
+        TextBlock title = new() { Classes = { StyleClasses.Strong }, Text = tool.Title, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Gaps.Normal, 0) };
         string first = tool.Detail.Split('\n')[0];
-        TextBlock detail = MutedText.Of(first).InCodeFont();
-        detail.FontSize = 12;
+        TextBlock detail = MutedText.Of(first);
+        detail.Classes.Add(StyleClasses.Code);
         ToolTip.SetTip(detail, tool.Detail.Length > first.Length ? tool.Detail : null);
         DockPanel head = new() { Children = { state, title } };
         StackPanel row = new() { Spacing = Gaps.Tight, Tag = $"{tool.Title} ({tool.State}): {tool.Detail}" };
@@ -268,7 +261,7 @@ public sealed class AgentView : DockPanel
             wrote.Child = null;
             wrote.Child = new ScrollViewer { Content = text, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
             wrote.IsVisible = tool.State == ToolState.Failed || opened.Contains(tool);
-            Button toggle = new() { Classes = { StyleClasses.Link }, Content = "Output", FontSize = 12, Margin = new Thickness(Gaps.Normal, 0, 0, 0), [DockProperty] = Dock.Right };
+            Button toggle = new() { Classes = { StyleClasses.Link, StyleClasses.Caption }, Content = "Output", Margin = new Thickness(Gaps.Normal, 0, 0, 0), [DockProperty] = Dock.Right };
             toggle.Click += (_, _) =>
             {
                 wrote.IsVisible = !wrote.IsVisible;
@@ -292,10 +285,9 @@ public sealed class AgentView : DockPanel
     {
         Button path = new()
         {
-            Classes = { StyleClasses.Link },
+            Classes = { StyleClasses.Link, StyleClasses.Caption },
             Content = $"{file.Change switch { AgentFileChange.Added => "Added", AgentFileChange.Deleted => "Deleted", _ => "Changed" }} {Passenger.Core.PathNames.Shown(file.Path, folder())}",
             HorizontalAlignment = HorizontalAlignment.Left,
-            FontSize = 12,
             IsEnabled = file.Change != AgentFileChange.Deleted,
         };
         path.Click += (_, _) => open(file.Path);
@@ -305,7 +297,7 @@ public sealed class AgentView : DockPanel
             StackPanel lines = new();
             foreach (string line in file.Diff.Split('\n'))
             {
-                TextBlock drawn = new TextBlock { Text = line.Length == 0 ? " " : line, FontSize = 12 }.InCodeFont();
+                TextBlock drawn = new() { Classes = { StyleClasses.Code }, Text = line.Length == 0 ? " " : line };
                 // A line is on the ground a diff gives what it did, as the diff view draws it.
                 if (line.Length > 0 && (line[0] switch { '+' => TokenKeys.Diff_Added, '-' => TokenKeys.Diff_Deleted, _ => null }) is { } ground)
                 {
@@ -331,7 +323,7 @@ public sealed class AgentView : DockPanel
     private Border Ask(AskEntry ask)
     {
         StackPanel page = new() { Spacing = Gaps.Small };
-        page.Children.Add(new TextBlock { Text = $"{Chat.Program.Name} asks: {ask.Title}", FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap });
+        page.Children.Add(new TextBlock { Classes = { StyleClasses.Strong }, Text = $"{Chat.Program.Name} asks: {ask.Title}", TextWrapping = TextWrapping.Wrap });
         if (ask.Detail.Length > 0)
         {
             Border detail = ColouredCode.Plain(ask.Detail);

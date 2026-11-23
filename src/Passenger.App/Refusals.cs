@@ -2,6 +2,7 @@ using System.Globalization;
 using Passenger.App.Mobile;
 using Passenger.App.Settings;
 using Passenger.Core;
+using Passenger.Dap;
 using Passenger.Text;
 using Passenger.Workspace;
 
@@ -90,6 +91,12 @@ public static class Refusals
     /// <summary>The agent chosen in the Agent window has no conversation to begin anew.</summary>
     public static string NoConversation(string agent) => $"No conversation with {agent} has begun";
 
+    /// <summary>A completion list's filter by the kind of member asked for where none is offered.</summary>
+    public const string NoMembersListed = "No completion list of a type's members of that kind is open";
+
+    /// <summary>Parameter Info's next or previous overload asked for where it shows no call of several.</summary>
+    public const string NoOverloadsShown = "Parameter Info shows no call of several overloads";
+
     /// <summary>The folder open has no solution (a project opened alone, or a folder of files).</summary>
     public const string NoSolution = "No solution is open";
 
@@ -137,6 +144,10 @@ public static class Refusals
 
     /// <summary>The C# language server ended too often and was left stopped, until a person starts it again.</summary>
     public const string CSharpStopped = "The C# language server ended too often and was left stopped until it is started again";
+
+    /// <summary>The C# language server could not start, why in the words of what stopped it, until a person starts it again.</summary>
+    public static string CSharpUnavailable(string why) =>
+        $"The C# language server could not start, so it has none of the folder's code to answer from until it is started again: {why}";
 
     /// <summary>The folder's C# language server asked of has not started yet, or has ended: a clause, after what it stopped
     /// or as <see cref="Passenger.Lsp.LanguageServerFailed"/>'s reason, or a sentence through <see cref="Sentence"/>.</summary>
@@ -188,6 +199,12 @@ public static class Refusals
         $"{file} is not loaded into {project} yet: the C# language server has not taken it in after {Durations.Said(CSharp.Patience.Limit)}, "
         + "and would answer without it; try again once it has";
 
+    /// <summary>A command (<paramref name="what"/>) asked of a file the C# language server is ready but has not taken in
+    /// yet: one come under a project (<paramref name="project"/>) whose load of it has not ended, else one it is still to open.</summary>
+    public static string NotInServerYet(string what, string file, string? project) => project is null
+        ? $"{what} needs {file} in the C# language server, which has not taken it in yet: try again in a moment"
+        : $"{what} needs {file} in the C# language server, which has not loaded it into {project} yet: try again once it has";
+
     /// <summary>A project the C# language server was asked to load again (its file or an import changed) that it has not
     /// loaded since (<see cref="CSharp.CSharpService.UnplacedAsync"/>), whose answers would be of the project as it was.</summary>
     public static string NotLoadedAgain(string project) =>
@@ -211,7 +228,7 @@ public static class Refusals
 
     /// <summary>The first three names, and how many more.</summary>
     private static string FirstNamed(IReadOnlyList<string> names) =>
-        $"{string.Join(", ", names.Take(3))}{(names.Count > 3 ? $" and {names.Count - 3} more" : string.Empty)}";
+        $"{string.Join(", ", names.Take(3))}{(names.Count > 3 ? $" and {Numbers.Said(names.Count - 3)} more" : string.Empty)}";
 
     /// <summary>The folder's projects have no .NET SDK to load, build and run them with: the one its global.json asks
     /// for (named from <paramref name="folder"/>) is not installed, none is, or dotnet found none for another reason it
@@ -247,6 +264,11 @@ public static class Refusals
     public static string StillLoading(TimeSpan waited, string state) =>
         $"The C# language server is still loading the folder's projects after {Durations.Said(waited)} ({(state.Length > 0 ? state : "starting")}), "
         + "so it has nothing of them to answer from yet: ask again once workspace says languageServer is ready";
+
+    /// <summary>A code tool asked of a file whose language server (<paramref name="server"/>, "YAML") is still starting
+    /// after the wait.</summary>
+    public static string StillStarting(string server, TimeSpan waited) =>
+        $"The {server} language server is still starting after {Durations.Said(waited)}, so it has nothing to answer from yet: ask again in a moment";
 
     /// <summary>A C# code tool asked while what a restore brought, or a load again, is still to reach the language server
     /// after the wait: <paramref name="coming"/> says what, as the agent was told it waited for.</summary>
@@ -467,6 +489,14 @@ public static class Refusals
     /// <summary>A build or publish asked for while another of the window's runs: one builds at a time.</summary>
     public const string Building = "Another build is running";
 
+    /// <summary>What a build whose projects' assemblies hold Avalonia XAML never compiled says (<see cref="Passenger.Xaml.Metadata.UncompiledXaml"/>),
+    /// and a preview whose previewer Avalonia's runtime ended for it: the build that last compiled their C# stopped before
+    /// Avalonia's XAML compiler finished, and each build since took that as up to date. A rebuild runs both compilers again.</summary>
+    public static string XamlUncompiled(IReadOnlyList<string> projects) =>
+        $"{(projects.Count == 1 ? $"{projects[0]}'s build has" : $"The builds of {Plural.Listed(projects)} have")} no compiled XAML: Avalonia's XAML compiler "
+        + $"did not finish in the build that last compiled {Plural.Agreeing(projects.Count, "its", "their")} C#, and the builds since took that as up to date. "
+        + "Rebuild to compile it";
+
     /// <summary>An AppHost the folder's session no longer runs, asked of by an agent's call or an Aspire tool: it stopped,
     /// or the folder was left.</summary>
     public const string AppHostNotOwned = "The AppHost is no longer owned by the workspace";
@@ -503,6 +533,33 @@ public static class Refusals
 
     /// <summary>Neither a selection nor a name is at the caret for the debugger to evaluate.</summary>
     public const string NoExpression = "No expression is at the caret";
+
+    /// <summary>A debugger's action asked for with no program debugged, as the debugger's own answer says it.</summary>
+    public const string NothingDebugged = DebuggerWords.NothingDebugged;
+
+    /// <summary>Set Data Breakpoint asked of a row of Variables that is no member of a value, as the debugger's own answer
+    /// says it.</summary>
+    public const string DataBreakpointNotAMember = DebuggerWords.NotAMember;
+
+    /// <summary>A run configuration given no name, which names it in the list and on the toolbar.</summary>
+    public const string ConfigurationUnnamed = "A configuration needs a name";
+
+    /// <summary>Why an edit left files as they were: each was edited after the edit was worked out, so its places no longer
+    /// stand where it was made for.</summary>
+    public static string EditedMeanwhile(int files) => $"{Plural.Agreeing(files, "it was", "they were")} edited meanwhile";
+
+    /// <summary>What an edit did, and the files it left as they were for being edited meanwhile: "Renamed in 3 files, but not
+    /// in A.cs and B.cs: they were edited meanwhile"; what it did alone where it left none.</summary>
+    public static string EditedMeanwhile(string done, IReadOnlyList<string> files) =>
+        files.Count == 0 ? done : $"{done}, but not in {Plural.Listed(files)}: {EditedMeanwhile(files.Count)}";
+
+    /// <summary>An edit said not applied to the files it left as they were for being edited meanwhile: "Extract Method was not
+    /// applied to A.cs: it was edited meanwhile".</summary>
+    public static string NotAppliedEditedMeanwhile(string what, IReadOnlyList<string> files) =>
+        $"{what} was not applied to {Plural.Listed(files)}: {EditedMeanwhile(files.Count)}";
+
+    /// <summary>A JSON property's rename whose property was edited before the rename could be placed.</summary>
+    public const string PropertyEditedMeanwhile = "Rename was not applied: the property was edited meanwhile";
 
     /// <summary>Go to Declaration found nothing to go to where it was asked.</summary>
     public const string NoDeclaration = "Cannot find a declaration to go to";
@@ -635,6 +692,10 @@ public static class Refusals
     public static string RemovedAlone(string name, string from) =>
         $"Delete moves several files and folders to the Trash at once, but {name} only leaves {from}, its files staying on disk: choose it alone to remove it";
 
+    /// <summary>A file or folder moved or copied into a folder where its name is a folder holding it (Docs/Docs put beside
+    /// Docs): replacing that would take it along first, so it stays where it is.</summary>
+    public static string ReplacesItsFolder(string name) => $"{name} cannot replace the folder it is in";
+
     /// <summary>A file or <paramref name="folder"/> of a NuGet package folder, every project's copy of that version, which no
     /// restore writes again.</summary>
     public static string OfPackage(string name, string package, bool folder = false) => $"{name} is {PackagesOwn(package, folder)}";
@@ -667,6 +728,21 @@ public static class Refusals
     /// reading its input.</summary>
     public const string OutputReadOnly = "The output is read-only";
 
+    /// <summary>Input for a program the debugger attached to rather than launched, which reads its standard input
+    /// <paramref name="from"/> (<see cref="ToolWindows.DebugTab.InputFrom"/>), never from its Debug console.</summary>
+    public static string InputFromStarter(string name, string from) =>
+        $"{name}'s Debug console takes no input: the debugger attached to it, so it reads its standard input {from}";
+
+    /// <summary>Input for a session debugging another part of a program beside <paramref name="companion"/>'s (a game's
+    /// GDScript, an app's code in the browser), which takes the program's input.</summary>
+    public static string InputBeside(string name, string companion) =>
+        $"{name}'s Debug console takes no input: the program's input goes to {companion}'s session";
+
+    /// <summary>Input for a launched program whose input was ended in its Debug console
+    /// (<see cref="ToolWindows.OutputView.EndOfInput"/>).</summary>
+    public static string InputEnded(string name) =>
+        $"{name}'s Debug console takes no more input: its input was ended ({KeyWords.Of(ToolWindows.OutputView.EndOfInput)}), so it reads none";
+
     /// <summary>A merge's own sides, which it takes changes from into the result between them.</summary>
     public const string MergeSideReadOnly = "A merge's sides are read-only: edit the result between them";
 
@@ -675,6 +751,18 @@ public static class Refusals
 
     /// <summary>A text box shown to read and copy from (an error's details, a log, a response, a licence).</summary>
     public const string TextReadOnly = "The text is read-only";
+
+    /// <summary>What a thing says, shown as text to read (Read as Text), never the thing itself.</summary>
+    public const string OnlyToRead = "The text is only to read: Escape goes back to where you were";
+
+    /// <summary>Read as Text where the keys are on nothing that says anything as text.</summary>
+    public const string NothingToRead = "Nothing here to read as text: put the keys in the editor, the terminal, a diff, the Tests window, Problems or the status bar";
+
+    /// <summary>Read as Text in the editor where nothing at the caret says anything.</summary>
+    public const string NothingAtCaret = "Nothing at the caret to read as text: no problem is on its line, and its language says nothing of it";
+
+    /// <summary>Read as Text asked while its own text is open.</summary>
+    public const string ReadingAlready = "Its text is open: Escape goes back to where you were";
 
     /// <summary>Why edits found in a file as Passenger read it are not made once the file is another text.</summary>
     public static string ChangedSinceRead(string file) =>
@@ -699,7 +787,7 @@ public static class Refusals
     /// <summary>An agent's act in Godot's editor naming no scene by its path in the folder, which holds several Godot projects
     /// whose editors each take such an act: the project is told by the scene's path alone.</summary>
     public static string GodotProjectUnnamed(IReadOnlyList<string> projects) =>
-        $"The folder holds {projects.Count} Godot projects ({Plural.Listed(projects)}): name the scene by its path in the folder, such as {projects[0]}/main.tscn, so the act goes to that project's Godot editor";
+        $"The folder holds {Numbers.Said(projects.Count)} Godot projects ({Plural.Listed(projects)}): name the scene by its path in the folder, such as {projects[0]}/main.tscn, so the act goes to that project's Godot editor";
 
     /// <summary>An agent's act in Godot's editor whose addon is older than one that takes it.</summary>
     public static string GodotAddonOlder(string project, int version) =>
@@ -825,6 +913,10 @@ public static class Refusals
     public const string QuitIsThePersons = "Only the person quits Passenger or closes its last window, which ends what runs there and installs an update made ready: "
         + "ask them to";
 
+    /// <summary>An agent's Close Solution, by its ide_action or its input into Passenger's window, attached or in its own
+    /// Passenger: the person closes the solution, which ends what runs there.</summary>
+    public const string CloseSolutionIsThePersons = "Only the person closes the solution, which ends what runs there and leaves its folder: ask them to";
+
     /// <summary>An attached agent's input closing a window that Settings' Confirm before closing asks the person about, or
     /// answering that question: the person closes it.</summary>
     public const string CloseIsThePersons = "Only the person closes this window, which Passenger asks them about first as Settings says (Confirm before closing): "
@@ -908,4 +1000,81 @@ public static class Refusals
     /// <summary>A NuGet package's Install, Update or Downgrade while the audit's feeds are still asked which versions have
     /// known vulnerabilities, so the version put in might be one they name.</summary>
     public const string VulnerabilitiesUnread = "The feeds have not yet said which versions have known vulnerabilities";
+
+    /// <summary>A changed file's Go to Source or Delete where the change deleted it.</summary>
+    public const string FileDeleted = "The file is deleted";
+
+    /// <summary>Add to .gitignore on a file Git tracks, where only an unversioned one is ignored.</summary>
+    public const string Tracked = "Git tracks this file: only an unversioned file is added to .gitignore";
+
+    /// <summary>Compare with Local on a file the commit deleted.</summary>
+    public const string DeletedByCommit = "The commit deleted this file, so it holds none to compare";
+
+    /// <summary>A problem's Go to Source or Show Context Actions where it is said of no file (a build's, the toolset's).</summary>
+    public const string ProblemNamesNoFile = "The problem names no file";
+
+    /// <summary>A problem's Open Link where it gives none.</summary>
+    public const string ProblemHasNoLink = "The problem gives no link";
+
+    /// <summary>Show Context Actions on a problem of the toolset or the environment, which no code action fixes.</summary>
+    public const string ToolsetUnfixed = "No context action fixes a problem of the toolset or the environment";
+
+    /// <summary>Show Context Actions on a failed binding whose source's type has no member near its path.</summary>
+    public const string BindingUnfixed = "No member of the binding's source is near enough its path to offer";
+
+    /// <summary>A test's Go to Source where its runner gave no file for it.</summary>
+    public const string TestUnplaced = "The test's runner gives no file for it";
+
+    /// <summary>A stack frame's Go to Source where its code has no source the debugger knows (no symbols, or code the
+    /// runtime made).</summary>
+    public const string FrameUnplaced = "The frame has no source file the debugger knows";
+
+    /// <summary>A stack frame's Go to Source with no frame chosen.</summary>
+    public const string NoFrameChosen = "No frame is chosen";
+
+    /// <summary>A menu's list (the recent solutions) while it lists nothing.</summary>
+    public const string NothingListed = "Nothing is listed here yet";
+
+    /// <summary>Copy where no text is selected.</summary>
+    public const string NothingSelected = "No text is selected";
+
+    /// <summary>Copy or Select All in a table with no cells.</summary>
+    public const string NoCells = "The table has no cells";
+
+    /// <summary>Add to Watches on a row that is a watch.</summary>
+    public const string WatchedAlready = "It is a watch already";
+
+    /// <summary>A data breakpoint's item while the debugger has not yet said whether one can be set on the row.</summary>
+    public const string AskingDebugger = "The debugger has not yet said whether one can be set here";
+
+    /// <summary>Go to Source on a breakpoint that stands on no line (an exception's, a binding error's, a script error's).</summary>
+    public const string BreakpointOnNoLine = "The breakpoint stands on no line";
+
+    /// <summary>Remove on a breakpoint the debugger always keeps (every exception, binding errors, script errors), which
+    /// is turned off rather than removed.</summary>
+    public const string BreakpointKept = "The debugger always keeps this breakpoint: turn it off instead";
+
+    /// <summary>Show in the file manager of a recent solution gone from disk.</summary>
+    public const string RecentGone = "It is gone from disk";
+
+    /// <summary>Go to Source on a step definition or hook whose method is not found where its project was read.</summary>
+    public const string MethodUnplaced = "Its method is not found in the project's source";
+
+    /// <summary>Find Usages of a step definition no feature step binds, or whose steps are not counted yet.</summary>
+    public static string StepUses(int? uses) => uses is null ? "Its feature steps are not counted yet" : "No feature step binds it";
+
+    /// <summary>A rebase on a branch while HEAD is detached, with no branch of its own.</summary>
+    public const string Detached = "HEAD is detached: no branch is checked out";
+
+    /// <summary>Clear Filters while the list is shown whole as at first.</summary>
+    public const string NotNarrowed = "The list is neither narrowed nor ordered otherwise";
+
+    /// <summary>Maximize of a tool window that floats or is shown over the editors for a moment.</summary>
+    public const string Unmaximized = "Only a docked tool window is maximized";
+
+    /// <summary>An Aspire resource's command while another runs.</summary>
+    public const string CommandRunning = "A command of the resource is running";
+
+    /// <summary>An Aspire resource's command the resource says cannot run now.</summary>
+    public const string CommandDisabled = "The resource says it cannot run now";
 }

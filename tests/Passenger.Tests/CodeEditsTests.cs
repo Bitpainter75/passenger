@@ -43,13 +43,35 @@ public sealed class CodeEditsTests : IClassFixture<CodeEditsTests.Project>
         ("using", "        using (resource)\n        {\n            total += 1;\n            total += 2;\n        }\n", "resource"),
     ];
 
+    /// <summary>The gate's code edits and safe deletes, as one flow.</summary>
+    [Gate]
+    [AvaloniaFact]
+    public void The_gates_code_edits_and_safe_deletes_hold_as_one_flow()
+    {
+        Flow.StepApart("Surround With and Complete Current Statement write their code around and after what is chosen or typed", () => new CodeEditsTests(project), t => t.Surround_with_and_complete_current_statement_write_their_code_around_and_after_what_is_chosen_or_typed());
+        Flow.StepApart("Optimize Imports, Introduce Field and Parameter and Encapsulate Field make their edits", () => new CodeEditsTests(project), t => t.Optimize_imports_introduce_field_and_parameter_and_encapsulate_field_make_their_edits());
+        Flow.StepApart("Introduce Variable offers one occurrence or all and makes a local in the place of each", () => new CodeEditsTests(project), t => t.Introduce_variable_offers_one_occurrence_or_all_and_makes_a_local_in_the_place_of_each());
+        Flow.StepApart("Inline puts a local's value in its use and a method's body in its call", () => new CodeEditsTests(project), t => t.Inline_puts_a_locals_value_in_its_use_and_a_methods_body_in_its_call());
+        Flow.StepApart("Safe Delete deletes an unused method at once and lists a used one's usages before deleting it when told to", () => new CodeEditsTests(project), t => t.Safe_delete_deletes_an_unused_method_at_once_and_lists_a_used_ones_usages_before_deleting_it_when_told_to());
+        Flow.StepApart("Safe Delete from a usage of a method declared in a file not open is undone from the solution view", () => new CodeEditsTests(project), t => t.Safe_delete_from_a_usage_of_a_method_declared_in_a_file_not_open_is_undone_from_the_solution_view());
+        Flow.StepApart("a rename reaching a file not open that changed on disk as the server worked is refused, and once the server has it lands right", () => new CodeEditsTests(project), t => t.A_rename_reaching_a_file_not_open_that_changed_on_disk_as_the_server_worked_is_refused_and_once_the_server_has_it_lands_right());
+        Flow.StepApart("Safe Delete in a file not open whose lines end in carriage returns keeps them", () => new CodeEditsTests(project), t => t.Safe_delete_in_a_file_not_open_whose_lines_end_in_carriage_returns_keeps_them());
+    }
+
+    /// <summary>Surround With indents the code it wraps but never the lines inside a string; and a rename right after
+    /// undoing one is made in the file not open the Undo wrote.</summary>
+    [AvaloniaFact]
+    public void Surround_with_keeps_a_strings_lines_and_a_rename_after_an_undo_reaches_the_file_the_undo_wrote()
+    {
+        Flow.StepApart("Surround With indents the code it wraps but never the lines inside a string", () => new CodeEditsTests(project), t => t.Surround_with_indents_the_code_it_wraps_but_never_the_lines_inside_a_string());
+        Flow.StepApart("a rename right after undoing one is made in the file not open the Undo wrote", () => new CodeEditsTests(project), t => t.A_rename_right_after_undoing_one_is_made_in_the_file_not_open_the_undo_wrote());
+    }
+
     /// <summary>Surround With wraps the statements chosen in each of its templates and leaves the caret at the
     /// template's end, each taken back by one Undo; Complete Current Statement closes what is typed (an if, a call, a
     /// declaration, a method) and puts the caret where the next code goes; and around an expression Surround With
     /// offers a cast and parentheses, around types a namespace.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Surround_with_and_complete_current_statement_write_rider_s_code_around_and_after_what_is_chosen_or_typed()
+    private void Surround_with_and_complete_current_statement_write_their_code_around_and_after_what_is_chosen_or_typed()
     {
         MainWindow window = project.Open("Sum.cs", languageServer: false);
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -149,8 +171,7 @@ public sealed class CodeEditsTests : IClassFixture<CodeEditsTests.Project>
 
     /// <summary>Surround With around statements holding a verbatim string and an interpolated one, each over two lines,
     /// indents the code it wraps and leaves each string's second line as written, so neither string's value changes.</summary>
-    [AvaloniaFact]
-    public void Surround_with_indents_the_code_it_wraps_but_never_the_lines_inside_a_string()
+    private void Surround_with_indents_the_code_it_wraps_but_never_the_lines_inside_a_string()
     {
         MainWindow window = project.Open("Quote.cs", languageServer: false);
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -168,9 +189,7 @@ public sealed class CodeEditsTests : IClassFixture<CodeEditsTests.Project>
     /// the rest; Introduce Field makes a constant a field of the type and says why not for anything else, one Undo
     /// taking it back; Introduce Parameter makes an expression a parameter and passes it at every call; and Encapsulate
     /// Field offers the choice of using the property and makes it.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Optimize_imports_introduce_field_and_parameter_and_encapsulate_field_make_their_edits_as_rider_names_them()
+    private void Optimize_imports_introduce_field_and_parameter_and_encapsulate_field_make_their_edits()
     {
         MainWindow window = project.Open("Usings.cs");
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -230,9 +249,7 @@ public sealed class CodeEditsTests : IClassFixture<CodeEditsTests.Project>
 
     /// <summary>Introduce Variable over an expression the method uses twice offers the server's two choices, and the one
     /// for every occurrence makes a local of it in the place of each, one Undo taking it back.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Introduce_variable_offers_one_occurrence_or_all_and_makes_a_local_in_the_place_of_each()
+    private void Introduce_variable_offers_one_occurrence_or_all_and_makes_a_local_in_the_place_of_each()
     {
         MainWindow window = project.Open("Prices.cs");
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -254,9 +271,7 @@ public sealed class CodeEditsTests : IClassFixture<CodeEditsTests.Project>
 
     /// <summary>Inline on a local puts its value in its one use at once; on the call of a method called once it offers
     /// to inline the method or to keep it too, and inlining puts its body in the call's place and deletes it.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Inline_puts_a_locals_value_in_its_use_and_a_methods_body_in_its_call()
+    private void Inline_puts_a_locals_value_in_its_use_and_a_methods_body_in_its_call()
     {
         MainWindow window = project.Open("Inlined.cs");
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -281,9 +296,7 @@ public sealed class CodeEditsTests : IClassFixture<CodeEditsTests.Project>
     /// <summary>A method nothing uses goes at once, its doc comment and the blank line before it with it; one that is
     /// called has its calls listed and is deleted only when told to, from a usage too, the call left to fix; and Undo
     /// in the Solution view puts the declaration back.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Safe_delete_deletes_an_unused_method_at_once_and_lists_a_used_ones_usages_before_deleting_it_when_told_to()
+    private void Safe_delete_deletes_an_unused_method_at_once_and_lists_a_used_ones_usages_before_deleting_it_when_told_to()
     {
         MainWindow window = project.Open("Calc.cs");
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -318,9 +331,7 @@ public sealed class CodeEditsTests : IClassFixture<CodeEditsTests.Project>
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Safe_delete_from_a_usage_of_a_method_declared_in_a_file_not_open_is_undone_from_the_solution_view()
+    private void Safe_delete_from_a_usage_of_a_method_declared_in_a_file_not_open_is_undone_from_the_solution_view()
     {
         string calc = project.PathOf("Calc.cs");
         string before = File.ReadAllText(calc);
@@ -350,9 +361,7 @@ public sealed class CodeEditsTests : IClassFixture<CodeEditsTests.Project>
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_rename_reaching_a_file_not_open_that_changed_on_disk_as_the_server_worked_is_refused_and_once_the_server_has_it_lands_right()
+    private void A_rename_reaching_a_file_not_open_that_changed_on_disk_as_the_server_worked_is_refused_and_once_the_server_has_it_lands_right()
     {
         string calc = project.PathOf("Calc.cs");
         MainWindow window = project.Open("Program.cs");
@@ -412,8 +421,7 @@ public sealed class CodeEditsTests : IClassFixture<CodeEditsTests.Project>
 
     /// <summary>Undo of a rename writes back the file not open it changed, and a rename at once after it, through that file,
     /// waits for the server to read what Undo wrote and is made there, never refused for a write the IDE made itself.</summary>
-    [AvaloniaFact]
-    public void A_rename_right_after_undoing_one_is_made_in_the_file_not_open_the_undo_wrote()
+    private void A_rename_right_after_undoing_one_is_made_in_the_file_not_open_the_undo_wrote()
     {
         string calc = project.PathOf("Calc.cs");
         string before = File.ReadAllText(calc);
@@ -454,9 +462,7 @@ public sealed class CodeEditsTests : IClassFixture<CodeEditsTests.Project>
         Ui.Settle();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Safe_delete_in_a_file_not_open_whose_lines_end_in_carriage_returns_keeps_them()
+    private void Safe_delete_in_a_file_not_open_whose_lines_end_in_carriage_returns_keeps_them()
     {
         string halve = project.Write("Halve.cs", "static class Halve\r{\r    public static int Of(int value) => value / 2;\r\r    public static int Two() => 1;\r}\r");
         project.Write("Halves.cs", "static class Halves\n{\n    public static int Four() => Halve.Of(8);\n}\n");

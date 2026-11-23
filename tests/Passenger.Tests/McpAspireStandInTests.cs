@@ -16,10 +16,39 @@ namespace Passenger.Tests;
 [Collection(Beside.Name)]
 public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, IClassFixture<StandInAppHost>
 {
+    /// <summary>An agent's telemetry of an AppHost as one flow, each step one test's check in an instance of its own:
+    /// the dashboard's own answer with its credentials hidden and never another resource's, a resource's trace holding
+    /// the spans its service sent from an instance, the key never sent to a dashboard elsewhere or named with
+    /// credentials, a service's request duration read through its metrics, and a runtime slow to take its first session
+    /// asked again, saying so.</summary>
+    [Fact]
+    public async Task An_agents_telemetry_is_the_dashboards_own_never_sending_its_key_elsewhere_and_asking_a_slow_runtime_again()
+    {
+        await Flow.StepApartAsync("an agents telemetry is the dashboards own answer with its credentials hidden and never another resources", () => new McpAspireStandInTests(project), t => t.An_agents_telemetry_is_the_dashboards_own_answer_with_its_credentials_hidden_and_never_another_resources());
+        await Flow.StepApartAsync("an agents trace of a resource holds the spans its service sent from an instance", () => new McpAspireStandInTests(project), t => t.An_agents_trace_of_a_resource_holds_the_spans_its_service_sent_from_an_instance());
+        await Flow.StepApartAsync("an agents telemetry never sends the key to a dashboard elsewhere or named with credentials", () => new McpAspireStandInTests(project), t => t.An_agents_telemetry_never_sends_the_key_to_a_dashboard_elsewhere_or_named_with_credentials());
+        await Flow.StepApartAsync("an agent reads a services request duration through telemetry metrics", () => new McpAspireStandInTests(project), t => t.An_agent_reads_a_services_request_duration_through_telemetry_metrics());
+        await Flow.StepApartAsync("an agents metrics of a runtime slow to take its first session are asked again and say so", () => new McpAspireStandInTests(project), t => t.An_agents_metrics_of_a_runtime_slow_to_take_its_first_session_are_asked_again_and_say_so());
+    }
+
+    /// <summary>An agent's runs of an AppHost as one flow, each step one test's check in an instance of its own: its
+    /// run answering with the AppHost's own console, an AppHost whose connection ended said to list no resources while
+    /// the rest answers, its resources' commands through container_action with those it cannot refused, a resource
+    /// whose container runtime is unhealthy failing saying so, and one replica's debug start debugging that replica's
+    /// own program.</summary>
+    [Fact]
+    public async Task An_agent_runs_an_AppHost_its_resources_commands_and_one_replicas_debugging_as_the_AppHost_and_its_engine_answer()
+    {
+        await Flow.StepApartAsync("an agents run of an AppHost answers with the AppHosts own console", () => new McpAspireStandInTests(project), t => t.An_agents_run_of_an_AppHost_answers_with_the_AppHosts_own_console());
+        await Flow.StepApartAsync("an agent is told why an AppHost whose connection ended lists no resources and the rest of the workspace answers", () => new McpAspireStandInTests(project), t => t.An_agent_is_told_why_an_AppHost_whose_connection_ended_lists_no_resources_and_the_rest_of_the_workspace_answers());
+        await Flow.StepApartAsync("an agent runs an AppHost resources commands through container action and is refused those it cannot", () => new McpAspireStandInTests(project), t => t.An_agent_runs_an_AppHost_resources_commands_through_container_action_and_is_refused_those_it_cannot());
+        await Flow.StepApartAsync("an agents run of a resource whose container runtime is unhealthy fails saying so", () => new McpAspireStandInTests(project), t => t.An_agents_run_of_a_resource_whose_container_runtime_is_unhealthy_fails_saying_so());
+        await Flow.StepApartAsync("an agents debug start of one replica debugs that replicas own program", () => new McpAspireStandInTests(project), t => t.An_agents_debug_start_of_one_replica_debugs_that_replicas_own_program());
+    }
+
     /// <summary>An agent's run of an AppHost answers with the AppHost's own console, which begins with the command that
     /// started it, never Run's console, which holds whatever Run ran before it.</summary>
-    [Fact]
-    public async Task An_agents_run_of_an_AppHost_answers_with_the_AppHosts_own_console()
+    private async Task An_agents_run_of_an_AppHost_answers_with_the_AppHosts_own_console()
     {
         await project.ResetAsync();
         await using AspireInteractionHost resources = await AspireInteractionHost.StartAsync(project.KeyFile);
@@ -36,8 +65,7 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
             $"An agent's run of the AppHost answered with a console that is not the AppHost's, so it reads nothing of its start: {ran}");
     }
 
-    [Fact]
-    public async Task An_agents_telemetry_is_the_dashboards_own_answer_with_its_credentials_hidden_and_never_another_resources()
+    private async Task An_agents_telemetry_is_the_dashboards_own_answer_with_its_credentials_hidden_and_never_another_resources()
     {
         await project.ResetAsync();
         await using AspireInteractionHost resources = await AspireInteractionHost.StartAsync(project.KeyFile);
@@ -122,8 +150,7 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
 
     /// <summary>A trace an agent reads for a resource is the dashboard's whole, its spans those of the resource's service
     /// whatever instance sent them: a trace of the service api, its instance instance1, read for the resource api by its id.</summary>
-    [Fact]
-    public async Task An_agents_trace_of_a_resource_holds_the_spans_its_service_sent_from_an_instance()
+    private async Task An_agents_trace_of_a_resource_holds_the_spans_its_service_sent_from_an_instance()
     {
         await project.ResetAsync();
         await using AspireInteractionHost resources = await AspireInteractionHost.StartAsync(project.KeyFile);
@@ -145,8 +172,7 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
         Assert.Empty(resources.Errors);
     }
 
-    [Fact]
-    public async Task An_agents_telemetry_never_sends_the_key_to_a_dashboard_elsewhere_or_named_with_credentials()
+    private async Task An_agents_telemetry_never_sends_the_key_to_a_dashboard_elsewhere_or_named_with_credentials()
     {
         await using AspireDashboardHost dashboard = await AspireDashboardHost.StartAsync();
         // An address no machine answers at (TEST-NET-1), and the stand-in dashboard's own named with a user.
@@ -168,8 +194,7 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
         }
     }
 
-    [Fact]
-    public async Task An_agent_is_told_why_an_AppHost_whose_connection_ended_lists_no_resources_and_the_rest_of_the_workspace_answers()
+    private async Task An_agent_is_told_why_an_AppHost_whose_connection_ended_lists_no_resources_and_the_rest_of_the_workspace_answers()
     {
         await project.ResetAsync();
         await using AspireInteractionHost resources = await AspireInteractionHost.StartAsync(project.KeyFile);
@@ -199,8 +224,7 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
     /// restart as Aspire's resource-restart; a confirmation asks no one (nobody would answer a headless IDE's question), while
     /// one that asks the person for input, one the resource lacks and one not enabled now are refused saying why, the AppHost
     /// never asked; workspace lists the commands it may run and how the AppHost's run was started.</summary>
-    [Fact]
-    public async Task An_agent_runs_an_AppHost_resources_commands_through_container_action_and_is_refused_those_it_cannot()
+    private async Task An_agent_runs_an_AppHost_resources_commands_through_container_action_and_is_refused_those_it_cannot()
     {
         await project.ResetAsync();
         await using AspireInteractionHost resources = await AspireInteractionHost.StartAsync(project.KeyFile);
@@ -263,8 +287,7 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
     /// <summary>An agent's run of a resource its AppHost cannot start where it is (RuntimeUnhealthy: its container engine is
     /// not running) fails at once saying so, as the Aspire window's red dot shows it, never waiting out the call's whole wait
     /// for it to come up and then answering as if it might yet.</summary>
-    [Fact]
-    public async Task An_agents_run_of_a_resource_whose_container_runtime_is_unhealthy_fails_saying_so()
+    private async Task An_agents_run_of_a_resource_whose_container_runtime_is_unhealthy_fails_saying_so()
     {
         await project.ResetAsync();
         await using AspireInteractionHost resources = await AspireInteractionHost.StartAsync(project.KeyFile);
@@ -283,8 +306,7 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
     /// replica: restarted held by its own resource's command, its session attached to its own new program (stopped at a
     /// breakpoint, its process's id a local there), workspace naming that session on its resource alone, and the other
     /// replica left running as it was, undebugged. The test starts each replica as DCP does, as the stand-in's commands ask.</summary>
-    [Fact]
-    public async Task An_agents_debug_start_of_one_replica_debugs_that_replicas_own_program()
+    private async Task An_agents_debug_start_of_one_replica_debugs_that_replicas_own_program()
     {
         await project.ResetAsync();
         await project.BuildApiAsync();
@@ -402,8 +424,16 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
     /// <summary>An agent reads a service's metrics through telemetry's kind metrics, as the Stats tab reads them: a web app the
     /// stand-in AppHost has Passenger start, sent requests meanwhile, answers its request duration with its rate and median,
     /// heard from its runtime.</summary>
-    [Fact]
-    public async Task An_agent_reads_a_services_request_duration_through_telemetry_metrics()
+    private async Task An_agent_reads_a_services_request_duration_through_telemetry_metrics() => await RequestDurationAsync(slowFirstSession: false);
+
+    /// <summary>An agent's metrics of a service whose runtime takes Passenger's first session too late but answers the next
+    /// request at once (a port in front of web's that holds the first connection and passes the rest to the runtime) are
+    /// asked again rather than given up, the answer saying so, with the request duration heard.</summary>
+    private async Task An_agents_metrics_of_a_runtime_slow_to_take_its_first_session_are_asked_again_and_say_so() => await RequestDurationAsync(slowFirstSession: true);
+
+    /// <summary>The web app's request duration read by the agent, its runtime's first session held where
+    /// <paramref name="slowFirstSession"/>.</summary>
+    private async Task RequestDurationAsync(bool slowFirstSession)
     {
         await project.ResetAsync();
         string web = await project.WriteWebAppAsync();
@@ -426,6 +456,11 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
         int program = 0;
         Assert.True(await Waiting.UntilAsync(() => (program = Processes.ReadId(told)) > 0, TimeSpan.FromMinutes(1), Cancel), "The web service never said its process's id");
         OwnProcess own = OwnProcess.Of(program);
+        // Held while it runs, so how it ended reads should it end.
+        using System.Diagnostics.Process webProcess = System.Diagnostics.Process.GetProcessById(program);
+        Assert.False(webProcess.SafeHandle.IsInvalid, "The web service's process could not be held");
+        await using SilentPort? held = slowFirstSession ? new SilentPort(program, holding: 1) : null;
+        held?.PassOn();
         port.LetGo(gate);
         resources.PushResource(new Passenger.App.Aspire.Protocol.Resource
         {
@@ -443,11 +478,15 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
             $"The IDE never heard that web runs its program.{Said()}");
         using CancellationTokenSource stopAsking = CancellationTokenSource.CreateLinkedTokenSource(Cancel);
         int served = 0;
+        int sent = 0;
+        int slow = 0;
+        // Until the agent is told: one slower than the client waits (a loaded machine's first) is let go, web measuring it all the same.
         Task asking = Waiting.Apart(async () =>
         {
             using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(5) };
             while (!stopAsking.IsCancellationRequested)
             {
+                Interlocked.Increment(ref sent);
                 try
                 {
                     using HttpResponseMessage answered = await http.GetAsync(address, stopAsking.Token);
@@ -460,8 +499,13 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
                 {
                     // Not yet listening.
                 }
-                catch (OperationCanceledException) when (stopAsking.IsCancellationRequested)
+                catch (OperationCanceledException) when (!stopAsking.IsCancellationRequested)
                 {
+                    Interlocked.Increment(ref slow);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Stopped as the test ends.
                 }
                 await Waiting.ForAsync(TimeSpan.FromMilliseconds(100), "a request's pause", stopAsking.Token).Ended();
             }
@@ -469,6 +513,7 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
         try
         {
             JsonElement heard = default;
+            List<string> waited = [];
             if (!await Waiting.UntilAsync(async () =>
             {
                 CallToolResult answer = await Result(client, McpTools.Telemetry, new() { ["kind"] = "metrics", ["resource"] = "web" });
@@ -478,6 +523,10 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
                 }
                 using JsonDocument read = JsonDocument.Parse(Text(answer));
                 heard = read.RootElement.Clone();
+                if (heard.TryGetProperty("waited", out JsonElement wait))
+                {
+                    waited.Add(wait.GetString()!);
+                }
                 return heard.TryGetProperty("metrics", out JsonElement metrics) && metrics.EnumerateArray().Any(m => m.GetProperty("instrument").GetString() == "http.server.request.duration"
                     && m.GetProperty("value").GetString()!.Contains("median", StringComparison.Ordinal));
             }, TimeSpan.FromMinutes(1), Cancel))
@@ -487,6 +536,12 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
             JsonElement duration = heard.GetProperty("metrics").EnumerateArray().Single(m => m.GetProperty("instrument").GetString() == "http.server.request.duration");
             Assert.Equal(("Microsoft.AspNetCore.Hosting", "s"), (duration.GetProperty("meter").GetString(), duration.GetProperty("unit").GetString()));
             Assert.Matches(@"^[0-9.,]+/s, median ", duration.GetProperty("value").GetString()!);
+            if (held is not null)
+            {
+                Assert.True(waited.Any(said => said.Contains("Asked web's runtime again: it took no session for reading its metrics in ", StringComparison.Ordinal)),
+                    $"The agent was not told web's runtime was asked again: it was told it waited for {(waited.Count == 0 ? "nothing" : string.Join("; ", waited))}; "
+                    + $"the port took {held.Account()}");
+            }
             Assert.Empty(resources.Errors);
         }
         finally
@@ -496,11 +551,24 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
             own.Kill();
         }
 
-        // How far web had come: the requests it answered, whether its program runs, and what its console says.
+        // How far web had come: the requests it was sent and answered, its program and what the agent's Passenger logged of it, its console.
         async Task<string> WebSaidAsync()
         {
             CallToolResult console = await Result(client, McpTools.Output, new() { ["resource"] = "web", ["lines"] = 40 });
-            return $"web answered {Volatile.Read(ref served)} requests, its program {program} {(Processes.IsRunning(program) ? "runs" : "has ended")}, and its console says:\n{Text(console)}";
+            string stopped = asking.IsFaulted ? $" (the requests stopped: {asking.Exception!.InnerException!.Message})" : string.Empty;
+            string log = Path.Combine(OwnState, "logs", "passenger.log");
+            string logged = string.Empty;
+            if (File.Exists(log))
+            {
+                using FileStream read = new(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                logged = string.Join("\n  ", new StreamReader(read).ReadToEnd().Split('\n').Where(line => line.Contains($"rocess {program}", StringComparison.Ordinal)).TakeLast(10));
+            }
+            string ran = !DotnetProcesses.Runs(webProcess)
+                ? $"began at {webProcess.StartTime:HH:mm:ss.fff} and ended at {webProcess.ExitTime:HH:mm:ss.fff} with exit code {webProcess.ExitCode}" : $"began at {webProcess.StartTime:HH:mm:ss.fff} and runs";
+            string port = held is null ? string.Empty : $"; at {DateTime.Now:HH:mm:ss.fff} the port in front of web's took {held.Account()}";
+            return $"web was sent {Volatile.Read(ref sent)} requests{stopped}, answered {Volatile.Read(ref served)} of them and was slower than 5 s to {Volatile.Read(ref slow)}, "
+                + $"its program {program} {ran} (the agent's Passenger logged {(logged.Length == 0 ? "nothing of it" : $"of it:\n  {logged}\n")}){port}, "
+                + $"and its console says:\n{Text(console)}";
         }
     }
 
@@ -511,7 +579,15 @@ public sealed class McpAspireStandInTests(StandInAppHost project) : McpRig, ICla
         Assert.True(await Waiting.UntilAsync(async () => (await Call(client, McpTools.Workspace)).GetProperty("runConfigurations").EnumerateArray()
             .Any(item => item.GetString() == StandInAppHost.Configuration), TimeSpan.FromMinutes(2), Cancel),
             $"The stand-in AppHost's Aspire configuration was not found.{Said()}");
-        JsonElement ran = await Call(client, McpTools.Run, new() { ["configuration"] = StandInAppHost.Configuration });
+        JsonElement ran;
+        try
+        {
+            ran = await Call(client, McpTools.Run, new() { ["configuration"] = StandInAppHost.Configuration });
+        }
+        catch (Xunit.Sdk.XunitException failed)
+        {
+            throw new Xunit.Sdk.XunitException(failed.Message + project.StartSaid(), failed);
+        }
         Assert.True(ran.GetProperty("stillRunning").GetBoolean(), $"run of the stand-in AppHost answered: {ran}");
         JsonElement workspace = await Call(client, McpTools.Workspace);
         Assert.True(workspace.GetProperty("aspireApps").EnumerateArray().Any(app => PathNames.Same(app.GetProperty("appHostPath").GetString()!, host)

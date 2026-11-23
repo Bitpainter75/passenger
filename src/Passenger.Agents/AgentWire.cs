@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Passenger.Core;
 
 namespace Passenger.Agents;
 
@@ -62,7 +63,7 @@ public abstract class AgentWire
 
     /// <summary>A text cut to <see cref="Longest"/>, saying how much more there was.</summary>
     protected static string Cut(string text) =>
-        text.Length <= Longest ? text : $"{text[..Longest]}\n… {text.Length - Longest:N0} more characters";
+        text.Length <= Longest ? text : $"{text[..Longest]}\n… {Numbers.Said(text.Length - Longest)} more characters";
 
     /// <summary>A JSON value as one line for a person to read: a string's own text, anything else as JSON writes it.</summary>
     protected static string Shown(JsonElement? value) => value switch

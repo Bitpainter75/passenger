@@ -13,8 +13,9 @@ namespace Passenger.Tests;
 /// <summary>A Godot game's runtime errors kept after it ends: a game that pushes one error every frame and another once
 /// leaves both pinned at their lines once stopped, each with its count and its last words, a badge's press listing each
 /// time with its stack; the Run console shows each once, folded with its count, its other lines as written; and an edit of
-/// a pinned line takes its pin off. Godot runs headless, its user folders the run's; without a Godot 4 .NET build the test
-/// skips saying why. Its game runs and is stopped, so run alone.</summary>
+/// a pinned line takes its pin off. Godot runs headless at twenty frames a second, as a game drawn to a screen runs about,
+/// where a headless one runs thousands, its user folders the run's; without a Godot 4 .NET build the test skips saying
+/// why. Its game runs and is stopped, so run alone.</summary>
 [Collection(Alone.Name)]
 public sealed class GodotPinsTests : IClassFixture<GodotPinsTests.Game>
 {
@@ -70,7 +71,7 @@ public sealed class GodotPinsTests : IClassFixture<GodotPinsTests.Game>
         try
         {
             RunConfiguration generated = Generated(window, "Spinner");
-            window.SetConfigurations([generated with { Name = "Spinner on Godot", Generated = false, Arguments = "--headless", Environment = new(game.Homes) }], "Spinner on Godot");
+            window.SetConfigurations([generated with { Name = "Spinner on Godot", Generated = false, Arguments = "--headless --max-fps 20", Environment = new(game.Homes) }], "Spinner on Godot");
             Ui.Launched(window, window.RunAsync(), "the game's build and start", TimeSpan.FromMinutes(3));
             Ui.WaitFor(() => Run(window).Contains("frame 30\n", StringComparison.Ordinal), () => $"the game to run thirty frames ({Tail(window)})", TimeSpan.FromMinutes(1));
             Ui.Run(window, AppActions.Stop);
@@ -97,18 +98,18 @@ public sealed class GodotPinsTests : IClassFixture<GodotPinsTests.Game>
             Assert.True(Occurrences(console, "frame 10\n") == 1 && Occurrences(console, "frame 30\n") == 1, $"The game's own lines were not kept as written: {Tail(window)}");
             Assert.True(fold.Entries.Count == 2, $"The console folds other than two entries:\n{entries}");
             int folded = console.Split('\n').ToList().FindIndex(l => l.StartsWith("ERROR: Every frame", StringComparison.Ordinal));
-            Assert.Contains(run.FoldNotes, n => n.Line == folded && n.Text.StartsWith($"×{fold.Entries[0].Count:N0} · last at ", StringComparison.Ordinal));
+            Assert.Contains(run.FoldNotes, n => n.Line == folded && n.Text.StartsWith($"×{Numbers.Said(fold.Entries[0].Count)} · last at ", StringComparison.Ordinal));
             Ui.Click(run.FoldFilter);
             Assert.True(run.Filtered?.Snapshot.ToString() is { } only && only.StartsWith("ERROR: Every frame\n", StringComparison.Ordinal)
                 && Occurrences(only, "ERROR: Only once") == 1 && !only.Contains("frame 10", StringComparison.Ordinal),
                 $"The filter shows {run.Filtered?.Snapshot}");
             Ui.Click(run.FoldFilter);
 
-            // The badge's press lists each time, newest first, with its stack.
+            // The badge's press lists each time, newest first, with its stack: the newest a pin keeps, as fast a game may run.
             Ui.Click(editor, editor.GutterColumnPoint(editor.Gutter!.Pins, every - 1));
             Ui.WaitFor(() => window.PinPopup is not null, "the every-frame pin's occurrences");
             GodotPinPopup popup = window.PinPopup!;
-            Assert.Equal(pinned.Count, popup.Listed.Count);
+            Assert.Equal(Math.Min(pinned.Count, GodotErrorPins.Kept), popup.Listed.Count);
             Assert.Contains(popup.Frames, f => f.Contains($"Main.cs:{every}", StringComparison.Ordinal));
             Ui.Press(window, "ESCAPE");
             Ui.WaitFor(() => window.PinPopup is null, "the pin's popup to close");

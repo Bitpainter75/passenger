@@ -45,7 +45,7 @@ public static class AppActions
     public const string ConvertIndentationToTabs = "app.convertIndentation.tabs";
     public const string ConvertIndentationToSpaces = "app.convertIndentation.spaces";
 
-    // Rider's ChangeTargetFramework (Target Framework), the editor's context switcher, which its keymaps give no keys.
+    // Rider's ChangeTargetFramework (Target Framework), the status bar's context widget, which its keymaps give no keys.
     public const string TargetFramework = "app.code.targetFramework";
     public const string Save = "app.save";
     public const string SaveAll = "app.saveAll";
@@ -62,6 +62,11 @@ public static class AppActions
     public const string GoToSymbol = "app.goToSymbol";
     public const string GoToEverything = "app.goToEverything";
     public const string FileStructure = "app.fileStructure";
+
+    // Rider's ShowNavBar (Jump to Navigation Bar): Ctrl+F2 in its Visual Studio keymap, Ctrl+Shift+; (Cmd+Shift+; on the
+    // Mac) in its VS Code keymaps, Alt+Home in $default's and Mac OS X 10.5+'s. Its Visual Studio OSX keymap gives its
+    // Cmd+F2 to Toggle Bookmark too, which keeps it here, and Mac OS X 10.5+'s Cmd+Up is the editor's Text Start here.
+    public const string JumpToNavigationBar = "app.jumpToNavigationBar";
 
     // Rider's GotoRelated (Related Symbol), here a XAML or Razor file's code-behind and back: its Visual Studio keymaps'
     // Ctrl+Alt+F7 and Cmd+Shift+F7, its VS Code keymaps' (from their parents) Ctrl+Alt+Home and Ctrl+Cmd+Up.
@@ -444,6 +449,19 @@ public static class AppActions
     public const string Inline = "app.code.inline";
     public const string ParameterInfo = "app.code.parameterInfo";
 
+    // Rider's MethodOverloadSwitchDown and MethodOverloadSwitchUp: Parameter Info's next and previous overload, on the keys
+    // the editor's own action has there (KeysIn).
+    public const string NextOverload = "app.code.nextOverload";
+    public const string PreviousOverload = "app.code.previousOverload";
+
+    // The completion list's filters by the kind of member, which no keymap of Rider's has: each on Alt and its badge's
+    // letter, taken only while the list shows them (InEditor), the key typing as before anywhere else.
+    public const string CompletionProperties = "app.code.completion.properties";
+    public const string CompletionMethods = "app.code.completion.methods";
+    public const string CompletionExtensionMethods = "app.code.completion.extensionMethods";
+    public const string CompletionFields = "app.code.completion.fields";
+    public const string CompletionEvents = "app.code.completion.events";
+
     // Rider's SurroundWith (its Visual Studio keymaps clear its own keys and give theirs to SurroundWithLiveTemplate, which
     // it is here), EditorCompleteStatement, OptimizeImports (named Optimize Imports in C# too; its id says usings, which
     // Find Action reads), SafeDelete, IntroduceField, IntroduceParameter and RiderBackendAction-EncapsulateField.
@@ -479,6 +497,11 @@ public static class AppActions
     // which no keymap of Rider's has an action for: Ctrl+Alt+` (Ctrl+Cmd+` on the Mac), Shift for back, in every keymap.
     public const string NextRegion = "app.nextRegion";
     public const string PreviousRegion = "app.previousRegion";
+
+    // What the thing at hand says, as plain text to read (a card, the caret's problems, the terminal's last command, a
+    // diff's changes, a test's result, the last message), which no keymap of Rider's has an action for: Ctrl+Alt+R
+    // (Ctrl+Cmd+R on the Mac) in every keymap.
+    public const string ReadAsText = "app.readAsText";
 
     // The debugger's, on the active editor and the session.
     public const string ToggleBreakpoint = "app.debug.toggleBreakpoint";
@@ -594,6 +617,9 @@ public static class AppActions
     // Commit Signing…, the Commit window's and the Git menu's: no keys of Rider's.
     public const string CommitSigning = "app.vcs.commitSigning";
     public const string CommitRefresh = "app.vcs.refreshChanges";
+
+    // Rider's ChangesView.GroupBy.Directory, the Commit window's Group By › Directory.
+    public const string GroupByDirectory = "app.vcs.groupByDirectory";
     public const string NuGetRefresh = "app.nuget.refresh";
     public const string NuGetUpdateAll = "app.nuget.updateAll";
     public const string LiveTreeRefresh = "app.liveTree.refresh";
@@ -610,6 +636,10 @@ public static class AppActions
     public const string NextChange = "app.vcs.nextChange";
     public const string PreviousChange = "app.vcs.previousChange";
     public const string RollbackLines = "app.vcs.rollbackLines";
+    // Rider's Git.Stage.Add, which takes ChangesView.AddUnversioned's keys ($default's Ctrl+Alt+A); Unstage takes them
+    // where what they act on is staged whole, as the change's own button turns.
+    public const string Stage = "app.vcs.stage";
+    public const string Unstage = "app.vcs.unstage";
     public const string ShowDiff = "app.vcs.showDiff";
 
     // Rider's Diff.ShowSettingsPopup, a diff's Settings: $default's Ctrl+Shift+D, none in its VS Code keymaps.
@@ -687,7 +717,19 @@ public static class AppActions
         NewItem when Preset != KeymapPreset.VisualStudio => Generate,
         EditBreakpoint when Preset != KeymapPreset.VisualStudio => ViewBreakpoints,
         Rerun when Preset == KeymapPreset.IntelliJ && OperatingSystem.IsMacOS() => Replace,
+        NextOverload when Preset != KeymapPreset.VSCode => OverloadKeys(down: true),
+        PreviousOverload when Preset != KeymapPreset.VSCode => OverloadKeys(down: false),
         _ => id,
+    };
+
+    /// <summary>The action whose keys step through Parameter Info's overloads, as Rider's keymaps give them Ctrl+Up and Down,
+    /// or Alt's on the Mac: the editor's scroll by a line, its line move on the Mac, or IntelliJ IDEA's selection steps
+    /// there.</summary>
+    private static string OverloadKeys(bool down) => (Preset, OperatingSystem.IsMacOS()) switch
+    {
+        (KeymapPreset.IntelliJ, true) => down ? ShrinkSelection : ExtendSelection,
+        (_, true) => down ? EditorActions.MoveLineDown : EditorActions.MoveLineUp,
+        _ => down ? EditorActions.ScrollDown : EditorActions.ScrollUp,
     };
 
     /// <summary>Whether a key pressed is one a place takes for an action (<see cref="KeysIn"/>), in the keymap in force.</summary>
@@ -708,9 +750,15 @@ public static class AppActions
         Keymap keymap = Base(preset).Bind(GameKeys, "control F11")
             .Bind(NextRegion, OperatingSystem.IsMacOS() ? "control meta BACK_QUOTE" : "control alt BACK_QUOTE")
             .Bind(PreviousRegion, OperatingSystem.IsMacOS() ? "control meta shift BACK_QUOTE" : "control alt shift BACK_QUOTE")
+            .Bind(ReadAsText, OperatingSystem.IsMacOS() ? "control meta R" : "control alt R")
             // The Switcher's keys are the same in every keymap of Rider's (Switcher).
             .Bind(Switcher, "control TAB")
-            .Bind(SwitcherBackward, "control shift TAB");
+            .Bind(SwitcherBackward, "control shift TAB")
+            .Bind(CompletionProperties, "alt P")
+            .Bind(CompletionMethods, "alt M")
+            .Bind(CompletionExtensionMethods, "alt X")
+            .Bind(CompletionFields, "alt F")
+            .Bind(CompletionEvents, "alt E");
         foreach ((string action, string[] shortcuts) in overrides)
         {
             List<Shortcut> keys = [];
@@ -835,6 +883,7 @@ public static class AppActions
                 .Bind(NextChange, "shift meta alt N")
                 .Bind(PreviousChange, "shift meta alt P")
                 .Bind(RollbackLines, "meta alt Z")
+                .Bind(Stage, "meta alt A")
                 .Bind(DiffSettings, "meta shift D")
                 .Bind(ShowGit, "meta 9")
                 .Bind(ShowTerminal, "meta control 1")
@@ -910,6 +959,7 @@ public static class AppActions
             .Bind(ShowSettings, "control alt S")
             .Bind(ShowNuGet, "alt 7", "alt shift 7")
             .Bind(FileStructure, "alt BACK_SLASH")
+            .Bind(JumpToNavigationBar, "control F2")
             .Bind(GoToRelated, "control alt F7")
             .Bind(Find, "control F")
             .Bind(Replace, "control H")
@@ -967,6 +1017,7 @@ public static class AppActions
             .Bind(NextChange, "shift control alt N")
             .Bind(PreviousChange, "shift control alt P")
             .Bind(RollbackLines, "control alt Z")
+            .Bind(Stage, "control alt A")
             .Bind(DiffSettings, "control shift D")
             .Bind(ShowGit, "alt 9")
             .Bind(ShowTerminal, "control alt 1")
@@ -1037,6 +1088,7 @@ public static class AppActions
                 .Bind(GoToLine, "control G")
                 .Bind(GoToSymbol, "meta T")
                 .Bind(FileStructure, "meta alt O", "meta shift O")
+                .Bind(JumpToNavigationBar, "meta shift SEMICOLON")
                 .Bind(GoToRelated, "control meta UP")
                 .Bind(FindAction, "F1", "meta shift P", "meta shift A")
                 .Bind(FindInFiles, "meta shift F")
@@ -1136,6 +1188,7 @@ public static class AppActions
                 .Bind(NextChange, "alt F3", "alt F5")
                 .Bind(PreviousChange, "alt shift F3", "alt shift F5")
                 .Bind(RollbackLines, "meta alt Z")
+                .Bind(Stage, "meta alt A")
                 .Bind(ShowGit, "control shift G")
                 .Bind(RecentChanges, "alt shift C");
         }
@@ -1153,6 +1206,7 @@ public static class AppActions
             .Bind(GoToSymbol, "control T")
             .Bind(GoToEverything, "F1", "control shift A")
             .Bind(FileStructure, "control shift O")
+            .Bind(JumpToNavigationBar, "control shift SEMICOLON")
             .Bind(GoToRelated, "control alt HOME")
             .Bind(FindAction, "control shift P")
             .Bind(FindInFiles, "control shift F")
@@ -1253,6 +1307,7 @@ public static class AppActions
             .Bind(NextChange, "alt F5")
             .Bind(PreviousChange, "alt shift F5")
             .Bind(RollbackLines, "control alt Z")
+            .Bind(Stage, "control alt A")
             .Bind(ShowGit, "control shift G");
     }
 
@@ -1279,6 +1334,7 @@ public static class AppActions
                 .Bind(GoToSymbol, "meta O", "meta alt O")
                 .Bind(GoToEverything, "shift , shift")
                 .Bind(FileStructure, "meta F12")
+                .Bind(JumpToNavigationBar, "alt HOME")
                 .Bind(GoToRelated, "control meta UP")
                 .Bind(FindAction, "meta shift A")
                 .Bind(FindInFiles, "meta shift F")
@@ -1381,6 +1437,7 @@ public static class AppActions
                 .Bind(NextChange, "control alt shift DOWN")
                 .Bind(PreviousChange, "control alt shift UP")
                 .Bind(RollbackLines, "meta alt Z")
+                .Bind(Stage, "meta alt A")
                 .Bind(DiffSettings, "meta shift D")
                 .Bind(RecentChanges, "alt shift C");
         }
@@ -1397,6 +1454,7 @@ public static class AppActions
             .Bind(GoToSymbol, "control N", "control alt shift N")
             .Bind(GoToEverything, "shift , shift")
             .Bind(FileStructure, "control F12")
+            .Bind(JumpToNavigationBar, "alt HOME")
             .Bind(GoToRelated, "control alt HOME")
             .Bind(FindAction, "control shift A")
             .Bind(FindInFiles, "control shift F")
@@ -1502,6 +1560,7 @@ public static class AppActions
             .Bind(NextChange, "control alt shift DOWN")
             .Bind(PreviousChange, "control alt shift UP")
             .Bind(RollbackLines, "control alt Z")
+            .Bind(Stage, "control alt A")
             .Bind(DiffSettings, "control shift D")
             .Bind(RecentChanges, "alt shift C");
     }

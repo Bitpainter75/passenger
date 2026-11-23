@@ -32,10 +32,10 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
     [IdentifierHome]
     public const string ServerLimitVariable = "PASSENGER_MCP_SERVER_WAIT_MS";
 
-    /// <summary>How long a code tool waits for the C# language server to be ready for its question before it refuses: 2
-    /// minutes, or what <see cref="ServerLimitVariable"/> gives; a value there that is no whole number of milliseconds above
-    /// 0 is fatal.</summary>
-    public static TimeSpan ServerLimit => EnvironmentValues.Milliseconds(ServerLimitVariable, TimeSpan.FromSeconds(120));
+    /// <summary>How long a code tool waits for its language server to be ready for its question before it refuses: 2
+    /// minutes, made longer on a slower machine as the IDE's other waits on what it started are (<see cref="Waits"/>), or
+    /// what <see cref="ServerLimitVariable"/> gives; a value there that is no whole number of milliseconds above 0 is fatal.</summary>
+    public static TimeSpan ServerLimit => EnvironmentValues.Milliseconds(ServerLimitVariable, Waits.Of(TimeSpan.FromSeconds(120)));
 
     /// <summary>How long a file's markers are waited for: its checks are quick once its project is read.</summary>
     private static readonly TimeSpan MarkersLimit = TimeSpan.FromSeconds(30);
@@ -131,7 +131,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
     }, projects: false);
 
     [McpServerTool(Name = McpTools.Workspace, Title = "The workspace", ReadOnly = true), Description(
-        "The open folder and solution (or solution filter), its projects (output type, frameworks and the one chosen, unloaded marked; a shared one with sharedBy), run " +
+        "The open folder and solution (or solution filter), its projects (kind, output type, frameworks and the one chosen, unloaded marked; a shared one with sharedBy), run " +
         "configurations (the chosen one marked), the build configuration every build takes and the others, whether the folder is trusted, the language server's state, the open files (unsaved marked) and the active " +
         "one with its caret, and the Aspire AppHosts and container run under way, each resource with its state, hold, debug " +
         "session and target. routes adds the web projects' routes, read from their code.")]
@@ -147,7 +147,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         {
             throw new InvalidOperationException($"{Session.WhyNoCSharp}, and routes are read from code through it");
         }
-        await When(() => Session.CSharp is not { } csharp || csharp.IsReady || csharp.IsStopped, ServerLimit, cancel, ServerState());
+        await SettledServer(cancel);
         IReadOnlyList<Roslyn.Extension.WebRoute> found = await window.RoutesAsync(cancel);
         return HeldWorkspace(answered with
         {
@@ -239,7 +239,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
 
     [McpServerTool(Name = McpTools.EditorText, Title = "A file's text in the editor", ReadOnly = true), Description(
         "A file's text as the editor holds it, unsaved changes included, its lines numbered.")]
-    public Task<string> EditorText(string path, int? from = null, int? to = null, CancellationToken cancel = default) => OnUi(cancel, async () =>
+    public Task<string> EditorText(string path, int? from = null, int? to = null, int? column = null, CancellationToken cancel = default) => OnUi(cancel, async () =>
     {
         OpenDocument document = await TextualAsync(path, cancel);
         TextSnapshot text = document.Text.Snapshot;
@@ -248,27 +248,48 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         {
             throw new ArgumentException($"to {end} is before from {first + 1}");
         }
+        int length = text.GetLine(first).Length;
+        if (column is int at && (at < 1 || at > length + 1))
+        {
+            throw new ArgumentException($"Column {at} is outside line {first + 1}, whose columns are 1 to {length + 1}");
+        }
         int last = Math.Min((to ?? text.LineCount) - 1, text.LineCount - 1);
-        return Numbered(text, first, last);
+        return Numbered(text, first, last, (column ?? 1) - 1);
     });
 
     /// <summary>A text's lines from <paramref name="first"/> to <paramref name="last"/> (from 0) numbered as editor_text
-    /// numbers them, held within <see cref="AgentAnswers.MostCharacters"/>: those that fit, at least the first (cut where it
-    /// alone runs past), then how many more lines were left out and the from that reads on.</summary>
-    private static string Numbered(TextSnapshot text, int first, int last)
+    /// numbers them, the first from its <paramref name="column"/> (from 0), held within <see cref="AgentAnswers.MostCharacters"/>:
+    /// those that fit, at least the first, cut where it alone runs past, then what was left out and the from (and column)
+    /// that reads on, a cut line's pieces joining whole.</summary>
+    private static string Numbered(TextSnapshot text, int first, int last, int column = 0)
     {
         System.Text.StringBuilder shown = new();
         int room = AgentAnswers.MostCharacters - WordsRoom;
         int at = first;
         for (; at <= last; at++)
         {
-            string line = $"{at + 1,6}\t{text.GetLineText(at)}";
-            if (line.Length + 1 > room && at > first)
+            LineSpan line = text.GetLine(at);
+            int from = at == first ? column : 0;
+            string number = $"{at + 1,6}\t";
+            int length = number.Length + line.Length - from;
+            if (length + 1 > room && at > first)
             {
                 break;
             }
-            shown.Append(at > first ? "\n" : string.Empty).Append(line.Length > room ? AgentAnswers.Cut(line, room) : line);
-            room -= line.Length + 1;
+            int kept = Math.Min(line.Length - from, Math.Max(0, room - number.Length));
+            if (kept < line.Length - from && kept > 0 && char.IsHighSurrogate(text[line.Start + from + kept - 1]))
+            {
+                kept--;
+            }
+            shown.Append(at > first ? "\n" : string.Empty).Append(number).Append(text.GetText(line.Start + from, kept));
+            if (kept < line.Length - from)
+            {
+                int after = last - at;
+                return string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                    $"{shown}\nLine {at + 1} is cut short, {line.Length - from - kept:N0} of its {line.Length:N0} characters left out"
+                    + $"{(after > 0 ? $" and {Numbers.Said(after)} more {Plural.Noun(after, "line")} after it" : string.Empty)}: from {at + 1} with column {from + kept + 1} reads on");
+            }
+            room -= length + 1;
         }
         return at > last ? shown.ToString() : $"{shown}\n{AgentAnswers.More(last - at + 1, "line", $"from {at + 1} reads on")}";
     }
@@ -285,7 +306,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         {
             string names = string.Join(", ", left.Select(d => FileText.IsReadOnly(d.Path) ? $"{Relative(d.Path)} (read-only)"
                 : Editors.HeldElsewhere(d.Path) is { } held ? $"{Relative(d.Path)} ({Refusals.HeldInGodot(held)})" : Relative(d.Path)));
-            throw new InvalidOperationException($"Saved {unsaved - left.Count} of {unsaved} files; not saved: {names}");
+            throw new InvalidOperationException($"Saved {Numbers.Said(unsaved - left.Count)} of {Numbers.Said(unsaved)} files; not saved: {names}");
         }
         return unsaved == 0 ? "Nothing to save" : $"Saved {Plural.Of(unsaved, "file")}";
     });
@@ -967,12 +988,11 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         List<string> changed = [.. renaming.Files.Where(f => f.Change == RefactoredChange.Changed).Select(f => Relative(f.Path))];
         List<string> moved = [.. renaming.Files.Where(f => f.Change == RefactoredChange.Moved).Select(f => $"{Relative(f.Path)} to {Relative(f.To!)}")];
         string renamed = moved.Count > 0 ? $"; renamed {string.Join(", ", moved)}" : string.Empty;
-        string unrenamed = renaming.Left.Count > 0 ? $"; not in {string.Join(", ", renaming.Left)}, edited meanwhile" : string.Empty;
-        return $"Renamed in {Plural.Of(changed.Count, "file")}: {string.Join(", ", changed)}{renamed}{unrenamed}{(renaming.Unmoved is { } unmoved ? $"; but {unmoved}" : string.Empty)}";
+        return $"{Refusals.EditedMeanwhile($"Renamed in {Plural.Of(changed.Count, "file")}: {string.Join(", ", changed)}{renamed}", renaming.Left)}{(renaming.Unmoved is { } unmoved ? $"; but {unmoved}" : string.Empty)}";
     }
 
     [McpServerTool(Name = McpTools.CodeActions, Title = "Fixes and refactorings", ReadOnly = true), Description(
-        "The fixes and refactorings offered at a position (Alt+Enter), or over a selection to endLine:endColumn (Extract " +
+        "The fixes and refactorings offered at a position (Show Context Actions), or over a selection to endLine:endColumn (Extract " +
         "Method, Introduce Variable), as 'title [kind]' with the choices each offers (nested actions, a Fix All's scopes, where " +
         "a XAML resource goes), which apply_code_action takes: Passenger's own fixes first (a GDScript's are all Passenger's), then " +
         "ESLint's, then the language server's; in XAML, the line's problems' fixes (a binding's missing property or command, a missing converter), Extract " +
@@ -1030,7 +1050,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
     });
 
     [McpServerTool(Name = McpTools.ApplyCodeAction, Title = "Apply a fix or refactoring", Destructive = true), Description(
-        "Applies the action titled as code_actions lists it there, as Alt+Enter does, choice naming one of its choices, and " +
+        "Applies the action titled as code_actions lists it there, as Show Context Actions does, choice naming one of its choices, and " +
         "saves the files. name is XAML's Extract Resource or Extract Style's new key or style (else their dialog's), which " +
         "replace every use of the value, or an Aspire parameter's Set… value.")]
     public Task<string> ApplyCodeAction(string path, int line, int column, string title, int? endLine = null, int? endColumn = null,
@@ -1163,8 +1183,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         List<string> moved = [.. made.Files.Where(f => f.Change == RefactoredChange.Moved).Select(f => $"{Relative(f.Path)} to {Relative(f.To!)}")];
         string to = changed > 0 || moved.Count == 0 ? $" to {Plural.Of(changed, "file")}" : string.Empty;
         string renaming = moved.Count > 0 ? $", renaming {string.Join(", ", moved)}" : string.Empty;
-        string left = made.Left.Count > 0 ? $", but not to {string.Join(", ", made.Left)}, edited meanwhile" : string.Empty;
-        return $"Applied {what}{to}{renaming}{unrun}{left}{(made.Unmoved is { } unmoved ? $"; but {unmoved}" : string.Empty)}";
+        return $"{Refusals.EditedMeanwhile($"Applied {what}{to}{renaming}{unrun}", made.Left)}{(made.Unmoved is { } unmoved ? $"; but {unmoved}" : string.Empty)}";
     }
 
     /// <summary>A code action whose change its server makes by its own command, made as the window makes it
@@ -1188,7 +1207,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         string changed = AgentAnswers.Named([.. made.Files.Where(f => f.Change != RefactoredChange.Created).Select(f => Relative(f.Path))], "file", FilesOfTheChange);
         string created = AgentAnswers.Named([.. made.Files.Where(f => f.Change == RefactoredChange.Created).Select(f => Relative(f.Path))], "file", FilesOfTheChange);
         string where = (changed.Length > 0 ? $" to {changed}" : string.Empty) + (created.Length > 0 ? $"{(changed.Length > 0 ? "," : string.Empty)} making {created}" : string.Empty);
-        return $"Applied {what}{where}{named}{(made.Left.Count > 0 ? $", but not to {string.Join(", ", made.Left)}, edited meanwhile" : string.Empty)}";
+        return Refusals.EditedMeanwhile($"Applied {what}{where}{named}", made.Left);
     }
 
     /// <summary>A code action as code_actions lists it: its title, its kind, and the choices it offers, a Suppress or
@@ -1277,7 +1296,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
             throw new ArgumentException($"No kind '{kind}'; Go to Symbol's kinds are {string.Join(", ", SymbolKinds.All)}", nameof(kind));
         }
         // Found once the C# files come under the folder's projects are in them (one just made may declare it), saying any left out.
-        await Server(cancel);
+        await SettledServer(cancel);
         IReadOnlyList<(string Path, string Project)> untaken = await UntakenAsync(cancel) ?? [];
         RoslynSession session = await Server(cancel);
         string? without = WentWithout(untaken);
@@ -1347,10 +1366,10 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         {
             throw new ArgumentException("Give symbol, a name, or path, line and column, a place: not both");
         }
-        SymbolsNamed named = await NamedAsync(await Server(cancel), symbol, null, 10, cancel);
+        SymbolsNamed named = await NamedAsync(await SettledServer(cancel), symbol, null, 10, cancel);
         return named.Symbols.Count == 1 ? new CodePlace(named.Symbols[0].Path, named.Symbols[0].Line, named.Symbols[0].Column)
             : throw new InvalidOperationException($"{symbol} names {Plural.Of(named.Symbols.Count + named.More, "symbol")} of the solution's own code: "
-                + $"{string.Join("; ", named.Symbols.Select(n => n.ToString()))}{(named.More > 0 ? $"; and {named.More} more" : string.Empty)}. Name one by its container, "
+                + $"{string.Join("; ", named.Symbols.Select(n => n.ToString()))}{(named.More > 0 ? $"; and {Numbers.Said(named.More)} more" : string.Empty)}. Name one by its container, "
                 + "its parameters' types or its documentation id");
     }
 
@@ -1396,7 +1415,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
     /// card says.</summary>
     private async Task<string> SymbolsInfo(string symbol, CancellationToken cancel)
     {
-        SymbolsNamed named = await NamedAsync(await Server(cancel), symbol, null, 10, cancel);
+        SymbolsNamed named = await NamedAsync(await SettledServer(cancel), symbol, null, 10, cancel);
         List<string> each = [];
         foreach (NamedPlace place in named.Symbols)
         {
@@ -1404,7 +1423,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
             (OpenDocument document, _) = await CodeOrCopy(place.Path, cancel);
             each.Add($"{place}\n{await CardAsync(document, Offset(document, place.Line, place.Column), cancel)}".TrimEnd());
         }
-        return string.Join("\n\n", each) + (named.More > 0 ? $"\n\nAnd {named.More} more: name one by its container, its parameters' types or its documentation id" : string.Empty);
+        return string.Join("\n\n", each) + (named.More > 0 ? $"\n\nAnd {Numbers.Said(named.More)} more: name one by its container, its parameters' types or its documentation id" : string.Empty);
     }
 
     /// <summary>What the hover card says of an offset of a file, as the languages' one order says it (<see
@@ -1414,50 +1433,6 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         HoverWords card = new();
         await window.Assist.Languages.HoverAsync(card, document, offset, cancel);
         return card.Text;
-    }
-
-    /// <summary>A hover card's parts as an agent reads them: code and words as they are, a language server's made plain
-    /// (<see cref="HoverText"/>) and set apart from the rest by a blank line.</summary>
-    private sealed class HoverWords : IHoverCard
-    {
-        private readonly List<(string Text, bool Served)> parts = [];
-
-        public string Text => string.Concat(parts.Select((p, i) => (i == 0 ? string.Empty : p.Served || parts[i - 1].Served ? "\n\n" : "\n") + p.Text));
-
-        public void AddCode(string code, Languages.Language? language = null) => Add(code, false);
-
-        public void AddText(string text) => Add(text, false);
-
-        public void AddHover(Hover hover) => Add(HoverText(hover), true);
-
-        private void Add(string text, bool served)
-        {
-            if (text.Trim() is { Length: > 0 } said)
-            {
-                parts.Add((said, served));
-            }
-        }
-    }
-
-    /// <summary>A hover card's words as an agent reads them, by its kind: plain text as written, Markdown made plain text,
-    /// its code fences, backslash escapes, entities and line-break spaces taken out, the code in it kept as written; no
-    /// image's data (<see cref="HoverMarkdown.ByKind"/>), a run of blank lines kept as one.</summary>
-    private static string HoverText(Hover hover)
-    {
-        System.Text.StringBuilder text = new();
-        bool gap = false;
-        foreach (string line in HoverMarkdown.ByKind(Shapes.Text(hover.Contents), HoverMarkdown.IsPlain(hover.Contents), words: false).SelectMany(b => b.Lines))
-        {
-            string plain = line.TrimEnd();
-            if (plain.Trim().Length == 0)
-            {
-                gap = text.Length > 0;
-                continue;
-            }
-            text.Append(gap ? "\n" : string.Empty).Append(plain).Append('\n');
-            gap = false;
-        }
-        return text.ToString().TrimEnd();
     }
 
     /// <summary>Usages in the order an agent reads them: by file, then line and column, generated code's files last: a
@@ -2343,7 +2318,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
             ?? throw new ArgumentException($"A column names a lambda's breakpoint in a C# file, which {Relative(path)} is not");
         if (line >= parsed.Text.LineCount)
         {
-            throw new ArgumentException($"{Relative(path)} has {parsed.Text.LineCount} lines");
+            throw new ArgumentException($"{Relative(path)} has {Numbers.Said(parsed.Text.LineCount)} lines");
         }
         LineSpan span = parsed.Text.GetLine(line);
         if ((column >= 1 ? LambdaBreakpoints.Of(parsed, line, column - 1) : null) is not { } lambda)
@@ -2506,7 +2481,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         }
         IEnumerable<string> lines = errors.Take(10).Select(p =>
             $"{(p.Path is { } at ? $"{Relative(at)}:{p.Position.Line + 1}:{p.Position.Column + 1}" : p.Project)}: {p.Code} {p.Message}");
-        return $"{refused}:\n{string.Join('\n', lines)}{(errors.Count > 10 ? $"\n… {errors.Count - 10} more: problems lists them" : "")}";
+        return $"{refused}:\n{string.Join('\n', lines)}{(errors.Count > 10 ? $"\n… {Numbers.Said(errors.Count - 10)} more: problems lists them" : "")}";
     }
 
     /// <summary>What an answer says of an app whose UI is up: where it draws, where nobody sees it, and what looks at it.</summary>
@@ -2573,7 +2548,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
                 : started.Debugged != DebugState.Running ? started
                 : app is { State: LiveTree.LiveAppState.Connected } ? started with { Status = $"{started.Status}, {UiUp(app)}" }
                 : game is { State: LiveTree.LiveAppState.Connected, Monitors: not null } ? started with { Status = $"{started.Status}, {GameUp}" }
-                : serving.Said is { } said ? started with { Status = $"{started.Status}, {said}" }
+                : serving.Said is { } said ? started with { Status = $"{started.Status}, {await ServedFromHereAsync(said, cancel)}" }
                 : process is not null && device?.Plan?.Device is { App: { } onIt } launch
                     ? started with { Status = $"{started.Status}, {onIt.Package} started on {launch.Target.Name} as process {process}" }
                 : started;
@@ -2585,6 +2560,45 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         {
             call?.Waited(Session.Debug.Session?.State.ToString().ToLowerInvariant() ?? "no session");
         }
+    }
+
+    /// <summary>Where the program the debugger shows serves, in an agent's words, once it has said (<paramref name="heard"/>):
+    /// a service of a run of services where its run reaches it from this machine (a container's published port, an AppHost's
+    /// endpoint), as the window's own links do (<see cref="ServiceRun.AddressAsync"/>); the program's own words for any other.
+    /// A container's own address reaches nothing here, so one whose run gives none says so rather than naming it.</summary>
+    private async Task<string> ServedFromHereAsync(string heard, CancellationToken cancel)
+    {
+        if (Session.Debug.Session is not { } shown || ServiceDebuggedBy(shown) is not { } debugged)
+        {
+            return heard;
+        }
+        (ServiceRun run, IRunService service) = debugged;
+        try
+        {
+            if (await run.AddressAsync(service, cancel) is { } address)
+            {
+                return $"listening at {address}";
+            }
+        }
+        catch (Exception unread) when (run.Refused(unread) || unread is InvalidOperationException or System.Text.Json.JsonException or TimeoutException)
+        {
+            return run is Containers.ContainerRun ? $"its host started in its container, whose published port could not be read: {unread.Message}" : heard;
+        }
+        return run is Containers.ContainerRun ? "its host started in its container, which publishes none of its ports to this machine" : heard;
+    }
+
+    /// <summary>The run of services and the service of it a session debugs, as its run names the session debugging each; null
+    /// for a program of no run of services.</summary>
+    private (ServiceRun Run, IRunService Service)? ServiceDebuggedBy(DebugSession session)
+    {
+        foreach (ServiceRun run in Session.ServiceRuns)
+        {
+            if (run.Services.FirstOrDefault(s => run.SessionOf(Session.Debug, s) == session) is { } service)
+            {
+                return (run, service);
+            }
+        }
+        return null;
     }
 
     /// <summary>What a launch under the debugger is waited for at a phase of its start, within <paramref name="limit"/> in
@@ -2622,7 +2636,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
             0 => null,
             1 => $"its breakpoint at {Relative(set[0].Path)}:{set[0].Line + 1}",
             <= 3 => $"its breakpoints at {Plural.Listed([.. set.Select(b => $"{Relative(b.Path)}:{b.Line + 1}")])}",
-            _ => $"its {set.Count} breakpoints",
+            _ => $"its {Numbers.Said(set.Count)} breakpoints",
         };
     }
 
@@ -2734,7 +2748,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         {
             [{ } only] => only,
             [] => throw new InvalidOperationException($"No .NET program {(processId is int pid ? $"with process id {pid}" : $"named {program}")} is running for the debugger to attach to; debug_state of processes lists those there are"),
-            _ => throw new InvalidOperationException($"{named.Count} running programs are named {program}: name one by its processId ({string.Join(", ", named.Select(p => p.Id))})"),
+            _ => throw new InvalidOperationException($"{Numbers.Said(named.Count)} running programs are named {program}: name one by its processId ({string.Join(", ", named.Select(p => p.Id))})"),
         };
         if (await window.AttachAsync(chosen) is { } problem)
         {
@@ -2829,6 +2843,20 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
             inTerminal.Session.Write(newline ? text + "\r" : text);
             return $"Typed into {inTerminal.Name}'s tab of the Terminal window";
         }
+        // What the Debug console types into nothing is refused, saying where the program reads its input.
+        ToolWindows.DebugTab tab = TabFor(session)!;
+        if (tab.Companion is { IsLive: true } beside)
+        {
+            throw new InvalidOperationException($"{Refusals.InputBeside(tab.Name, beside.Name)} ({McpTools.DebugInput} with session \"{beside.Name}\")");
+        }
+        if (tab.InputFrom is { } from)
+        {
+            throw new InvalidOperationException(Refusals.InputFromStarter(tab.Name, from));
+        }
+        if (tab.Console.InputEnded)
+        {
+            throw new InvalidOperationException(Refusals.InputEnded(tab.Name));
+        }
         await debugged.InputAsync(newline ? text + "\n" : text);
         return "Sent";
     });
@@ -2890,7 +2918,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
 
     [McpServerTool(Name = McpTools.IdeAction, Title = "Run an IDE action", Destructive = true), Description(
         "Runs an IDE action by its id (app.build, app.debug.stepOver...; ide_actions lists them) as its shortcut would, waits " +
-        "for the work it begins and says what it came to, or says why it cannot. input: app.migrations.add's name, updateTo's " +
+        "for the work it begins and says what it came to, or says why it cannot. input: app.migrations.add's name (then its output folder, else the context's last), updateTo's " +
         "target, environment's name; app.saveAsLaunchProfile's configuration (else the chosen one); app.targetFramework's framework, as " +
         "Project:net9.0 where several projects target several; app.chooseRunTarget's device, emulator or simulator by name " +
         "(Configuration:name for another configuration's), app.chooseBuildConfiguration's configuration (Release, or " +
@@ -3006,12 +3034,17 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
     {
         ActionRegistry actions = window.Actions;
         ActionContext context = Beside ? actions.Context().ForAgent() : actions.Context();
-        IEnumerable<IdeAction> asked = query is not { Length: > 0 } words ? actions.All
-            : actions.All.Where(a => a.Id.Contains(words, StringComparison.OrdinalIgnoreCase) || a.Title.Contains(words, StringComparison.OrdinalIgnoreCase)
-                || a.Group.Contains(words, StringComparison.OrdinalIgnoreCase));
-        return Task.FromResult(Held([.. asked.Select(a =>
-            $"{a.Id}: {a.Title} [{a.Group}]{(actions.Shortcut(a.Id) is { } keys ? $" ({keys})" : string.Empty)}{(a.WhyNot(context) is { } why ? $" - cannot run: {why}" : string.Empty)}")],
-            "action", "query, a group's name or a word of the action's, narrows them"));
+        IdeAction[] asked = query is not { Length: > 0 } words ? [.. actions.All]
+            : [.. actions.All.Where(a => a.Id.Contains(words, StringComparison.OrdinalIgnoreCase) || a.Title.Contains(words, StringComparison.OrdinalIgnoreCase)
+                || a.Group.Contains(words, StringComparison.OrdinalIgnoreCase))];
+        string[] lines = [.. asked.Select(a =>
+            $"{a.Id}: {a.Title} [{a.Group}]{(actions.Shortcut(a.Id) is { } keys ? $" ({keys})" : string.Empty)}{(a.WhyNot(context) is { } why ? $" - cannot run: {why}" : string.Empty)}")];
+        // Cut short, it names the groups of those it left out, which a query of each lists.
+        return Task.FromResult(Held(lines, "action", "query, a group's name or a word of the action's, narrows them", readOn: last =>
+        {
+            string[] groups = [.. asked.Skip(Array.IndexOf(lines, last) + 1).Select(a => $"\"{a.Group}\"").Distinct(StringComparer.Ordinal)];
+            return $"they are of the {Plural.Noun(groups.Length, "group")} {Plural.Listed(groups)}";
+        }));
     });
 
     // The work behind them
@@ -3185,7 +3218,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         return paused is [var stopped] ? stopped
             : programs is [var only] ? only
             : live.Count == 0 ? debugger.Chosen
-            : throw new InvalidOperationException($"{live.Count} programs are debugged ({Listed()}), {(paused.Count == 0 ? "none" : $"{paused.Count}")} paused: name the one meant with session");
+            : throw new InvalidOperationException($"{Numbers.Said(live.Count)} programs are debugged ({Listed()}), {(paused.Count == 0 ? "none" : Numbers.Said(paused.Count))} paused: name the one meant with session");
     }
 
     /// <summary>The programs debugged and each one's state, as debug_state lists them.</summary>
@@ -3324,7 +3357,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
             }
             string[] modules = [.. frames.Skip(i).Take(last - i + 1).Select(f => f.Name.IndexOf('!', StringComparison.Ordinal) is > 0 and int bang ? f.Name[..bang] : null)
                 .OfType<string>().Distinct()];
-            lines.Add($"{i}-{last}: {last - i + 1} frames outside the folder's code{(modules.Length > 0 ? $" ({string.Join(", ", modules.Take(4))}{(modules.Length > 4 ? ", …" : "")})" : "")}");
+            lines.Add($"{i}-{last}: {Numbers.Said(last - i + 1)} frames outside the folder's code{(modules.Length > 0 ? $" ({string.Join(", ", modules.Take(4))}{(modules.Length > 4 ? ", …" : "")})" : "")}");
             i = last;
         }
         return lines;
@@ -3384,7 +3417,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
             {
                 0 => $"There is no frame {frame}: the stopped thread has no frames",
                 1 => $"There is no frame {frame}: the stopped thread has 1 frame, 0",
-                _ => $"There is no frame {frame}: the stopped thread has {frames.Count} frames, 0 (the top) to {frames.Count - 1}, as debug_state numbers them",
+                _ => $"There is no frame {frame}: the stopped thread has {Numbers.Said(frames.Count)} frames, 0 (the top) to {frames.Count - 1}, as debug_state numbers them",
             });
     }
 
@@ -3408,7 +3441,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         ToolWindows.DebugTab? tab = TabFor(session);
         if (tab?.Session is not { State: not DebugState.Ended } debugged || !tab.IsLive)
         {
-            throw new InvalidOperationException(session is null || tab is null ? "Nothing is being debugged; debug_start starts it" : $"{tab.Name} is no longer debugged; debug_state lists those that are");
+            throw new InvalidOperationException(session is null || tab is null ? $"{Refusals.NothingDebugged}; debug_start starts it" : $"{tab.Name} is no longer debugged; debug_state lists those that are");
         }
         if (choose)
         {
@@ -3473,8 +3506,9 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
     {
         BindingErrorBreakpoint bindings = Session.Debug.Breakpoints.BindingErrors;
         ScriptErrorBreakpoint scripts = Session.Debug.Breakpoints.ScriptErrors;
-        return [.. Session.Debug.Breakpoints.Exceptions.Select(b => new BreakpointInfo(null, null, b.Enabled, b.Status.ToString().ToLowerInvariant(), b.Condition, b.HitCondition,
-                b.LogMessage, b.Suspend, b.Message, b.Location, ExceptionScenarioNames.Of(b.Scenarios))),
+        // One whose scenarios leave it never stopping is inactive, whatever a debugger said of it, in Suspend If's words.
+        return [.. Session.Debug.Breakpoints.Exceptions.Select(b => new BreakpointInfo(null, null, b.Enabled, b.Inactive is null ? b.Status.ToString().ToLowerInvariant() : "inactive",
+                b.Condition, b.HitCondition, b.LogMessage, b.Suspend, b.Inactive ?? b.Message, b.Location, ExceptionScenarioNames.Of(b.Scenarios))),
             new BreakpointInfo(null, null, bindings.Enabled, bindings.Status.ToString().ToLowerInvariant(), bindings.Condition, bindings.HitCondition, bindings.LogMessage,
                 bindings.Suspend, bindings.Message, BindingErrors: true),
             new BreakpointInfo(null, null, scripts.Enabled, scripts.Status.ToString().ToLowerInvariant(), scripts.Condition, scripts.HitCondition, scripts.LogMessage,
@@ -3516,10 +3550,12 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         return [.. actions.Where(a => a.Disabled is null)];
     }
 
-    /// <summary>The language server, once it has loaded the workspace; refused, saying why, while the folder's projects
-    /// have no SDK to load with (<see cref="Unloadable"/>) or are still loading after the wait.</summary>
+    /// <summary>The language server, once it has loaded the workspace and taken in what was written on disk since it was
+    /// last asked (<see cref="WrittenTakenInAsync"/>); refused, saying why, while the folder's projects have no SDK to load
+    /// with (<see cref="Unloadable"/>) or are still loading after the wait.</summary>
     private async Task<RoslynSession> Server(CancellationToken cancel)
     {
+        await LookedAgainForCodeAsync(cancel);
         if (Unloadable() is { } unloadable)
         {
             throw new InvalidOperationException(unloadable);
@@ -3529,17 +3565,30 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
             throw new InvalidOperationException(Session.WhyNoCSharp);
         }
         // The session's server, which starts again when its projects change: each look is at the one there is then.
-        if (Session.CSharp is { IsReady: false })
+        if (Session.CSharp is { IsReady: false } && ServerDown() is null)
         {
             AgentCall.Say("Waiting for the C# language server to load the solution");
-            await When(() => Session.CSharp is not { IsReady: false, IsStopped: false } || Unloadable() is not null, ServerLimit, cancel, ServerState(), SdkState());
+            await When(() => Session.CSharp is not { IsReady: false } || ServerDown() is not null || Unloadable() is not null, ServerLimit, cancel, ServerState(), SdkState());
             AgentCall.Say(null);
+        }
+        if (Unloadable() is null && Session.CSharp is { IsReady: true })
+        {
+            await WrittenTakenInAsync(cancel);
         }
         return Unloadable() is { } found ? throw new InvalidOperationException(found)
             : Session.CSharp is { IsReady: true, Session: { } server } ? server
-            : Session.CSharp is { IsStopped: true } ? throw new InvalidOperationException(Refusals.CSharpStopped)
+            : ServerDown() is { } down ? throw new InvalidOperationException(down)
             : throw new TimeoutException(Refusals.StillLoading(ServerLimit, Session.CSharp?.State ?? "none"));
     }
+
+    /// <summary>Why the C# language server will answer nothing however long a question waits, in Refusals' words: left
+    /// stopped, or unable to start; null while it runs or starts.</summary>
+    private string? ServerDown() => Session.CSharp switch
+    {
+        { IsStopped: true } => Refusals.CSharpStopped,
+        { Unavailable: { } why } => Refusals.CSharpUnavailable(why),
+        _ => null,
+    };
 
     /// <summary>The folder's projects found to have no .NET SDK, or one again: what a wait for the server's load wakes on too.</summary>
     private Wake SdkState()
@@ -3580,6 +3629,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
     /// it was waited for (false while the server still loads the workspace).</summary>
     private async Task<bool> TakenInAsync(string path, CancellationToken cancel)
     {
+        await LookedAgainForCodeAsync(cancel);
         if (Session.ProjectOf(Resolve(path)) is not null && Unloadable() is { } unloadable)
         {
             throw new InvalidOperationException(unloadable);
@@ -3599,6 +3649,7 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
     /// server still loads the workspace.</summary>
     private async Task<IReadOnlyList<(string Path, string Project)>?> UntakenAsync(CancellationToken cancel)
     {
+        await LookedAgainForCodeAsync(cancel);
         if (Unloadable() is { } unloadable)
         {
             throw new InvalidOperationException(unloadable);
@@ -3662,39 +3713,33 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
                 : $"The language server has not loaded {Path.GetFileName(document.Path)} ({Session.CSharp?.State ?? "none"})"));
     }
 
-    /// <summary>Waits until the C# language server answers for a file of the folder's as its projects stand, and <paramref name="held"/>
-    /// holds: answers before the solution has loaded, or before what a restore as it loaded brought (the projects' load
-    /// after it, their generators' run, the files its builds wrote read again), are of the code before, so the agent is
-    /// told what it waits for. Refused once the server has stopped, when the time is up with the load or what the restore
-    /// brought still to come, and when the server's generators' wait ran out meanwhile with what it waited for unread.</summary>
-    private async Task ServerSettledAsync(string path, Func<CSharpService, bool> held, CancellationToken cancel)
+    /// <summary>Waits until the C# language server answers for a file of the folder's, or with none the whole solution, as
+    /// its projects stand, and <paramref name="held"/> holds: answers before the solution has loaded, or before what a restore
+    /// as it loaded brought (the projects' load after it, their generators' run, the files its builds wrote read again), are
+    /// of the code before, so the agent is told what it waits for. Refused once the server has stopped, when the time is up
+    /// with any of it still to come, and when the generators' wait ran out meanwhile with what it waited for unread.</summary>
+    private async Task ServerSettledAsync(string? path, Func<CSharpService, bool> held, CancellationToken cancel)
     {
+        await LookedAgainForCodeAsync(cancel);
         string? reloading = null;
         bool waited = false;
         bool settled = false;
         long began = System.Diagnostics.Stopwatch.GetTimestamp();
         // Looked at every 50 ms.
-        await Until(() =>
+        await Until(Settled, ServerLimit, cancel);
+        if (settled)
         {
-            if (Session.CSharp is not { } csharp || csharp.IsStopped)
-            {
-                return settled = true;
-            }
-            if (csharp.IsReady && csharp.ReloadingWhat(path) is var what && what != reloading)
-            {
-                reloading = what;
-                waited |= what is not null;
-                AgentCall.Say(what is null ? null : $"Waiting for {what}");
-            }
-            return settled = csharp.IsReady && reloading is null && !csharp.AwaitsRestore(path) && held(csharp);
-        }, ServerLimit, cancel);
+            // The load's end is heard on the server's thread, what it said before it on this one only in its turn: heard, then looked at again.
+            await PostedHeardAsync().WaitAsync(cancel);
+            await Until(Settled, ServerLimit - System.Diagnostics.Stopwatch.GetElapsedTime(began), cancel);
+        }
         if (reloading is not null)
         {
             AgentCall.Say(null);
         }
-        if (Session.CSharp is { IsStopped: true })
+        if (ServerDown() is { } down)
         {
-            throw new InvalidOperationException(Refusals.CSharpStopped);
+            throw new InvalidOperationException(down);
         }
         if (waited && Session.CSharp?.RanOutReading is { } ranOut && ranOut.At > began)
         {
@@ -3704,11 +3749,74 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
         {
             throw new TimeoutException(Refusals.StillLoading(ServerLimit, unready.State));
         }
-        if (!settled && (reloading ?? (Session.CSharp?.AwaitsRestore(path) == true ? $"the C# language server to restore {Session.ProjectOf(path)?.Name}" : null)) is { } coming)
+        if (!settled && (reloading ?? (Session.CSharp is { } restoring && RestoreAwaited(restoring) is { } project ? $"the C# language server to restore {project}" : null)) is { } coming)
         {
             throw new TimeoutException(Refusals.StillComing(ServerLimit, coming));
         }
+        await WrittenTakenInAsync(cancel);
+
+        bool Settled()
+        {
+            if (Session.CSharp is not { } csharp || ServerDown() is not null)
+            {
+                return settled = true;
+            }
+            if (csharp.IsReady && csharp.ReloadingWhat(path) is var what && what != reloading)
+            {
+                reloading = what;
+                waited |= what is not null;
+                AgentCall.Say(what is null ? null : $"Waiting for {what}");
+            }
+            return settled = csharp.IsReady && reloading is null && RestoreAwaited(csharp) is null && held(csharp);
+        }
+
+        // The project whose restore the answer waits for, by name: the file's, or with none, any the server loaded.
+        string? RestoreAwaited(CSharpService csharp) => path is null ? csharp.RestoreAwaited()
+            : csharp.AwaitsRestore(path) ? Session.ProjectOf(path)?.Name ?? string.Empty : null;
     }
+
+    /// <summary>Done once the window's thread has run what was posted to it before now at <see cref="UiThread.Post(Action,
+    /// string, int)"/>'s priority, below a wait's own turns: the C# language server's words among it.</summary>
+    private static Task PostedHeardAsync()
+    {
+        TaskCompletionSource heard = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        UiThread.Post(() => heard.TrySetResult());
+        return heard.Task;
+    }
+
+    /// <summary>The language server once it answers for the whole solution as its projects stand (<see cref="Server"/>, then
+    /// <see cref="ServerSettledAsync"/> with no file), for a question of the solution's whole code: what it says of the
+    /// projects' load, their symbols, routes and findings. Refused, saying why, as each of those refuses.</summary>
+    private async Task<RoslynSession> SettledServer(CancellationToken cancel)
+    {
+        await Server(cancel);
+        await ServerSettledAsync(null, _ => true, cancel);
+        return await Server(cancel);
+    }
+
+    /// <summary>Waits, up to <see cref="LookLimit"/>, for the watchers to look again once in this call for what another program
+    /// made or deleted that the system never told of (<see cref="MainWindow.AgentAsksOfCode"/>), so a question of the code
+    /// waits for what they find.</summary>
+    private async Task LookedAgainForCodeAsync(CancellationToken cancel)
+    {
+        // A wait with no fault to leave behind: a look ends however it went.
+        await Task.WhenAny(window.AgentAsksOfCode(), Task.Delay(LookLimit, cancel));
+        cancel.ThrowIfCancellationRequested();
+    }
+
+    /// <summary>Waits for the C# language server to take in what another program wrote on disk that it may hold as it was,
+    /// the folder's watcher having yet to tell it (<see cref="CSharpService.TakeInWrittenAsync"/>): refused once the time is
+    /// up, as the answer would be of the code before it.</summary>
+    private async Task WrittenTakenInAsync(CancellationToken cancel)
+    {
+        if (Session.CSharp is { } csharp && await csharp.TakeInWrittenAsync(Patience.Limit, SayReading, cancel) is { } unread)
+        {
+            throw new TimeoutException(Refusals.StillComing(Patience.Limit, $"the C# language server to read {Relative(unread)} as it is on disk"));
+        }
+    }
+
+    /// <summary>The agent's progress while a file written on disk is waited for (null once it is not).</summary>
+    private void SayReading(string? file) => AgentCall.Say(file is null ? null : $"Waiting for the C# language server to read {Relative(file)} as it is on disk");
 
     /// <summary><see cref="Code"/>, or a source generator's code copied, as the document the server has now and only asked
     /// about (<see cref="GeneratedCode.AskableAsync"/>).</summary>
@@ -3719,7 +3827,11 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
             return await Code(path, cancel);
         }
         OpenDocument copy = await DocumentAsync(path, cancel);
-        await When(() => Session.CSharp is not { } csharp || csharp.IsReady || csharp.IsStopped, ServerLimit, cancel, ServerState());
+        await When(() => Session.CSharp is not { IsReady: false } || ServerDown() is not null, ServerLimit, cancel, ServerState());
+        if (ServerDown() is { } down)
+        {
+            throw new InvalidOperationException(down);
+        }
         (LspDocument? lsp, string? why) = Session.CSharp is { } service ? await service.Generated.AskableAsync(copy, cancel) : (null, Session.WhyNoCSharp);
         return lsp is null ? throw new InvalidOperationException(why) : (copy, lsp);
     }
@@ -3938,8 +4050,11 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
 
     /// <summary>A line an agent names (from one) as a line of a file's text (from zero); one below the first or past the
     /// last refused, saying the file's lines.</summary>
-    private int LineIn(TextSnapshot text, string path, int line) => line >= 1 && line <= text.LineCount ? line - 1
-        : throw new ArgumentException($"Line {line} is outside {Relative(path)}, whose lines are 1 to {text.LineCount}");
+    private int LineIn(TextSnapshot text, string path, int line)
+    {
+        int last = text.LineCount;
+        return line >= 1 && line <= last ? line - 1 : throw new ArgumentException($"Line {line} is outside {Relative(path)}, whose lines are 1 to {last}");
+    }
 
     /// <summary>The places the language server names, in its lines, as an agent reads them (<see cref="Lines"/>).</summary>
     private async Task<IReadOnlyList<Place>> Places(IReadOnlyList<LspLocation> locations, CancellationToken cancel)
@@ -4060,10 +4175,12 @@ public sealed partial class PassengerTools(MainWindow window, AgentConnection? c
             session.Workspace?.Filter?.Path ?? session.Solution?.Path,
             [.. (session.Workspace?.Projects ?? []).Where(p => Here(p.Path)).Select(p => new ProjectInfo(p.Name, Relative(p.Path), p.IsAndroidApp ? "Exe" : p.OutputType, p.TargetFrameworks)
             {
+                Kind = session.Unloaded.Contains(p.Path) ? null : ProjectKinds.Words(ProjectKinds.Of(p)),
                 Unloaded = session.Unloaded.Contains(p.Path) ? true : null,
                 ChosenFramework = session.Frameworks.Of(p),
             }), .. (session.Workspace?.SharedProjects ?? []).Where(Here).Select(p => new ProjectInfo(Path.GetFileNameWithoutExtension(p), Relative(p), null, [])
             {
+                Kind = ProjectKinds.Words(ProjectKind.Shared),
                 SharedBy = [.. ImportersOf(session, p)],
             })],
             [.. session.Configurations.All.Where(c => inside is null || PlacesOf(c).Any(Here)).Select(c => c.Name)],
@@ -4326,6 +4443,10 @@ public sealed record RouteInfo(string Project, string Kind, string Route, string
 /// Android build), which .NET for Android evaluates as Library though it runs.</summary>
 public sealed record ProjectInfo(string Name, string Path, string? OutputType, IReadOnlyList<string>? TargetFrameworks)
 {
+    /// <summary>What it builds as its evaluation says, in the Solution view's words ("web API", "class library"); null
+    /// where none is said: not yet evaluated, unloaded, or of no kind told apart.</summary>
+    public string? Kind { get; init; }
+
     /// <summary>True for a project not loaded: one the solution filter opened leaves out, or one the person unloaded; null
     /// for one loaded, which the answer leaves unsaid.</summary>
     public bool? Unloaded { get; init; }

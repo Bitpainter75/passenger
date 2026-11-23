@@ -20,7 +20,7 @@ public sealed class SqlFileDialog : IdeWindow
     {
         FormRows.Scope(this);
         Title = title;
-        Width = 600;
+        Width = DialogWidths.Form;
         SizeToContent = SizeToContent.Height;
         CanResize = false;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -35,12 +35,10 @@ public sealed class SqlFileDialog : IdeWindow
         Control field = file;
         if (local is { } reads)
         {
-            Button browse = new() { Content = "Browse…", Margin = new Avalonia.Thickness(8, 0, 0, 0), [DockPanel.DockProperty] = Dock.Right };
-            browse.Click += (_, _) => IdeErrors.Observe(BrowseAsync(reads));
-            field = new DockPanel { Children = { browse, file } };
+            field = BrowseRow.Of(file, () => BrowseAsync(reads));
         }
-        StackPanel fields = new() { Spacing = Gaps.Wide, Children = { FormRows.Of("Database:", database), FormRows.Of(local is null ? "File on the server:" : "File:", field) } };
-        Content = DialogFooter.Headed(title, new TextBlock { Classes = { StyleClasses.Muted }, Text = about, TextWrapping = TextWrapping.Wrap, FontSize = 12 }, fields,
+        StackPanel fields = new() { Spacing = Gaps.Wide, Children = { FormRows.Of("Database", database), FormRows.Of(local is null ? "File on the server" : "File", field) } };
+        Content = DialogFooter.Headed(title, new TextBlock { Classes = { StyleClasses.Muted, StyleClasses.Caption }, Text = about, TextWrapping = TextWrapping.Wrap }, fields,
             DialogFooter.OkCancel(ok, () => Close(false)));
         Opened += (_, _) => (names ? database : file).Focus();
         Paint();

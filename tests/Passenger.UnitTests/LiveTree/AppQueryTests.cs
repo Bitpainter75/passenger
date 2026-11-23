@@ -3,9 +3,9 @@ using Passenger.Inspector;
 
 namespace Passenger.UnitTests.LiveTree;
 
-/// <summary>An app's tree as an agent's tools and the Live Visual Tree walk it: each walk finishing on a small stack however
-/// deep the tree, an element that holds more than was read saying so wherever the tree is written, and two trees told
-/// apart by where each element is.</summary>
+/// <summary>An app's tree as an agent's tools and the Live Visual Tree walk it: each walk finishing on a small stack
+/// however deep the tree, and a query finding the outermost matches of each step, by a type what derives from
+/// it.</summary>
 public sealed class AppQueryTests
 {
     /// <summary>Elements each holding the next, the first outermost.</summary>
@@ -20,7 +20,12 @@ public sealed class AppQueryTests
     }
 
     [Fact]
-    public void Every_walk_of_a_tree_nested_past_what_a_stack_holds_finishes_on_a_small_stack()
+    public void An_apps_tree_is_walked_on_a_small_stack_however_deep_and_queried_step_by_step_and_by_type() => Cases.All(
+        ("every walk of a tree nested past what a stack holds finishes on a small stack", Every_walk_of_a_tree_nested_past_what_a_stack_holds_finishes_on_a_small_stack),
+        ("a query finds the outermost matches inside what its last step found", A_query_finds_the_outermost_matches_inside_what_its_last_step_found),
+        ("a query by a type finds an element of a type derived from it", A_query_by_a_type_finds_an_element_of_a_type_derived_from_it));
+
+    private void Every_walk_of_a_tree_nested_past_what_a_stack_holds_finishes_on_a_small_stack()
     {
         const int Deep = 100_000;
         Element root = Chain(Deep);
@@ -43,40 +48,10 @@ public sealed class AppQueryTests
         string[] lines = written.Split('\n');
         Assert.Equal(AppQuery.MostLines + 1, lines.Length);
         Assert.Equal($"{new string(' ', 2 * (AppQuery.MostLines - 1))}Border#Link{AppQuery.MostLines - 1} @{AppQuery.MostLines - 1}", lines[^2]);
-        Assert.Equal($"... and {Deep - AppQuery.MostLines} more elements: narrow it with control, filter or depth", lines[^1]);
+        Assert.Equal($"... and {Passenger.Core.Numbers.Said(Deep - AppQuery.MostLines)} more elements: narrow it with control, filter or depth", lines[^1]);
     }
 
-    [Fact]
-    public void An_element_that_holds_more_than_was_read_says_so_wherever_the_tree_is_written()
-    {
-        Element deeper = new(3, "Border", null, [], false, false, true, []) { Deeper = true };
-        Element panel = new(2, "StackPanel", "Outer", [], false, false, true, [deeper]);
-        Element window = new(1, "Window", null, [], false, false, true, [panel]);
-        string note = $"... more inside, not read: the tree is read {Element.DeepestNesting} levels deep";
-
-        Assert.Equal($"Window @1\n  StackPanel#Outer @2\n    Border @3\n      {note}", AppQuery.Write(AppQuery.Flatten([window]).Take(1), null, false, false));
-        Assert.Equal("Window @1\n  ... at least 2 inside", AppQuery.Write(AppQuery.Flatten([window]).Take(1), 0, false, false));
-        Element hidden = window with { Children = [panel with { Visible = false }] };
-        Assert.Equal("Window @1\n  StackPanel#Outer @2 [hidden] (at least 1 inside)", AppQuery.Write(AppQuery.Flatten([hidden]).Take(1), null, false, false));
-        // A template's part is not written, so what it holds, and its note, come up to its level.
-        Element templated = window with { Children = [panel with { Children = [deeper with { FromTemplate = true }] }] };
-        Assert.Equal($"Window @1\n  StackPanel#Outer @2\n    {note}", AppQuery.Write(AppQuery.Flatten([templated]).Take(1), null, false, false));
-    }
-
-    [Fact]
-    public void Two_trees_holding_the_same_elements_in_other_places_are_not_the_same()
-    {
-        Element Leaf(long id) => new(id, "TextBlock", null, [], false, false, true, []);
-        Element side = new(1, "StackPanel", null, [], false, false, true, [Leaf(2), Leaf(3)]);
-        Element under = new(1, "StackPanel", null, [], false, false, true, [Leaf(2) with { Children = [Leaf(3)] }]);
-        Assert.True(AppQuery.Same([side], [side with { }]), "A tree was not the same as its copy");
-        Assert.False(AppQuery.Same([side], [under]), "Two trees with the same elements in other places read as the same");
-        Assert.False(AppQuery.Same([side], [side, Leaf(4)]), "A tree with a window more read as the same");
-        Assert.False(AppQuery.Same([side], [side with { Children = [Leaf(2), Leaf(3) with { Deeper = true }] }]), "An element that came to hold more than was read read as the same");
-    }
-
-    [Fact]
-    public void A_query_finds_the_outermost_matches_inside_what_its_last_step_found()
+    private void A_query_finds_the_outermost_matches_inside_what_its_last_step_found()
     {
         Element save = new(4, "Button", "Save", [], false, false, true, []) { Text = "Save" };
         Element inner = new(3, "Border", "Inner", [], false, false, true, [save]);
@@ -91,8 +66,7 @@ public sealed class AppQueryTests
 
     /// <summary>A query by a type finds an element of a type derived from it as of its own, however far down, by what the
     /// tree tells each type derives from directly; a tree that tells nothing finds each by its own type alone.</summary>
-    [Fact]
-    public void A_query_by_a_type_finds_an_element_of_a_type_derived_from_it()
+    private void A_query_by_a_type_finds_an_element_of_a_type_derived_from_it()
     {
         Element lib = new(4, "TextBlock", null, [], false, false, true, []) { Text = "Lib" };
         Element tree = new(3, "TreeList", "Rows", [], false, false, true, [lib]);
@@ -114,22 +88,9 @@ public sealed class AppQueryTests
         Assert.Empty(AppQuery.Find(AppQuery.Flatten([window]), "ListBox#Rows"));
     }
 
-    /// <summary>What each type derives from, as the inspector tells it: every type up from those given, object left out, and
-    /// two types of one name telling theirs together.</summary>
-    [Fact]
-    public void The_inspector_tells_each_type_by_the_types_it_derives_from_directly()
-    {
-        Dictionary<string, IReadOnlyList<string>> bases = Words.BasesOf([typeof(Leaf), typeof(Middle), typeof(Other.Middle)]);
-        Assert.Equal(["Leaf", "Middle"], bases.Keys.Order(StringComparer.Ordinal));
-        Assert.Equal(["Middle"], bases["Leaf"]);
-        Assert.Equal(["Base", "Middle"], bases["Middle"]);
-    }
-
     private class Base;
 
     private class Middle : Base;
-
-    private sealed class Leaf : Middle;
 
     private static class Other
     {

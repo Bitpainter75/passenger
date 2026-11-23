@@ -3,6 +3,7 @@ using System.Data.Common;
 using System.Diagnostics;
 using Microsoft.Data.SqlClient;
 using Microsoft.SqlServer.Dac;
+using Passenger.Core;
 
 namespace Passenger.Sql;
 
@@ -190,7 +191,7 @@ public sealed class SqlServer(SqlConnectionInfo info, string? password)
         {
             lock (messages)
             {
-                messages.Add(new SqlMessage($"({done.RecordCount:N0} row{(done.RecordCount == 1 ? string.Empty : "s")} affected)", IsError: false));
+                messages.Add(new SqlMessage($"({Numbers.Said(done.RecordCount)} row{(done.RecordCount == 1 ? string.Empty : "s")} affected)", IsError: false));
             }
         };
         await using SqlDataReader reader = await command.ExecuteReaderAsync(cancel).ConfigureAwait(false);
@@ -345,7 +346,7 @@ public sealed class SqlServer(SqlConnectionInfo info, string? password)
         if (rows is { } wanted && changed != wanted)
         {
             await change.RollbackAsync(cancel).ConfigureAwait(false);
-            throw new SqlFailure(changed == 0 ? "The row is no longer there as it was read: read the table again" : $"{changed:N0} rows would have changed, so nothing was");
+            throw new SqlFailure(changed == 0 ? "The row is no longer there as it was read: read the table again" : $"{Numbers.Said(changed)} rows would have changed, so nothing was");
         }
         await change.CommitAsync(cancel).ConfigureAwait(false);
         return true;

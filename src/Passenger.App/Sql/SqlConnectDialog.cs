@@ -17,7 +17,7 @@ public sealed class SqlConnectDialog : IdeWindow
     private readonly Func<SqlConnectionInfo, string?, Task<string?>> connect;
     private readonly TextBox server = new() { PlaceholderText = "host, host,1433 or host\\instance" };
     private readonly TextBox name = new() { PlaceholderText = "Optional: what the window calls it" };
-    private readonly ComboBox signIn = new() { HorizontalAlignment = HorizontalAlignment.Stretch, ItemsSource = new[] { Login, Integrated } };
+    private readonly FormDropDown signIn = new() { ItemsSource = new[] { Login, Integrated } };
     private readonly TextBox user = new();
     private readonly TextBox password = new() { PasswordChar = '•' };
     private readonly CheckBox trust = new() { Content = "Trust the server's certificate" };
@@ -34,7 +34,7 @@ public sealed class SqlConnectDialog : IdeWindow
         trust.Name = "SqlTrust";
         FormRows.Scope(this);
         Title = "Connect to SQL Server";
-        Width = 520;
+        Width = DialogWidths.Question;
         SizeToContent = SizeToContent.Height;
         CanResize = false;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -43,8 +43,8 @@ public sealed class SqlConnectDialog : IdeWindow
         user.Text = before?.User ?? string.Empty;
         trust.IsChecked = before?.TrustCertificate ?? false;
         signIn.SelectedIndex = before?.SignIn == SqlSignIn.Integrated ? 1 : 0;
-        Grid userRow = FormRows.Of("User:", user);
-        Grid passwordRow = FormRows.Of("Password:", password);
+        Grid userRow = FormRows.Of("User", user);
+        Grid passwordRow = FormRows.Of("Password", password);
         signIn.SelectionChanged += (_, _) => Paint();
         server.TextChanged += (_, _) => Paint();
         user.TextChanged += (_, _) => Paint();
@@ -52,7 +52,7 @@ public sealed class SqlConnectDialog : IdeWindow
         StackPanel fields = new()
         {
             Spacing = Gaps.Wide,
-            Children = { FormRows.Of("Server:", server), FormRows.Of("Name:", name), FormRows.Of("Sign in:", signIn), userRow, passwordRow, FormRows.Of(null, trust) },
+            Children = { FormRows.Of("Server", server), FormRows.Of("Name", name), FormRows.Of("Sign in", signIn), userRow, passwordRow, FormRows.Of(null, trust) },
         };
         Content = DialogFooter.Page(fields, DialogFooter.OkCancel(ok, () => Close(false), problem));
         Opened += (_, _) => (before is null ? server : before.SignIn == SqlSignIn.Login ? password : (Control)ok).Focus();

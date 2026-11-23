@@ -18,12 +18,27 @@ namespace Passenger.Tests;
 /// file's row names where it came from.</summary>
 public sealed partial class VcsTests
 {
+    /// <summary>Moves and renames as one flow, each step one test's check in an instance of its own: files and folders
+    /// moved in the Explorer moved in the index by one git and undone, twelve hundred at once or renamed elsewhere
+    /// listed and committed as renames, a moved file edited past git's likeness committed through the moves first, rows
+    /// naming where each came from, and Group By Directory's folders.</summary>
+    [AvaloniaFact]
+    public void Files_moved_or_renamed_anywhere_are_listed_and_committed_as_renames_their_index_moved_in_one_git()
+    {
+        Flow.StepApart<VcsTests>("files and a folder dragged together in the Explorer move in the index by one git and undo moves it back", t => t.Files_and_a_folder_dragged_together_in_the_Explorer_move_in_the_index_by_one_git_and_undo_moves_it_back());
+        Flow.StepApart<VcsTests>("a project folder renamed in the Explorer lists and commits its files as renames undo and redo moving the index", t => t.A_project_folder_renamed_in_the_Explorer_lists_and_commits_its_files_as_renames_undo_and_redo_moving_the_index());
+        Flow.StepApart<VcsTests>("twelve hundred files moved at once move in the index by one git list as renamed and commit as renames", t => t.Twelve_hundred_files_moved_at_once_move_in_the_index_by_one_git_list_as_renamed_and_commit_as_renames());
+        Flow.StepApart<VcsTests>("twelve hundred files renamed and edited elsewhere are listed as renamed past gits own limit", t => t.Twelve_hundred_files_renamed_and_edited_elsewhere_are_listed_as_renamed_past_gits_own_limit());
+        Flow.StepApart<VcsTests>("a moved file edited past what git finds alike commits as a rename through the moves committed first", t => t.A_moved_file_edited_past_what_git_finds_alike_commits_as_a_rename_through_the_moves_committed_first());
+        Flow.StepApart<VcsTests>("a renamed and a moved files rows in the Commit window name where each came from", t => t.A_renamed_and_a_moved_files_rows_in_the_Commit_window_name_where_each_came_from());
+        Flow.StepApart<VcsTests>("group by directory lists changes under their folders and a folder's box chooses every file under it", t => t.Group_by_directory_lists_changes_under_their_folders_and_a_folders_box_chooses_every_file_under_it());
+    }
+
     /// <summary>Files and a folder chosen together and dragged onto a folder in the Explorer move in the index as git mv
     /// moves them, by one git writing it: each lists as renamed, a staged edit staying staged under the new name and an
     /// edit not staged staying unstaged, a file git does not track staying untracked; Undo moves the index back with
     /// the files, git's status as it was before the drag.</summary>
-    [AvaloniaFact]
-    public void Files_and_a_folder_dragged_together_in_the_Explorer_move_in_the_index_by_one_git_and_undo_moves_it_back()
+    private void Files_and_a_folder_dragged_together_in_the_Explorer_move_in_the_index_by_one_git_and_undo_moves_it_back()
     {
         string tree = PathNames.Canonical(folder);
         TestFolders.Write(tree, "Basket.cs", "class Basket\n{\n    int count;\n}\n");
@@ -76,8 +91,7 @@ public sealed partial class VcsTests
 
     /// <summary>A project's folder renamed in the Explorer lists each of its files as renamed; Undo moves the index back,
     /// Redo moves it again, and the Commit window commits the files as renames.</summary>
-    [AvaloniaFact]
-    public void A_project_folder_renamed_in_the_Explorer_lists_and_commits_its_files_as_renames_undo_and_redo_moving_the_index()
+    private void A_project_folder_renamed_in_the_Explorer_lists_and_commits_its_files_as_renames_undo_and_redo_moving_the_index()
     {
         string tree = PathNames.Canonical(folder);
         TestFolders.Write(tree, "Store/Store.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n</Project>\n");
@@ -116,8 +130,7 @@ public sealed partial class VcsTests
 
     /// <summary>Twelve hundred files moved into a folder at once, as the Explorer's Paste moves them, are moved in the index
     /// by one git, list every one as renamed in the Commit window and commit as twelve hundred renames.</summary>
-    [AvaloniaFact]
-    public void Twelve_hundred_files_moved_at_once_move_in_the_index_by_one_git_list_as_renamed_and_commit_as_renames()
+    private void Twelve_hundred_files_moved_at_once_move_in_the_index_by_one_git_list_as_renamed_and_commit_as_renames()
     {
         const int Count = 1200;
         string tree = PathNames.Canonical(folder);
@@ -150,8 +163,7 @@ public sealed partial class VcsTests
 
     /// <summary>Twelve hundred files renamed and edited by another program and staged list every one as renamed: the
     /// status looks past git's own limit, under which it would list them as deleted and added.</summary>
-    [AvaloniaFact]
-    public void Twelve_hundred_files_renamed_and_edited_elsewhere_are_listed_as_renamed_past_gits_own_limit()
+    private void Twelve_hundred_files_renamed_and_edited_elsewhere_are_listed_as_renamed_past_gits_own_limit()
     {
         const int Count = 1200;
         string tree = PathNames.Canonical(folder);
@@ -180,8 +192,7 @@ public sealed partial class VcsTests
     /// <summary>A file renamed in the Explorer and then rewritten past what git finds alike would commit as a deletion and an
     /// addition: the Commit window says so and offers to commit the move first, its message editable, and committing
     /// makes the move its own commit, a rename, and the edits a second with the person's message.</summary>
-    [AvaloniaFact]
-    public void A_moved_file_edited_past_what_git_finds_alike_commits_as_a_rename_through_the_moves_committed_first()
+    private void A_moved_file_edited_past_what_git_finds_alike_commits_as_a_rename_through_the_moves_committed_first()
     {
         string tree = PathNames.Canonical(folder);
         MainWindow window = Ui.OpenFolder(tree, languageServer: false);
@@ -209,11 +220,11 @@ public sealed partial class VcsTests
         window.Close();
     }
 
-    /// <summary>The Commit window's rows of moved files name where each came from after its name: its old name where it was
-    /// renamed in its folder, its old path where it went to another folder, renamed or not, the tip saying the old path
-    /// whole; a file only modified names none.</summary>
-    [AvaloniaFact]
-    public void A_renamed_and_a_moved_files_rows_in_the_Commit_window_name_where_each_came_from()
+    /// <summary>The Commit window's rows of moved files name where each came from after its name and its change's letter
+    /// (R, saying Renamed on its tip and to a screen reader): its old name where it was renamed in its folder, its old path
+    /// where it went to another folder, renamed or not, the tip saying the old path whole; a file only modified, its
+    /// letter M, names none.</summary>
+    private void A_renamed_and_a_moved_files_rows_in_the_Commit_window_name_where_each_came_from()
     {
         string tree = PathNames.Canonical(folder);
         TestFolders.Write(tree, "Old/Basket.cs", "class Basket\n{\n    int count;\n}\n");
@@ -232,18 +243,21 @@ public sealed partial class VcsTests
         Ui.WaitFor(() => commit.Rows.OfType<CommitRow>().Count() == 4, () => $"the four changes listed in the Commit window, where Git lists {Listed(window)}");
         Avalonia.Controls.ListBox list = Find(commit, commit.Rows);
 
-        Assert.Equal(("Store.cs  ← Shop.cs", "Renamed from Shop.cs"), Shown("Store.cs"));
-        Assert.Equal(("Basket.cs  ← Old/Basket.cs  New", "Moved from Old/Basket.cs"), Shown("Basket.cs"));
-        Assert.Equal(("Register.cs  ← Old/Till.cs  New", "Moved from Old/Till.cs"), Shown("Register.cs"));
-        Assert.Equal(("Price.cs  Old", null), Shown("Price.cs"));
+        Assert.Equal(("Store.cs  R  ← Shop.cs", "Renamed", "Renamed from Shop.cs"), Shown("Store.cs"));
+        Assert.Equal(("Basket.cs  R  ← Old/Basket.cs  New", "Renamed", "Moved from Old/Basket.cs"), Shown("Basket.cs"));
+        Assert.Equal(("Register.cs  R  ← Old/Till.cs  New", "Renamed", "Moved from Old/Till.cs"), Shown("Register.cs"));
+        Assert.Equal(("Price.cs  M  Old", "Modified", null), Shown("Price.cs"));
         window.Close();
 
-        // The words a file's row shows, in order, and the tip of where it came from.
-        (string Words, string? Tip) Shown(string name)
+        // The words a file's row shows, in order, its letter's word (its tip, and what a screen reader says) and the tip of where it came from.
+        (string Words, string? Letter, string? Tip) Shown(string name)
         {
             Avalonia.Controls.Control row = Ui.Row(list, commit.Rows.OfType<CommitRow>().First(r => r.Change.Name == name));
             Avalonia.Controls.TextBlock[] words = [.. row.GetVisualDescendants().OfType<Avalonia.Controls.TextBlock>().Where(t => t.IsEffectivelyVisible && t.Text is { Length: > 0 })];
-            return (string.Join("  ", words.Select(t => t.Text)), words.FirstOrDefault(t => t.Text!.StartsWith('←')) is { } came ? Avalonia.Controls.ToolTip.GetTip(came) as string : null);
+            Avalonia.Controls.TextBlock letter = words[1];
+            string? said = Avalonia.Controls.ToolTip.GetTip(letter) as string;
+            Assert.Equal(said, Avalonia.Automation.AutomationProperties.GetName(letter));
+            return (string.Join("  ", words.Select(t => t.Text)), said, words.FirstOrDefault(t => t.Text!.StartsWith('←')) is { } came ? Avalonia.Controls.ToolTip.GetTip(came) as string : null);
         }
     }
 

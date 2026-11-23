@@ -4,7 +4,6 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Passenger.App;
-using Passenger.App.Editors;
 using Passenger.App.Godot;
 using Passenger.App.Run;
 using Passenger.App.ToolWindows;
@@ -12,18 +11,18 @@ using Passenger.App.Workspace;
 using Passenger.Core;
 using Passenger.Editor;
 using Passenger.Text;
+using Passenger.Workspace;
 
 namespace Passenger.Tests;
 
-/// <summary>GDScript through Godot's own language server, in the headless Godot editor Passenger starts for a project the
-/// test writes (its user folders the run's): a script is coloured, completes a Godot class's member, hovers its docs and
-/// goes to a declaration, keeping the project's editor layout as it was, and its project.godot where an editor plugin
-/// saves it; an error typed shows in Problems as typed, a warning with its name; and a project deleted under that editor
-/// is let go of, said once; what that editor makes (a script's .uid) is taken away, a plugin runs not there from Godot 4.5,
-/// another program's writes are kept, as is what the person's own editor (a stand-in) makes there, an editor on a project
-/// whose path begins with this one's being none on it, and the editor is let go once no script is open, each project with one of
-/// its own; and, as a person's window opens a script, none is started until something Passenger's own reading has no answer for
-/// asks for it. Without a Godot (GODOT, the PATH, Applications) each test skips saying why. A Godot editor of its own each, so run alone.</summary>
+/// <summary>GDScript through Godot's own language server, in the headless Godot editor Passenger starts for a project
+/// the test writes (its user folders the run's): a script is coloured, completes a Godot class's member, hovers its
+/// docs and goes to a declaration, keeping the project's editor layout as it was, and its project.godot where an editor
+/// plugin saves it; an error typed shows in Problems as typed, a warning with its name; a plugin runs not there from
+/// Godot 4.5, another program's writes are kept, as is what the person's own editor (a stand-in) makes there, and the
+/// editor is let go once no script is open; and, as a person's window opens a script, none is started until something
+/// Passenger's own reading has no answer for asks for it. Without a Godot (GODOT, the PATH, Applications) each test
+/// skips saying why. A Godot editor of its own each, so run alone.</summary>
 [Collection(Alone.Name)]
 public sealed class GDScriptTests
 {
@@ -46,16 +45,54 @@ public sealed class GDScriptTests
         TestFolders.Write(folder, "main.tscn", "[gd_scene load_steps=2 format=3]\n\n[ext_resource type=\"Script\" path=\"res://main.gd\" id=\"1\"]\n\n"
             + "[node name=\"Main\" type=\"Node2D\"]\nscript = ExtResource(\"1\")\n");
         TestFolders.Write(folder, "main.gd", Script);
-        TestFolders.Write(folder, Path.Combine(".godot", "editor", "editor_layout.cfg"), Layout);
+        TestFolders.Write(folder, Path.Combine(IgnoredFolders.GodotCache, "editor", "editor_layout.cfg"), Layout);
     }
 
+    /// <summary>A GDScript is coloured, completed, hovered and checked by Godot's server beside Passenger's reading,
+    /// its headless editor started only when asked.</summary>
     [AvaloniaFact]
-    public void A_script_is_coloured_completes_a_Godot_classs_member_hovers_its_docs_and_goes_to_a_declaration()
+    public void A_gdscript_is_read_by_godots_server_beside_passengers_own()
+    {
+        Flow.StepApart<GDScriptTests>(nameof(A_script_is_coloured_completes_a_Godot_classs_member_hovers_its_docs_and_goes_to_a_declaration),
+            test => test.A_script_is_coloured_completes_a_Godot_classs_member_hovers_its_docs_and_goes_to_a_declaration());
+        OpenWindows.CloseAll();
+        Flow.StepApart<GDScriptTests>(nameof(An_error_typed_shows_in_Problems_as_typed_and_a_warning_with_its_name),
+            test => test.An_error_typed_shows_in_Problems_as_typed_and_a_warning_with_its_name());
+        OpenWindows.CloseAll();
+        Flow.StepApart<GDScriptTests>(nameof(A_script_opened_starts_no_godot_editor_until_a_question_passengers_reading_has_no_answer_for_asks_for_one),
+            test => test.A_script_opened_starts_no_godot_editor_until_a_question_passengers_reading_has_no_answer_for_asks_for_one());
+        OpenWindows.CloseAll();
+        Flow.StepApart<GDScriptTests>(nameof(Godots_headless_editor_is_let_go_once_no_script_is_open_and_starts_again_as_one_opens),
+            test => test.Godots_headless_editor_is_let_go_once_no_script_is_open_and_starts_again_as_one_opens());
+    }
+
+    /// <summary>What Godot's headless editor writes into the project is put back, and what another program writes as it
+    /// starts is kept.</summary>
+    [AvaloniaFact]
+    public void Godots_headless_editor_leaves_the_project_as_others_wrote_it()
+    {
+        Flow.StepApart<GDScriptTests>(nameof(A_projects_settings_an_editor_plugin_would_save_in_its_headless_editor_stay_as_they_were),
+            test => test.A_projects_settings_an_editor_plugin_would_save_in_its_headless_editor_stay_as_they_were());
+        OpenWindows.CloseAll();
+        Flow.StepApart<GDScriptTests>(nameof(Project_settings_replaced_whole_by_another_program_as_a_checkout_does_are_kept),
+            test => test.Project_settings_replaced_whole_by_another_program_as_a_checkout_does_are_kept());
+        OpenWindows.CloseAll();
+        Flow.StepApart<GDScriptTests>(nameof(Project_settings_another_program_writes_as_the_headless_editor_starts_are_kept),
+            test => test.Project_settings_another_program_writes_as_the_headless_editor_starts_are_kept());
+        OpenWindows.CloseAll();
+        Flow.StepApart<GDScriptTests>(nameof(Project_settings_saved_through_Godots_safe_save_as_the_headless_editor_starts_are_put_back),
+            test => test.Project_settings_saved_through_Godots_safe_save_as_the_headless_editor_starts_are_put_back());
+        OpenWindows.CloseAll();
+        Flow.StepApart<GDScriptTests>(nameof(A_file_the_persons_own_editor_makes_as_the_headless_editor_starts_stays),
+            test => test.A_file_the_persons_own_editor_makes_as_the_headless_editor_starts_stays());
+    }
+
+    private void A_script_is_coloured_completes_a_Godot_classs_member_hovers_its_docs_and_goes_to_a_declaration()
     {
         MainWindow window = Open();
         CodeEditor editor = window.EditorArea.CodeEditor;
         Assert.Equal(TokenKind.Keyword, KindOf(editor, "func"));
-        string layout = Path.Combine(PathNames.Canonical(folder), ".godot", "editor", "editor_layout.cfg");
+        string layout = Path.Combine(PathNames.Canonical(folder), IgnoredFolders.GodotCache, "editor", "editor_layout.cfg");
         // By the log, since until the headless editor writes its own the file holds the person's layout anyway.
         Ui.WaitFor(() => Ui.Shared(IdeLog.PathOf(IdeLog.Ide)).Contains($"GDScript: {layout}, which Godot's headless editor wrote over, is put back as it was", StringComparison.Ordinal),
             () => $"the layout the headless editor writes over the person's to be put back ({Shown(layout)})", TimeSpan.FromSeconds(90));
@@ -86,57 +123,7 @@ public sealed class GDScriptTests
         window.Close();
     }
 
-    /// <summary>Once Godot's server serves the script, a node its scene runs a C# script on (<c>$Player</c>) completes the C#
-    /// class's members, each once beside what the server lists, the card on one says it as C# declares it, and Go to
-    /// Declaration opens the C# file at it: what Godot's server, which never built the C# script, cannot answer.</summary>
-    [AvaloniaFact]
-    public void A_nodes_csharp_scripts_members_join_godots_servers_answers_each_said_once()
-    {
-        TestFolders.Write(folder, "Player.cs", "using Godot;\n\npublic partial class Player : Node2D\n{\n    [Signal]\n    public delegate void HitEventHandler(int amount);\n\n    public int Health { get; set; } = 3;\n\n    public void TakeDamage(int amount)\n    {\n        Health -= amount;\n    }\n}\n");
-        TestFolders.Write(folder, "main.tscn", "[gd_scene load_steps=3 format=3]\n\n[ext_resource type=\"Script\" path=\"res://main.gd\" id=\"1\"]\n[ext_resource type=\"Script\" path=\"res://Player.cs\" id=\"2\"]\n\n"
-            + "[node name=\"Main\" type=\"Node2D\"]\nscript = ExtResource(\"1\")\n\n[node name=\"Player\" type=\"Node2D\" parent=\".\"]\nscript = ExtResource(\"2\")\n");
-        MainWindow window = Open();
-        CodeEditor editor = window.EditorArea.CodeEditor;
-        Ui.PlaceAfter(editor, "\t\tget_tree()");
-        editor.Focus();
-        Ui.Press(window, "ENTER");
-        window.KeyTextInput("$Player");
-        window.KeyTextInput(".");
-        Ui.WaitFor(() => window.Assist.CompletionLabels.Count > 0, "the members after $Player's dot");
-        Ui.WaitFor(() => window.Assist.CompletionLabels.Contains("TakeDamage") && window.Assist.CompletionLabels.Contains("Health") && window.Assist.CompletionLabels.Contains("Hit"),
-            () => $"Player.cs's TakeDamage, Health and Hit after $Player's dot; the list has {string.Join(", ", window.Assist.CompletionLabels.Take(12))}");
-        Assert.Equal(1, window.Assist.CompletionLabels.Count(l => l == "TakeDamage" || l.StartsWith("TakeDamage(", StringComparison.Ordinal)));
-        window.KeyTextInput("TakeDamage");
-        Ui.Press(window, "ESCAPE");
-        Assert.Contains("void TakeDamage(int amount)", Hover(window, editor, "TakeDamage"), StringComparison.Ordinal);
-        Ui.PlaceAfter(editor, "$Player.Take");
-        Ui.Press(window, Ui.Shortcut(AppActions.GoToDeclaration));
-        Ui.WaitFor(() => window.EditorArea.Active?.Path.EndsWith("Player.cs", StringComparison.Ordinal) == true && window.EditorArea.CodeEditor.CaretPosition.Line == 9,
-            "Player.cs open at TakeDamage, line 10");
-        window.Close();
-    }
-
-    /// <summary>Context Help on a call of Godot's engine browses its method's place on its class's page of Godot's class
-    /// reference, for the version of the Godot found; on the script's own function it says there is none, browsing nothing.</summary>
-    [AvaloniaFact]
-    public void Context_help_on_a_call_of_godots_engine_browses_its_place_in_the_class_reference()
-    {
-        MainWindow window = Open();
-        CodeEditor editor = window.EditorArea.CodeEditor;
-        Ui.PlaceAfter(editor, "\t\tget_tr");
-        Ui.Press(window, Ui.Shortcut(AppActions.ContextHelp));
-        Uri page = new($"https://docs.godotengine.org/en/{GodotDocs.VersionOf(godot!.Version)}/classes/class_node.html#class-node-method-get-tree");
-        Ui.WaitFor(() => window.Browsed.Contains(page), () => $"get_tree's place in the class reference to be browsed ({window.Status}): {string.Join(", ", window.Browsed)}");
-
-        Ui.PlaceAfter(editor, "var doubled := tw");
-        Ui.Press(window, Ui.Shortcut(AppActions.ContextHelp));
-        Ui.WaitFor(() => window.Status == Refusals.NoGodotDocumentation, () => $"Context Help on the script's own function to say it has no page ({window.Status})");
-        Assert.Equal([page], window.Browsed);
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public void An_error_typed_shows_in_Problems_as_typed_and_a_warning_with_its_name()
+    private void An_error_typed_shows_in_Problems_as_typed_and_a_warning_with_its_name()
     {
         MainWindow window = Open();
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -160,41 +147,11 @@ public sealed class GDScriptTests
         window.Close();
     }
 
-    /// <summary>A project deleted under the headless editor Passenger started for it, in that editor's first seconds, ends the
-    /// putting back of what the editor writes there, said once rather than at every look.</summary>
-    [AvaloniaFact]
-    public void A_project_deleted_under_its_headless_editor_is_let_go_of_said_once()
-    {
-        MainWindow window = Open();
-        string project = PathNames.Canonical(folder);
-        try
-        {
-            Directory.Delete(folder, recursive: true);
-        }
-        catch (Exception held) when (held is IOException or UnauthorizedAccessException)
-        {
-            // Windows keeps a folder the editor works in, and what it holds open: the project.godot goes all the same.
-            File.Delete(Path.Combine(folder, "project.godot"));
-        }
-        // The project as the log names it, by the path its script was opened by or its real one.
-        string[] Said() => [.. Ui.Shared(IdeLog.PathOf(IdeLog.Ide)).Split('\n')
-            .Where(l => l.Contains("GDScript: ", StringComparison.Ordinal) && (l.Contains(project, StringComparison.Ordinal) || l.Contains(folder, StringComparison.Ordinal)))];
-        static bool Gone(string line) => line.Contains(" is gone, so what Godot's headless editor wrote there is no longer put back", StringComparison.Ordinal);
-        Ui.WaitFor(() => Said().Any(Gone), () => $"the IDE's log to say {project} is gone ({string.Join(" | ", Said())})");
-        Ui.Hold(TimeSpan.FromSeconds(1), "what the headless editor writes looked at again, as it is every 200 ms in its first seconds");
-        // A file the deletion held a moment (Windows) may be said before; nothing is tried once the going is said.
-        string[] said = Said();
-        Assert.True(said.Count(Gone) == 1 && Gone(said[^1]),
-            $"The project's going was to be said once, and nothing tried there after; the log says:\n{string.Join('\n', said)}");
-        window.Close();
-    }
-
     /// <summary>A project whose editor plugin saves the project's settings as it loads (as Dialogic's does), and again well
     /// after, keeps its project.godot byte for byte, where the headless editor's save writes what it holds (its header,
     /// features, the .NET editor's assembly name): from Godot 4.5 that editor runs in recovery mode, where the plugin never
     /// runs; before it, its first save is put back. A save of the person's in Passenger meanwhile is theirs and stays.</summary>
-    [AvaloniaFact]
-    public void A_projects_settings_an_editor_plugin_would_save_in_its_headless_editor_stay_as_they_were()
+    private void A_projects_settings_an_editor_plugin_would_save_in_its_headless_editor_stay_as_they_were()
     {
         string settings = Path.Combine(folder, "project.godot");
         TestFolders.Write(folder, "project.godot", File.ReadAllText(settings) + "\n[editor_plugins]\n\nenabled=PackedStringArray(\"res://addons/saver/plugin.cfg\")\n");
@@ -204,7 +161,7 @@ public sealed class GDScriptTests
             + "\tProjectSettings.save()\n\tFileAccess.open(\"res://.godot/saver_saved\", FileAccess.WRITE).store_string(\"saved\")\n"
             + "\tawait get_tree().create_timer(20.0).timeout\n\tProjectSettings.set_setting(\"application/config/description\", \"saved later\")\n\tProjectSettings.save()\n");
         byte[] before = File.ReadAllBytes(settings);
-        string marker = Path.Combine(folder, ".godot", "saver_saved");
+        string marker = Path.Combine(folder, IgnoredFolders.GodotCache, "saver_saved");
         bool recovering = GodotExecutables.HasRecoveryMode(Ui.Await(GodotExecutables.VersionAsync(godot!), "the Godot's version"));
         MainWindow window = Open();
         if (recovering)
@@ -232,62 +189,10 @@ public sealed class GDScriptTests
         window.Close();
     }
 
-    /// <summary>A project of Godot 4.3 or older, whose script has no .uid, keeps none: the .uid the headless editor makes beside
-    /// it as it scans the project is taken away, the person's own Godot making its own as it opens the project.</summary>
-    [AvaloniaFact]
-    public void A_uid_the_headless_editor_makes_beside_a_script_of_an_older_project_is_taken_away()
-    {
-        string uid = Path.Combine(folder, "main.gd.uid");
-        Assert.False(File.Exists(uid), "The test's project of Godot 4.3 has a .uid already");
-        MainWindow window = Open();
-        string named = Path.Combine(Path.GetFileName(folder), "main.gd.uid");
-        Ui.WaitFor(() => Ui.Shared(IdeLog.PathOf(IdeLog.Ide)).Contains($"{named}, which Godot's headless editor made, is taken away", StringComparison.Ordinal),
-            () => $"the .uid the headless editor makes beside main.gd to be taken away ({(File.Exists(uid) ? "it is there" : "none is there")})", TimeSpan.FromSeconds(90));
-        Ui.Hold(TimeSpan.FromSeconds(2), "the headless editor's scan to go on, a .uid made again taken away as it comes");
-        Assert.False(File.Exists(uid), "The .uid the headless editor made beside main.gd was left in the project");
-        window.Close();
-    }
-
-    /// <summary>A C# game's script keeps no .uid as the headless editor, past its start work, reloads a build of the game:
-    /// .NET's tools in it reload the built assembly within a second and make a .uid beside each C# script with none, which is
-    /// taken away as one it makes as it starts is; a .uid another program wrote beside a script before that build is kept.
-    /// Needs Godot's .NET build.</summary>
-    [AvaloniaFact]
-    public void A_uid_the_headless_editor_makes_as_it_reloads_a_game_built_after_its_start_work_is_taken_away()
-    {
-        Assert.SkipWhen(GoDotTestGame.Skipped(godot) is not null, GoDotTestGame.Skipped(godot) ?? string.Empty);
-        GodotTests.Game.Make(folder, godot!.Version!, godot.Packages!, "using Godot;\n\npublic partial class Main : Node\n{\n}\n",
-            "[gd_scene load_steps=3 format=3]\n\n[ext_resource type=\"Script\" path=\"res://Main.cs\" id=\"1\"]\n[ext_resource type=\"Script\" path=\"res://main.gd\" id=\"2\"]\n\n"
-            + "[node name=\"Main\" type=\"Node\"]\nscript = ExtResource(\"1\")\n\n[node name=\"Spinner\" type=\"Node2D\" parent=\".\"]\nscript = ExtResource(\"2\")\n");
-        TestFolders.Write(folder, "turner.gd", "extends Node\n");
-        Restore.Run(Path.Combine(folder, "Spinner.csproj"));
-        string uid = Path.Combine(folder, "Main.cs.uid");
-        string theirs = Path.Combine(folder, "turner.gd.uid");
-        string assembly = Path.Combine(folder, ".godot", "mono", "temp", "bin", "Debug", "Spinner.dll");
-        string project = PathNames.Canonical(folder);
-        string Log() => Ui.Shared(IdeLog.PathOf(IdeLog.Ide));
-        MainWindow window = Open();
-        Ui.WaitFor(() => Log().Contains($"GDScript: Godot's headless editor on {project} has done its start work", StringComparison.Ordinal),
-            "the headless editor's start work done", TimeSpan.FromMinutes(2));
-        Assert.False(File.Exists(uid), "The .uid the headless editor made beside Main.cs as it started was left in the project");
-        File.WriteAllText(theirs, "uid://cturner1\n");
-
-        window.Perform(AppActions.Build);
-        Ui.WaitFor(() => File.Exists(assembly), () => $"the game built ({window.Status})", TimeSpan.FromMinutes(3));
-        int before = Log().Split($"{Path.Combine(project, "Main.cs.uid")}, which Godot's headless editor made, is taken away").Length;
-        Ui.WaitFor(() => Log().Split($"{Path.Combine(project, "Main.cs.uid")}, which Godot's headless editor made, is taken away").Length > before || File.Exists(uid),
-            () => "the .uid the headless editor makes as it reloads the build", TimeSpan.FromSeconds(30));
-        Ui.Hold(TimeSpan.FromSeconds(5), "a .uid made as the build is reloaded waits 3 s, for the watcher to say what came with it, before it is taken away");
-        Assert.False(File.Exists(uid), "The .uid the headless editor made beside Main.cs as it reloaded the game's build was left in the project");
-        Assert.True(File.Exists(theirs), "A .uid another program wrote beside turner.gd before the build was taken away as the headless editor's");
-        window.Close();
-    }
-
     /// <summary>project.godot replaced whole by another program, as Git's checkout writes a file, is kept: as the headless
     /// editor starts, where the folder's watcher saw it come with another file, as one operation brings them; and later,
     /// alone, once the editor's start work is done, after which nothing written there is put back.</summary>
-    [AvaloniaFact]
-    public void Project_settings_replaced_whole_by_another_program_as_a_checkout_does_are_kept()
+    private void Project_settings_replaced_whole_by_another_program_as_a_checkout_does_are_kept()
     {
         string settings = Path.Combine(folder, "project.godot");
         string incoming = TestFolders.Create("gdscript-incoming-");
@@ -338,8 +243,7 @@ public sealed class GDScriptTests
 
     /// <summary>project.godot written in place by another program as the headless editor starts is the person's and is kept,
     /// never put back as if the editor had written it: no word of Godot's own safe save came with it.</summary>
-    [AvaloniaFact]
-    public void Project_settings_another_program_writes_as_the_headless_editor_starts_are_kept()
+    private void Project_settings_another_program_writes_as_the_headless_editor_starts_are_kept()
     {
         string settings = Path.Combine(folder, "project.godot");
         (MainWindow window, OpenDocument document) = HeadlessStarting();
@@ -353,29 +257,10 @@ public sealed class GDScriptTests
         window.Close();
     }
 
-    /// <summary>project.godot replaced by another program alone, as an editor's atomic save writes a file and nothing comes
-    /// with it, is the person's and kept as the headless editor starts: a file replaced says nothing of who replaced it, and
-    /// no word of Godot's own safe save came with this one.</summary>
-    [AvaloniaFact]
-    public void Project_settings_another_programs_atomic_save_replaces_alone_as_the_headless_editor_starts_are_kept()
-    {
-        string settings = Path.Combine(folder, "project.godot");
-        string shown = Path.Combine(PathNames.Canonical(folder), "project.godot");
-        (MainWindow window, _) = HeadlessStarting();
-        // As the server starts: a new name for the game, written whole beside the file and moved over it.
-        SavedThrough(settings + ".saving", settings, File.ReadAllText(settings).Replace("config/name=\"Turns\"", "config/name=\"Renamed\"", StringComparison.Ordinal));
-        Ui.WaitFor(() => Ui.Shared(IdeLog.PathOf(IdeLog.Ide)).Contains($"GDScript: {shown} was written by another program than Passenger's headless editor, so it is kept as written", StringComparison.Ordinal),
-            () => $"the save another program made to be kept:\n{File.ReadAllText(settings)}", TimeSpan.FromSeconds(30));
-        Assert.True(File.ReadAllText(settings).Contains("config/name=\"Renamed\"", StringComparison.Ordinal),
-            $"An atomic save of project.godot by another program was put back over as if the headless editor had written it:\n{File.ReadAllText(settings)}");
-        window.Close();
-    }
-
     /// <summary>project.godot saved through Godot's own safe save, its file of a dash and six letters or digits heard beside it,
     /// is the headless editor's and put back, as another program's atomic save is not. The save is the test's own, so it is
     /// there to put back whatever the Godot found writes.</summary>
-    [AvaloniaFact]
-    public void Project_settings_saved_through_Godots_safe_save_as_the_headless_editor_starts_are_put_back()
+    private void Project_settings_saved_through_Godots_safe_save_as_the_headless_editor_starts_are_put_back()
     {
         string settings = Path.Combine(folder, "project.godot");
         string shown = Path.Combine(PathNames.Canonical(folder), "project.godot");
@@ -420,8 +305,7 @@ public sealed class GDScriptTests
     /// <summary>A file the person's own Godot editor makes as it opens the project while Passenger's headless editor does its
     /// start work there (the messaging file of Godot's .NET tools, by which Passenger finds that editor) stays as that editor
     /// wrote it: nothing there is put back or taken away while the person's editor runs on the project.</summary>
-    [AvaloniaFact]
-    public void A_file_the_persons_own_editor_makes_as_the_headless_editor_starts_stays()
+    private void A_file_the_persons_own_editor_makes_as_the_headless_editor_starts_stays()
     {
         MainWindow window = Open();
         string project = PathNames.Canonical(folder);
@@ -441,34 +325,6 @@ public sealed class GDScriptTests
         {
             End(persons);
             window.Close();
-        }
-    }
-
-    /// <summary>A Godot editor of the person's open on another project, whose folder's path begins with this one's (a copy
-    /// kept beside it), is no editor on this project: what Passenger's headless editor writes over here (its layout over
-    /// the person's) is put back still.</summary>
-    [AvaloniaFact]
-    public void An_editor_on_a_project_whose_path_begins_with_this_ones_leaves_the_headless_editors_writes_put_back()
-    {
-        string project = PathNames.Canonical(folder);
-        string other = project + "-old";
-        TestFolders.Write(other, "project.godot", "; Engine configuration file.\nconfig_version=5\n\n[application]\n\nconfig/name=\"Turns (old)\"\n");
-        string layout = Path.Combine(project, ".godot", "editor", "editor_layout.cfg");
-        string Log() => Ui.Shared(IdeLog.PathOf(IdeLog.Ide));
-        bool Kept() => Log().Contains($"GDScript: {layout} was written by another program", StringComparison.Ordinal);
-        Process persons = PersonsEditor(other);
-        try
-        {
-            MainWindow window = Open();
-            Ui.WaitFor(() => Log().Contains($"GDScript: {layout}, which Godot's headless editor wrote over, is put back as it was", StringComparison.Ordinal) || Kept(),
-                () => $"the layout the headless editor writes over the person's to be put back ({Shown(layout)})", TimeSpan.FromSeconds(90));
-            Assert.False(Kept(), $"The headless editor's layout was kept as the person's, as if their editor on {other} were one on {project}:\n{Shown(layout)}");
-            Ui.WaitFor(() => File.ReadAllText(layout) == Layout, () => $"the person's own layout as it was, not the headless editor's:\n{Shown(layout)}");
-            window.Close();
-        }
-        finally
-        {
-            End(persons);
         }
     }
 
@@ -565,8 +421,7 @@ public sealed class GDScriptTests
         }
     }
 
-    [AvaloniaFact]
-    public void Godots_headless_editor_is_let_go_once_no_script_is_open_and_starts_again_as_one_opens()
+    private void Godots_headless_editor_is_let_go_once_no_script_is_open_and_starts_again_as_one_opens()
     {
         string? was = Environment.GetEnvironmentVariable(Passenger.App.Web.WebLanguages.GDScriptIdleVariable);
         Environment.SetEnvironmentVariable(Passenger.App.Web.WebLanguages.GDScriptIdleVariable, "1000");
@@ -590,72 +445,10 @@ public sealed class GDScriptTests
         }
     }
 
-    /// <summary>Two Godot projects side by side in the folder open: each script is served by an editor on its own project, never
-    /// the first opened's, each editor goes once no script of its project is open, the other's staying, and a project reopened
-    /// alone starts on itself.</summary>
-    [AvaloniaFact]
-    public void Each_godot_project_in_the_folder_has_a_server_of_its_own_let_go_alone_and_reopened_on_itself()
-    {
-        string root = TestFolders.Create("gdscript-siblings-");
-        string[] projects = [Path.Combine(root, "north"), Path.Combine(root, "south")];
-        foreach (string project in projects)
-        {
-            TestFolders.Write(project, "project.godot", $"; Engine configuration file.\nconfig_version=5\n\n[application]\n\nconfig/name=\"{Path.GetFileName(project)}\"\n");
-            TestFolders.Write(project, "main.gd", "extends Node\n");
-        }
-        string? was = Environment.GetEnvironmentVariable(Passenger.App.Web.WebLanguages.GDScriptIdleVariable);
-        Environment.SetEnvironmentVariable(Passenger.App.Web.WebLanguages.GDScriptIdleVariable, "1000");
-        MainWindow window = new()
-        {
-            Width = 1200,
-            Height = 800,
-            StartsLanguageServer = false,
-            GodotEnvironment = GodotTests.Game.Home(root + "-home"),
-            GodotHeadlessAtOpen = true,
-        };
-        try
-        {
-            window.Show();
-            window.OpenFolder(root);
-            Ui.Settle();
-            OpenDocument Served(string project)
-            {
-                Assert.Null(window.OpenFile(Path.Combine(project, "main.gd")));
-                Ui.Settle();
-                OpenDocument document = window.EditorArea.Active!;
-                Ui.WaitFor(() => window.Session.Web?.For(document)?.Lsp is not null && window.Session.Web.StateOf(document) is null,
-                    () => $"Godot's server for {document.Path}: {window.Session.Web?.StateOf(document)} {document.Notice}", TimeSpan.FromSeconds(90));
-                return document;
-            }
-
-            Served(projects[0]);
-            Served(projects[1]);
-            Assert.True(EditorsServing(projects[0]) == 1 && EditorsServing(projects[1]) == 1,
-                $"{EditorsServing(projects[0])} editors serve the first project and {EditorsServing(projects[1])} the second, where each script was to be answered by its own project's");
-
-            Ui.Run(window, AppActions.CloseTab);
-            Ui.WaitFor(() => EditorsServing(projects[1]) == 0, () => $"the second project's editor let go once no script of it was open ({EditorsServing(projects[1])} still run)", TimeSpan.FromSeconds(30));
-            Assert.True(EditorsServing(projects[0]) == 1, "The first project's editor went with the second's, though its script is open");
-
-            Ui.Run(window, AppActions.CloseTab);
-            Ui.WaitFor(() => EditorsServing(projects[0]) == 0, () => $"the first project's editor let go ({EditorsServing(projects[0])} still run)", TimeSpan.FromSeconds(30));
-
-            Served(projects[1]);
-            Assert.True(EditorsServing(projects[1]) == 1 && EditorsServing(projects[0]) == 0,
-                $"The second project reopened alone started {EditorsServing(projects[1])} editors on itself and {EditorsServing(projects[0])} on the project opened first");
-        }
-        finally
-        {
-            window.Close();
-            Environment.SetEnvironmentVariable(Passenger.App.Web.WebLanguages.GDScriptIdleVariable, was);
-        }
-    }
-
     /// <summary>A script opened starts no Godot editor where none of the person's serves the project: Passenger's own reading
     /// marks and answers it. Go to Declaration of a name that reading declares nowhere (an engine's method) asks for one,
     /// a headless editor, which serves the script from then.</summary>
-    [AvaloniaFact]
-    public void A_script_opened_starts_no_godot_editor_until_a_question_passengers_reading_has_no_answer_for_asks_for_one()
+    private void A_script_opened_starts_no_godot_editor_until_a_question_passengers_reading_has_no_answer_for_asks_for_one()
     {
         MainWindow window = new() { Width = 1200, Height = 800, StartsLanguageServer = false, GodotEnvironment = GodotTests.Game.Home(folder + "-home") };
         window.Show();

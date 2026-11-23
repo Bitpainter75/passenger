@@ -292,16 +292,29 @@ public partial class MainWindow
     private async Task PruneAsync(ContainerRow? chosen)
     {
         ContainerEngine engine = Engine;
-        if (await BackgroundWork.Run(() => engine.StateAsync()) is { IsReady: false } state)
+        (string what, IReadOnlyList<string> words) pruning;
+        Task<bool> answer;
+        using (Working? reading = BeginWork(AppActions.ContainerPrune, "Asking the container engine…"))
         {
-            status.Say(state.Problem ?? Refusals.EngineNotRunning, ProblemSeverity.Warning, EnginePlace(state));
-            return;
+            if (reading is null)
+            {
+                return;
+            }
+            if (await BackgroundWork.Run(() => engine.StateAsync()) is { IsReady: false } state)
+            {
+                status.Say(state.Problem ?? Refusals.EngineNotRunning, ProblemSeverity.Warning, EnginePlace(state));
+                reading.Tell(false, state.Problem ?? Refusals.EngineNotRunning);
+                return;
+            }
+            string kind = chosen?.Object?.Kind ?? (chosen?.Kind == ContainerRowKind.Group ? chosen.Label : "container");
+            pruning = ContainerCommands.Prune(kind);
+            ConfirmDialog asked = new("Prune", $"Remove {pruning.what}? This cannot be undone.", "Prune");
+            Asked = asked;
+            // The work ends as the dialog asks: the prune after it is begun again under the same id.
+            answer = asked.ShowDialog<bool>(this);
         }
-        string kind = chosen?.Object?.Kind ?? (chosen?.Kind == ContainerRowKind.Group ? chosen.Label : "container");
-        (string what, IReadOnlyList<string> words) = ContainerCommands.Prune(kind);
-        ConfirmDialog asked = new("Prune", $"Remove {what}? This cannot be undone.", "Prune");
-        Asked = asked;
-        if (!await asked.ShowDialog<bool>(this))
+        IReadOnlyList<string> words = pruning.words;
+        if (!await answer)
         {
             return;
         }
@@ -398,7 +411,7 @@ public partial class MainWindow
         }
         status.Text = removed.Count == 1
             ? $"Removed {Path.GetFileName(removed[0])}, Inspect's copy written before Passenger masked the secrets in it"
-            : $"Removed {removed.Count} of Inspect's copies written before Passenger masked the secrets in them";
+            : $"Removed {Numbers.Said(removed.Count)} of Inspect's copies written before Passenger masked the secrets in them";
     }
 
     /// <summary>Inspect's JSON as it reads: indented, its characters (a masked secret's dots, an image's names) as they are.</summary>

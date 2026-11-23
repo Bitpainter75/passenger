@@ -43,14 +43,78 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
         return Path.Combine(made, "Sample.slnx");
     });
 
+    /// <summary>The gate's seventeen checks of Build and Run, as one flow: a solution opened by name, build errors
+    /// listed and linked, Hot Reload reaching the program, the run console's input and colours, the projects chosen
+    /// built alone, a build stopped or waiting for design-time builds, links in a program's output, the Build window, a
+    /// browser opened once listening, and a build or program ended with the window.</summary>
+    [Gate]
+    [AvaloniaFact]
+    public void The_gates_builds_and_runs_hold_as_one_flow()
+    {
+        Flow.StepApart("a solution opened by name opens that one shows its projects framework unloads it and its design time build leaves the apphost", () => new BuildRunTests(folders), t => t.A_solution_opened_by_name_opens_that_one_shows_its_projects_framework_unloads_it_and_its_design_time_build_leaves_the_apphost());
+        Flow.StepApart("a build error is listed in problems and a link from the build window and a run whose build fails runs nothing", () => new BuildRunTests(folders), t => t.A_build_error_is_listed_in_problems_and_a_link_from_the_build_window_and_a_run_whose_build_fails_runs_nothing());
+        Flow.StepApart("a build error whose message runs over several lines is one problem showing its first line", () => new BuildRunTests(folders), t => t.A_build_error_whose_message_runs_over_several_lines_is_one_problem_showing_its_first_line());
+        Flow.StepApart("with hot reload edits reach the running program a signature change restarts it and it ends with the window", () => new BuildRunTests(folders), t => t.With_hot_reload_edits_reach_the_running_program_a_signature_change_restarts_it_and_it_ends_with_the_window());
+        Flow.StepApart("the run console takes typed input never shows a split colour code colours standard error clears from its menu and keeps riders buffer", () => new BuildRunTests(folders), t => t.The_run_console_takes_typed_input_never_shows_a_split_colour_code_colours_standard_error_clears_from_its_menu_and_keeps_riders_buffer());
+        Flow.StepApart("the projects chosen in the explorer build rebuild and clean on their own", () => new BuildRunTests(folders), t => t.The_projects_chosen_in_the_explorer_build_rebuild_and_clean_on_their_own());
+        Flow.StepApart("a build under dotnet tests environment ends and stopping a build ends its steps wherever msbuild ran them and nothing more is written after", () => new BuildRunTests(folders), t => t.A_build_under_dotnet_tests_environment_ends_and_stopping_a_build_ends_its_steps_wherever_msbuild_ran_them_and_nothing_more_is_written_after());
+        Flow.StepApart("a build begun while a wpf apps design time build writes its generated code waits for it and succeeds", () => new BuildRunTests(folders), t => t.A_build_begun_while_a_wpf_apps_design_time_build_writes_its_generated_code_waits_for_it_and_succeeds());
+        Flow.StepApart("a build begun while an avalonia apps design time build writes its resources waits for it and succeeds", () => new BuildRunTests(folders), t => t.A_build_begun_while_an_avalonia_apps_design_time_build_writes_its_resources_waits_for_it_and_succeeds());
+        Flow.StepApart("an address a message naming a file and a stack trace a program writes are links where they point", () => new BuildRunTests(folders), t => t.An_address_a_message_naming_a_file_and_a_stack_trace_a_program_writes_are_links_where_they_point());
+        Flow.StepApart("a console as output streams copies no line it has linked", () => new BuildRunTests(folders), t => t.A_console_as_output_streams_copies_no_line_it_has_linked());
+        Flow.StepApart("Build opens the build window as it starts and its end brings it forward as settings say", () => new BuildRunTests(folders), t => t.Build_opens_the_build_window_as_it_starts_and_its_end_brings_it_forward_as_settings_say());
+        Flow.StepApart("a web project whose profile launches the browser opens its launch url once it listens and not before", () => new BuildRunTests(folders), t => t.A_web_project_whose_profile_launches_the_browser_opens_its_launch_url_once_it_listens_and_not_before());
+        Flow.StepApart("a build that cannot start says why and leaves nothing waiting", () => new BuildRunTests(folders), t => t.A_build_that_cannot_start_says_why_and_leaves_nothing_waiting());
+        Flow.StepApart("the run windows rerun while the program runs stops it and runs it again and a program still running ends with the window", () => new BuildRunTests(folders), t => t.The_run_windows_rerun_while_the_program_runs_stops_it_and_runs_it_again_and_a_program_still_running_ends_with_the_window());
+        Flow.StepApart("a program run built and built again in the terminal starts with no build before it", () => new BuildRunTests(folders), t => t.A_program_run_built_and_built_again_in_the_terminal_starts_with_no_build_before_it());
+        Flow.StepApart("a build still running when the window closes ends with it", () => new BuildRunTests(folders), t => t.A_build_still_running_when_the_window_closes_ends_with_it());
+    }
+
+    /// <summary>Rerun asks first and Stop ends the program, each stream's lines heard and shown whole however the other
+    /// writes into them, characters outside the system's code page reaching both ways, the apphost started on
+    /// Passenger's dotnet, and a message naming a file linked, as one flow, each step the check one test made in an
+    /// instance of its own.</summary>
+    [AvaloniaFact]
+    public void The_run_window_shows_a_programs_output_whole_and_reruns_or_stops_as_asked()
+    {
+        Flow.StepApart("asked before a rerun cancel leaves the program running stop ends it and stop and rerun starts it again", () => new BuildRunTests(folders), t => t.Asked_before_a_rerun_cancel_leaves_the_program_running_stop_ends_it_and_stop_and_rerun_starts_it_again());
+        Flow.StepApart("a programs output and errors written into each others lines are heard a whole line of each stream at a time", () => new BuildRunTests(folders), t => t.A_programs_output_and_errors_written_into_each_others_lines_are_heard_a_whole_line_of_each_stream_at_a_time());
+        Flow.StepApart("the run window shows each streams line whole whatever the other writes into it and a prompt as written", () => new BuildRunTests(folders), t => t.The_run_window_shows_each_streams_line_whole_whatever_the_other_writes_into_it_and_a_prompt_as_written());
+        Flow.StepApart("a programs characters outside the systems code page reach the run window as written and the program as typed", () => new BuildRunTests(folders), t => t.A_programs_characters_outside_the_systems_code_page_reach_the_run_window_as_written_and_the_program_as_typed());
+        Flow.StepApart("Run starts the projects apphost on the dotnet passenger builds with", () => new BuildRunTests(folders), t => t.Run_starts_the_projects_apphost_on_the_dotnet_passenger_builds_with());
+        Flow.StepApart("a build message naming a file but no place in it links the file and opens it", () => new BuildRunTests(folders), t => t.A_build_message_naming_a_file_but_no_place_in_it_links_the_file_and_opens_it());
+    }
+
+    /// <summary>Under dotnet watch a program that ends or whose build fails is said to wait for a change that builds,
+    /// each save reaches the program alone however long it takes, and a web project's browser opens once through the
+    /// window, as one flow, each step in an instance of its own.</summary>
+    [AvaloniaFact]
+    public void Hot_Reload_and_dotnet_watch_follow_each_save_and_wait_for_a_change_that_builds()
+    {
+        Flow.StepApart("a program under dotnet watch that ends on a deleted method is said to wait for a change and a save or rerun starts it again", () => new BuildRunTests(folders), t => t.A_program_under_dotnet_watch_that_ends_on_a_deleted_method_is_said_to_wait_for_a_change_and_a_save_or_rerun_starts_it_again());
+        Flow.StepApart("a program under dotnet watch whose build fails is said to wait for a change naming the error and a change that builds runs it", () => new BuildRunTests(folders), t => t.A_program_under_dotnet_watch_whose_build_fails_is_said_to_wait_for_a_change_naming_the_error_and_a_change_that_builds_runs_it());
+        Flow.StepApart("with hot reload edits saved one after another each reach the program heard as their files change alone however long a save takes", () => new BuildRunTests(folders), t => t.With_hot_reload_edits_saved_one_after_another_each_reach_the_program_heard_as_their_files_change_alone_however_long_a_save_takes());
+        Flow.StepApart("Under hot reload a web project whose profile launches the browser opens it once through the window and never through dotnet watch", () => new BuildRunTests(folders), t => t.Under_hot_reload_a_web_project_whose_profile_launches_the_browser_opens_it_once_through_the_window_and_never_through_dotnet_watch());
+    }
+
+    /// <summary>A build waits for a held file's save to land, goes on through the language server starting again and
+    /// ends its nodes with it, each on the systems it holds on, as one step whose rows pass over the others, each in an
+    /// instance of its own.</summary>
+    [AvaloniaFact]
+    public void A_build_waits_for_a_held_save_and_outlasts_the_language_server_starting_again()
+    {
+        Flow.Step("a build waits for a held save and outlasts the language server's start and its nodes", () => Cases.All(
+            ("a build pressed while a held files save lands waits for it and compiles the saved text", () => Flow.StepApart("a build pressed while a held files save lands waits for it and compiles the saved text", () => new BuildRunTests(folders), t => t.A_build_pressed_while_a_held_files_save_lands_waits_for_it_and_compiles_the_saved_text())),
+            ("a build goes on through the language server starting again while it runs", () => Flow.StepApart("a build goes on through the language server starting again while it runs", () => new BuildRunTests(folders), t => t.A_build_goes_on_through_the_language_server_starting_again_while_it_runs())),
+            ("the language servers msbuild nodes end with it on windows too", () => Flow.StepApart("the language servers msbuild nodes end with it on windows too", () => new BuildRunTests(folders), t => t.The_language_servers_msbuild_nodes_end_with_it_on_windows_too()))));
+    }
+
     /// <summary>A solution opened by name among the folder's several, its project's framework set by the repository,
     /// built before: the window opens that solution and keeps it as it reads it again; the project shows its framework,
     /// unloaded is dimmed and leaves the run configurations until reloaded; and the project host's design-time build of
     /// it writes no apphost, which the SDK makes (and on macOS signs) in Compile's dependencies once the assembly is
     /// there, so a build begun beside it could have both make and sign that one file at once.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_solution_opened_by_name_opens_that_one_shows_its_projects_framework_unloads_it_and_its_design_time_build_leaves_the_apphost()
+    private void A_solution_opened_by_name_opens_that_one_shows_its_projects_framework_unloads_it_and_its_design_time_build_leaves_the_apphost()
     {
         Write("Zebra.slnx", "<Solution>\n  <Folder Name=\"/src/\">\n    <Project Path=\"src/Hello/Hello.csproj\" />\n  </Folder>\n</Solution>\n");
         Write("Directory.Build.props", $"<Project>\n  <PropertyGroup>\n    <TargetFramework>{TestProjects.Framework}</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
@@ -100,11 +164,75 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
         }
     }
 
+    /// <summary>With Ask before stopping a running configuration to start it again on, Run of the program that runs asks
+    /// first: Cancel leaves it running, Stop ends it and starts nothing, a Run with nothing running asks nothing, and Stop and
+    /// Rerun with Don't ask again ticked runs it again and turns the question off.</summary>
+    private void Asked_before_a_rerun_cancel_leaves_the_program_running_stop_ends_it_and_stop_and_rerun_starts_it_again()
+    {
+        string started = Path.Combine(Folder, "program.pid");
+        Write("src/Hello/Program.cs", $$"""
+            File.WriteAllText(@"{{started}}", Environment.ProcessId.ToString());
+            while (true)
+            {
+                Console.WriteLine("running");
+                Thread.Sleep(200);
+            }
+
+            """);
+        // Seen, as only a window the person sees asks them.
+        MainWindow window = new() { Width = 1200, Height = 800, Unseen = false };
+        window.Show();
+        window.OpenFolder(Folder);
+        Ui.Settle();
+        window.ApplySettings(window.Settings with { AskBeforeRerun = true });
+        try
+        {
+            Assert.True(window.Perform(AppActions.RunProgram), $"Run could not run: {window.Status}");
+            Ui.WaitFor(() => window.Runner.IsRunning && Processes.ReadId(started) > 0, "the program to run", TimeSpan.FromMinutes(2));
+            int first = Processes.ReadId(started);
+
+            ChoiceDialog cancelled = RunAgainAsked(window);
+            Ui.ClickButton(cancelled, "Cancel");
+            Ui.WaitFor(() => window.Actions.Work.Of(AppActions.RunProgram) is null, "the start the person cancelled to end");
+            Assert.True(window.Runner.IsRunning && Processes.ReadId(started) == first && Processes.IsRunning(first),
+                $"Cancel did not leave the program running as it was: the status bar says \"{window.Status}\"");
+
+            Ui.ClickButton(RunAgainAsked(window), "Stop");
+            Ui.WaitFor(() => !window.Runner.IsRunning && window.Actions.Work.Of(AppActions.RunProgram) is null, "the program to stop, nothing started");
+            Assert.True(Processes.ReadId(started) == first && !Processes.IsRunning(first), $"Stop started the program again or left it running: \"{window.Status}\"");
+
+            Assert.True(window.Perform(AppActions.RunProgram), $"Run could not run: {window.Status}");
+            Assert.Null(window.RunAgainQuestion);
+            Ui.WaitFor(() => window.Runner.IsRunning && Processes.ReadId(started) is int again && again > 0 && again != first, "the program to run again, asked nothing", TimeSpan.FromMinutes(2));
+            int second = Processes.ReadId(started);
+
+            ChoiceDialog rerun = RunAgainAsked(window);
+            rerun.GetVisualDescendants().OfType<CheckBox>().Single(c => (string?)c.Content == "Don't ask again").IsChecked = true;
+            Ui.ClickButton(rerun, "Stop and Rerun");
+            Ui.WaitFor(() => window.Runner.IsRunning && Processes.ReadId(started) is int third && third > 0 && third != second, "the program to run again", TimeSpan.FromMinutes(2));
+            Assert.False(Processes.IsRunning(second), "Stop and Rerun left the program it stopped running beside the new one");
+            Assert.False(window.Settings.AskBeforeRerun, "Don't ask again left the question on");
+        }
+        finally
+        {
+            window.Perform(AppActions.Stop);
+            Ui.WaitFor(() => !window.Runner.IsRunning, "the program to stop");
+            window.ApplySettings(new Passenger.App.Settings.AppSettings());
+            window.Close();
+        }
+
+        static ChoiceDialog RunAgainAsked(MainWindow window)
+        {
+            Assert.True(window.Perform(AppActions.RunProgram), $"Run could not run: {window.Status}");
+            Ui.PumpUntil(() => window.RunAgainQuestion is not null, "Run to ask about the program that runs", TimeSpan.FromMinutes(1));
+            return DialogButtonsTests.Check(window.RunAgainQuestion!);
+        }
+    }
+
     /// <summary>Windows refuses a save while another program holds the file sharing neither writes nor its deletion, and
     /// Build is pressed at once: the build waits for the save to land, saying so, and compiles the saved text (an error
     /// typed into it), never the file as it was.</summary>
-    [AvaloniaFact]
-    public void A_build_pressed_while_a_held_files_save_lands_waits_for_it_and_compiles_the_saved_text()
+    private void A_build_pressed_while_a_held_files_save_lands_waits_for_it_and_compiles_the_saved_text()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows refuses to replace or write a file another program holds");
         string shop = TestFolders.Create("build-held-");
@@ -135,9 +263,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// listed in Problems at its file and line, the status bar's word a link there, the Build window's line of it a link to
     /// its file, line and column; and Run, whose build fails on it too, brings the Build window forward with it and runs
     /// nothing.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_build_error_is_listed_in_problems_and_a_link_from_the_build_window_and_a_run_whose_build_fails_runs_nothing()
+    private void A_build_error_is_listed_in_problems_and_a_link_from_the_build_window_and_a_run_whose_build_fails_runs_nothing()
     {
         string shop = Path.Combine(TestFolders.Create("build-error-"), "Shop (copy)");
         TestFolders.Write(shop, "Shop.csproj", TestProjects.Console("<ImplicitUsings>enable</ImplicitUsings>"));
@@ -183,9 +309,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_build_error_whose_message_runs_over_several_lines_is_one_problem_showing_its_first_line()
+    private void A_build_error_whose_message_runs_over_several_lines_is_one_problem_showing_its_first_line()
     {
         // A message of many lines, as XAML compilers' and NuGet's are: MSBuild writes each line as its own.
         Write("src/Hello/Hello.csproj",
@@ -242,8 +366,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// <summary>A compiler's message about a file as a whole, which names no place in it (MSBuild's "file : warning
     /// AVLN3001: ...", as Avalonia's XAML compiler writes one), links its file in the Build window, a path with a space in it
     /// whole, and the link opens it.</summary>
-    [AvaloniaFact]
-    public void A_build_message_naming_a_file_but_no_place_in_it_links_the_file_and_opens_it()
+    private void A_build_message_naming_a_file_but_no_place_in_it_links_the_file_and_opens_it()
     {
         Write("src/Hello/Hello.csproj",
             $"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>{TestProjects.Framework}</TargetFramework>\n    <ImplicitUsings>enable</ImplicitUsings>\n  </PropertyGroup>\n" +
@@ -277,9 +400,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// which leaves the callers calling the method the update deletes, is said as the restart dotnet watch makes, however
     /// long after the Apply the program calls it and however far the window fell behind; and the program dotnet watch
     /// started again, and dotnet watch, end with the window.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void With_hot_reload_edits_reach_the_running_program_a_signature_change_restarts_it_and_it_ends_with_the_window()
+    private void With_hot_reload_edits_reach_the_running_program_a_signature_change_restarts_it_and_it_ends_with_the_window()
     {
         string started = Path.Combine(Folder, "program.pid");
         string asked = Path.Combine(Folder, "asked");
@@ -337,6 +458,8 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
             // The status bar says the restart however late: here once the Apply has ended.
             WaitWatched(window, () => window.Actions.Work.Of(AppActions.ApplyHotReloadChanges) is null, "the Apply before to end");
             int first = Processes.ReadId(started);
+            // A start again writes the id file again, told by its write rather than by an id the system may give twice.
+            DateTime firstWritten = FileStamp.WrittenAt(started);
             at = program.Text.Snapshot.ToString().IndexOf("Later() =>", StringComparison.Ordinal);
             window.EditorArea.CodeEditor.ApplyEdits([new TextEdit(at, "Later() =>".Length, "Later(int times = 1) =>")]);
             Assert.True(window.Perform(AppActions.ApplyHotReloadChanges), $"Apply Hot Reload Changes could not run: {window.Status}");
@@ -346,21 +469,23 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
             WaitWatched(window, () => window.Status?.Contains("dotnet watch is restarting the application", StringComparison.Ordinal) == true,
                 "the status bar to say dotnet watch restarts the program, which called the method as it was after the Apply had ended", TimeSpan.FromMinutes(1));
             // An edit before dotnet watch loads the project again is in what it loads, never applied.
-            WaitWatched(window, () => Processes.ReadId(started) is int again && again > 0 && again != first
+            WaitWatched(window, () => FileStamp.WrittenAt(started) > firstWritten && Processes.ReadId(started) > 0
                 && Output(window) is { } output && output.LastIndexOf("Waiting for changes", StringComparison.Ordinal) > output.LastIndexOf("Restarting application", StringComparison.Ordinal),
-                "dotnet watch to start the program again and watch it", TimeSpan.FromMinutes(1));
+                () => $"dotnet watch to start the program again and watch it (its id file {IdSaid(started)}, process {first} before{(Processes.IsRunning(first) ? ", still running" : string.Empty)})", TimeSpan.FromMinutes(1));
 
             // The window kept from drawing from the Apply to the restart, as a slow machine's falls behind: both words come at once.
             int second = Processes.ReadId(started);
+            DateTime secondWritten = FileStamp.WrittenAt(started);
             at = program.Text.Snapshot.ToString().IndexOf("Later(int times = 1) =>", StringComparison.Ordinal);
             window.EditorArea.CodeEditor.ApplyEdits([new TextEdit(at, "Later(int times = 1) =>".Length, "Later(int times = 1, bool again = true) =>")]);
             Assert.True(window.Perform(AppActions.ApplyHotReloadChanges), $"Apply Hot Reload Changes could not run: {window.Status}");
             Assert.Equal("Hot Reload: saved for dotnet watch to apply", window.Status);
-            if (!Waiting.Until(() => Processes.ReadId(started) is int again && again > 0 && again != second, TimeSpan.FromMinutes(1)))
+            if (!Waiting.Until(() => FileStamp.WrittenAt(started) > secondWritten && Processes.ReadId(started) > 0, TimeSpan.FromMinutes(1)))
             {
                 // What dotnet watch said meanwhile reaches the Run window only once the window runs again.
                 Ui.Settle();
-                Assert.Fail($"dotnet watch did not start the program again, for the signature changed while the window was held; the Run window:\n{Output(window)}");
+                Assert.Fail($"dotnet watch did not start the program again, for the signature changed while the window was held (its id file {IdSaid(started)}, "
+                    + $"process {second} before{(Processes.IsRunning(second) ? ", still running" : string.Empty)}); the Run window:\n{Output(window)}");
             }
             WaitWatched(window, () => window.Status?.Contains("dotnet watch is restarting the application", StringComparison.Ordinal) == true,
                 "the status bar to say dotnet watch restarted the program while the window was held", TimeSpan.FromMinutes(1));
@@ -385,8 +510,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// before it acts: each edit reaches the program, saved by Save or by Apply Hot Reload Changes, which the status bar
     /// says applied, and dotnet watch hears each save as its file's change alone, never as a file added to the project,
     /// which would have it load the projects again and say an edit saved meanwhile had no changes to apply.</summary>
-    [AvaloniaFact]
-    public void With_hot_reload_edits_saved_one_after_another_each_reach_the_program_heard_as_their_files_change_alone_however_long_a_save_takes()
+    private void With_hot_reload_edits_saved_one_after_another_each_reach_the_program_heard_as_their_files_change_alone_however_long_a_save_takes()
     {
         Write("src/Hello/Program.cs", """
             while (true)
@@ -413,7 +537,11 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
         }
         MainWindow window = Open();
         window.ApplySettings(window.Settings with { HotReload = true });
+        // dotnet watch's words as the runner hears them, each stream's lines whole, where the program's line may split one in the Run window.
+        List<string> lines = [];
+        void OnLine(object? sender, string line) => lines.Add(line);
         FileText.Placing += Slow;
+        window.Runner.Line += OnLine;
         try
         {
             window.OpenFile(Path.Combine(Folder, "src", "Hello", "Program.cs"));
@@ -421,7 +549,8 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
             window.Perform(AppActions.RunProgram);
             WaitWatched(window, () => Output(window).Contains("said 0", StringComparison.Ordinal) && Output(window).Contains("Waiting for changes", StringComparison.Ordinal),
                 "the program to run under dotnet watch", TimeSpan.FromMinutes(2));
-            int watching = Output(window).IndexOf("Waiting for changes", StringComparison.Ordinal);
+            int watching = lines.FindIndex(line => line.StartsWith("dotnet watch", StringComparison.Ordinal) && line.Contains("Waiting for changes", StringComparison.Ordinal));
+            Assert.True(watching >= 0, $"dotnet watch's word that it waits for changes was never heard whole: [{string.Join(" | ", lines)}]");
             Passenger.App.Workspace.OpenDocument program = window.EditorArea.Active!;
 
             for (int edit = 1; edit <= 4; edit++)
@@ -445,7 +574,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
             }
 
             Assert.True(held.Count >= 4, $"{held.Count} saves held their temporary file, of the 4 made");
-            string[] heard = [.. Output(window)[watching..].Split('\n').Where(line => line.StartsWith("dotnet watch", StringComparison.Ordinal))];
+            string[] heard = [.. lines.Skip(watching).Where(line => line.StartsWith("dotnet watch", StringComparison.Ordinal))];
             string[] more = [.. heard.Where(line => held.Any(name => line.Contains(name, StringComparison.Ordinal))
                 || line.Contains(" added: ", StringComparison.Ordinal) || line.Contains(" deleted: ", StringComparison.Ordinal)
                 || line.Contains("Loading projects", StringComparison.Ordinal) || line.Contains("No managed code changes", StringComparison.Ordinal))];
@@ -457,6 +586,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
         finally
         {
             FileText.Placing -= Slow;
+            window.Runner.Line -= OnLine;
             window.Perform(AppActions.Stop);
             Ui.WaitFor(() => !window.Runner.IsRunning, "the program to stop");
             window.Close();
@@ -469,8 +599,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// window say the program ended and dotnet watch starts it again when a change is saved, the Run window offering Rerun
     /// and Stop; a change Apply Hot Reload Changes saves starts it again, which the status bar says, the Apply ending and the
     /// offer gone; and after a second such end, the Run window's Rerun starts it again.</summary>
-    [AvaloniaFact]
-    public void A_program_under_dotnet_watch_that_ends_on_a_deleted_method_is_said_to_wait_for_a_change_and_a_save_or_rerun_starts_it_again()
+    private void A_program_under_dotnet_watch_that_ends_on_a_deleted_method_is_said_to_wait_for_a_change_and_a_save_or_rerun_starts_it_again()
     {
         string started = Path.Combine(Folder, "program.pid");
         string asked = Path.Combine(Folder, "asked");
@@ -577,8 +706,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// Run window says dotnet watch builds it again when a change is saved, offering Stop, the Apply that saved the change
     /// ending on it; a change that builds, saved, has the program run, which the status bar says, the bar and the error
     /// gone.</summary>
-    [AvaloniaFact]
-    public void A_program_under_dotnet_watch_whose_build_fails_is_said_to_wait_for_a_change_naming_the_error_and_a_change_that_builds_runs_it()
+    private void A_program_under_dotnet_watch_whose_build_fails_is_said_to_wait_for_a_change_naming_the_error_and_a_change_that_builds_runs_it()
     {
         string started = Path.Combine(Folder, "program.pid");
         string asked = Path.Combine(Folder, "asked");
@@ -688,8 +816,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// <summary>A program whose errors begin a line its output writes a whole line into before they end it, and whose output
     /// begins a line its errors write a whole line into: each stream's lines are heard whole, as dotnet watch's words are
     /// read whatever the program it runs writes between a word's start and its end.</summary>
-    [AvaloniaFact]
-    public void A_programs_output_and_errors_written_into_each_others_lines_are_heard_a_whole_line_of_each_stream_at_a_time()
+    private void A_programs_output_and_errors_written_into_each_others_lines_are_heard_a_whole_line_of_each_stream_at_a_time()
     {
         Write("src/Hello/Program.cs", """
             Console.Error.Write("dotnet watch : ");
@@ -725,11 +852,59 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
         }
     }
 
+    /// <summary>A program whose errors begin a line its output writes a whole line into a moment before they end it, and
+    /// whose output begins a line its errors write a whole line into, shows each line whole in the Run window; and its
+    /// prompt, which ends with no line break, shows as written while it waits for its input (#2048).</summary>
+    private void The_run_window_shows_each_streams_line_whole_whatever_the_other_writes_into_it_and_a_prompt_as_written()
+    {
+        Write("src/Hello/Program.cs", """
+            Console.Error.Write("dotnet watch : ");
+            Console.Out.WriteLine("the program's own line");
+            Thread.Sleep(20);
+            Console.Error.WriteLine("Waiting for changes");
+            Console.Out.Write("output begun, ");
+            Console.Error.WriteLine("an error between");
+            Thread.Sleep(20);
+            Console.Out.WriteLine("output ended");
+            Console.Out.Write("Name? ");
+            string? name = Console.ReadLine();
+            Console.Out.WriteLine($"Hello, {name}");
+
+            """);
+        MainWindow window = Open();
+        OutputView run = window.BottomPanel.Run;
+        try
+        {
+            window.Perform(AppActions.RunProgram);
+            Ui.WaitFor(() => Output(window).EndsWith("Name? ", StringComparison.Ordinal), () => $"the program's prompt, with no line break after it, where the Run window shows:\n{Output(window)}",
+                TimeSpan.FromMinutes(2));
+            Assert.True(window.Runner.IsRunning, "The program ended before its prompt showed, where it waits for its input");
+            string[] written = ["dotnet watch", "the program's own line", "Waiting for changes", "output begun", "an error between", "output ended", "Name?"];
+            string[] lines = [.. Output(window).Split('\n').Where(line => written.Any(part => line.Contains(part, StringComparison.Ordinal)))];
+            // Read apart, one stream's line may come before or after the other's written first; each stream's own order holds.
+            string[] output = ["the program's own line", "output begun, output ended", "Name? "];
+            string[] errors = ["dotnet watch : Waiting for changes", "an error between"];
+            Assert.True(lines.Where(output.Contains).SequenceEqual(output) && lines.Where(errors.Contains).SequenceEqual(errors) && lines.Length == output.Length + errors.Length,
+                $"The Run window shows a line of one stream inside the other's, as written between its two writes: [{string.Join(" | ", lines)}]");
+
+            Ui.Click(run.Editor, settle: false);
+            window.KeyTextInput("Ada");
+            Ui.Press(window, "ENTER");
+            Ui.WaitFor(() => Output(window).Contains("Process finished", StringComparison.Ordinal), "the program to read the line typed and end");
+            Assert.Contains("Name? Ada\nHello, Ada\n", Output(window), StringComparison.Ordinal);
+        }
+        finally
+        {
+            window.Perform(AppActions.Stop);
+            Ui.WaitFor(() => !window.Runner.IsRunning, "the run to end");
+            window.Close();
+        }
+    }
+
     /// <summary>Run starts a project's apphost, as dotnet run does, so what only it carries (a Windows app's manifest, its
     /// icon, its name) reaches the program, which runs on the .NET Passenger builds with, never one the apphost finds
     /// itself (#1416).</summary>
-    [AvaloniaFact]
-    public void Run_starts_the_projects_apphost_on_the_dotnet_passenger_builds_with()
+    private void Run_starts_the_projects_apphost_on_the_dotnet_passenger_builds_with()
     {
         Write("src/Hello/Program.cs", $$"""
             Console.WriteLine($"started as {Path.GetFileNameWithoutExtension(Environment.ProcessPath)}");
@@ -762,7 +937,10 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
 
     /// <summary>Waits as <see cref="Ui.WaitFor"/> does for what the window says of a program under dotnet watch; one that
     /// never comes says what the status bar and the Run window said by the end of the wait, not as it began.</summary>
-    private static void WaitWatched(MainWindow window, Func<bool> condition, string what, TimeSpan? limit = null)
+    private static void WaitWatched(MainWindow window, Func<bool> condition, string what, TimeSpan? limit = null) => WaitWatched(window, condition, () => what, limit);
+
+    /// <inheritdoc cref="WaitWatched(MainWindow, Func{bool}, string, TimeSpan?)"/>
+    private static void WaitWatched(MainWindow window, Func<bool> condition, Func<string> what, TimeSpan? limit = null)
     {
         try
         {
@@ -779,9 +957,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// colour, whatever colour codes it writes, none of which shows even split between two reads, and the console's
     /// menu clears it with its colours; and the third's three megabytes keep to the console's buffer, its oldest lines
     /// dropped.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void The_run_console_takes_typed_input_never_shows_a_split_colour_code_colours_standard_error_clears_from_its_menu_and_keeps_riders_buffer()
+    private void The_run_console_takes_typed_input_never_shows_a_split_colour_code_colours_standard_error_clears_from_its_menu_and_keeps_riders_buffer()
     {
         Write("src/Hello/Program.cs",
             "Console.Write(\"Name? \");\nstring? name = Console.ReadLine();\nConsole.WriteLine($\"Hello, {name}\");\n"
@@ -874,8 +1050,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// <summary>A program run writes characters outside an English Windows' code page (an é, the narrow no-break space
     /// French groups digits with, a CJK letter) and reads a line typed with them: the Run window shows each as the program
     /// wrote it, and the program reads each as it was typed, on every system.</summary>
-    [AvaloniaFact]
-    public void A_programs_characters_outside_the_systems_code_page_reach_the_run_window_as_written_and_the_program_as_typed()
+    private void A_programs_characters_outside_the_systems_code_page_reach_the_run_window_as_written_and_the_program_as_typed()
     {
         Write("src/Hello/Program.cs",
             "Console.WriteLine(\"caf\\u00e9 1\\u202f234,5 \\u6f22\");\nstring typed = Console.ReadLine() ?? string.Empty;\n"
@@ -902,9 +1077,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
         }
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void The_projects_chosen_in_the_explorer_build_rebuild_and_clean_on_their_own()
+    private void The_projects_chosen_in_the_explorer_build_rebuild_and_clean_on_their_own()
     {
         Write("Sample.slnx", "<Solution>\n  <Folder Name=\"/src/\">\n    <Project Path=\"src/Hello/Hello.csproj\" />\n    <Project Path=\"src/Tools/Tools.csproj\" />\n  </Folder>\n</Solution>\n");
         Write("src/Tools/Tools.csproj", TestProjects.Library());
@@ -942,9 +1115,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// person's IDE's environment, after a build that left its nodes for the next, Stop pressed while each project's build
     /// runs a step writing to its output folder until ended (as a code generator, a bundler or tests in the build would)
     /// ends every step, and nothing more is written; each line names its step's shell, for a failure to say who wrote.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_build_under_dotnet_tests_environment_ends_and_stopping_a_build_ends_its_steps_wherever_msbuild_ran_them_and_nothing_more_is_written_after()
+    private void A_build_under_dotnet_tests_environment_ends_and_stopping_a_build_ends_its_steps_wherever_msbuild_ran_them_and_nothing_more_is_written_after()
     {
         WriteTwoProjects();
         using OwnMSBuild tested = new(("MSBUILDENSURESTDOUTFORTASKPROCESSES", "1"));
@@ -1046,8 +1217,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// build the IDE starts never takes that node up, so the server started again while the build runs ends nothing of
     /// the build's. On Windows the restore's node is no part of the server's tree once the restore has gone. Where MSBuild
     /// keeps no node of the restore (other builds' nodes filling its count), there is none to see, and the test skips.</summary>
-    [AvaloniaFact]
-    public void A_build_goes_on_through_the_language_server_starting_again_while_it_runs()
+    private void A_build_goes_on_through_the_language_server_starting_again_while_it_runs()
     {
         Nice.SkipUnlessMSBuildKeepsNodes();
         WriteTwoProjects();
@@ -1098,8 +1268,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// tree once the restore has gone, and one no build ever took up keeps the folder it was started in, the solution's,
     /// which Windows then lets nobody delete. They end with the server, as its process group ends them elsewhere: none is
     /// left once the window closes.</summary>
-    [AvaloniaFact]
-    public void The_language_servers_msbuild_nodes_end_with_it_on_windows_too()
+    private void The_language_servers_msbuild_nodes_end_with_it_on_windows_too()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "Elsewhere the server's process group holds its nodes, which A_build_goes_on_through_the_language_server_starting_again_while_it_runs checks");
         WriteTwoProjects();
@@ -1120,9 +1289,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// build waits for the design-time build, the Build window saying so, and runs alone. Here the design-time build
     /// holds App.g.cs as MarkupCompile does while it writes it, until the test lets it go; a build's MarkupCompile
     /// begun meanwhile says so.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_build_begun_while_a_wpf_apps_design_time_build_writes_its_generated_code_waits_for_it_and_succeeds()
+    private void A_build_begun_while_a_wpf_apps_design_time_build_writes_its_generated_code_waits_for_it_and_succeeds()
     {
         string app = PathNames.Canonical(TestFolders.Create("wpf-build-"));
         string release = Path.Combine(app, "release");
@@ -1180,9 +1347,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// writer have: the build waits. Here the design-time build holds the resources open until the test lets it go,
     /// then deletes the empty file it held (taken as up to date, it would be embedded: AVLN9999) for the task to write;
     /// a build begun meanwhile says so.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_build_begun_while_an_avalonia_apps_design_time_build_writes_its_resources_waits_for_it_and_succeeds()
+    private void A_build_begun_while_an_avalonia_apps_design_time_build_writes_its_resources_waits_for_it_and_succeeds()
     {
         string app = PathNames.Canonical(TestFolders.Create("avalonia-build-"));
         string release = Path.Combine(app, "release");
@@ -1297,9 +1462,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// <summary>What a program writes in the Run window links where it points: an address opens in the browser, a message
     /// naming a file of its project in a compiler's shape opens that file (a relative path the project's, though the run's
     /// working folder is its output folder), and the stack trace of what it threw has each frame's file and line a link.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void An_address_a_message_naming_a_file_and_a_stack_trace_a_program_writes_are_links_where_they_point()
+    private void An_address_a_message_naming_a_file_and_a_stack_trace_a_program_writes_are_links_where_they_point()
     {
         Write("src/Hello/Program.cs", "Console.WriteLine(\"The orders are documented at https://example.com/orders/help?topic=load.\");\n"
             + "Console.WriteLine(\"Program.cs(2,9): warning ORD001: the orders were checked by the program\");\nOrders.Load(\"orders.json\");\n\nstatic class Orders\n{\n"
@@ -1345,9 +1508,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// to find their links, and a row on screen throughout has the same links at the end as at the start. Each row's text
     /// was copied as its colours were compared and again as its links were drawn, at every line written and every pointer
     /// move over it, its links made again each time.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_console_as_output_streams_copies_no_line_it_has_linked()
+    private void A_console_as_output_streams_copies_no_line_it_has_linked()
     {
         string folder = TestFolders.Create("links-");
         string source = TestFolders.Write(folder, "Orders.cs", "static class Orders\n{\n}\n");
@@ -1391,9 +1552,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// build is explicitly invoked" is off, and a build's end brings it forward as "Showing build results after build
     /// completed" says, by default only when errors were received; Run's build, an implicit one, opens it only with
     /// "even when the build is invoked implicitly".</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Build_opens_the_build_window_as_it_starts_and_its_end_brings_it_forward_as_settings_say()
+    private void Build_opens_the_build_window_as_it_starts_and_its_end_brings_it_forward_as_settings_say()
     {
         MainWindow window = Open();
         try
@@ -1463,9 +1622,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
         Assert.True(window.Status?.StartsWith(said, StringComparison.Ordinal) == true, $"The build did not end saying \"{said}\": {Ui.Said(window)}");
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_web_project_whose_profile_launches_the_browser_opens_its_launch_url_once_it_listens_and_not_before()
+    private void A_web_project_whose_profile_launches_the_browser_opens_its_launch_url_once_it_listens_and_not_before()
     {
         // Each profile's port held from now until its site is about to listen there.
         using HeldPort browse = new();
@@ -1521,8 +1678,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// <summary>Under Run with Hot Reload, a web project whose profile launches the browser opens its launch URL once,
     /// through the window, once it listens; dotnet watch opens none of its own, which would run the program its
     /// DOTNET_WATCH_BROWSER_PATH names: a stand-in here, writing where it was sent.</summary>
-    [AvaloniaFact]
-    public void Under_hot_reload_a_web_project_whose_profile_launches_the_browser_opens_it_once_through_the_window_and_never_through_dotnet_watch()
+    private void Under_hot_reload_a_web_project_whose_profile_launches_the_browser_opens_it_once_through_the_window_and_never_through_dotnet_watch()
     {
         // The port held until the site, started, waits at its gate, outside its project where dotnet watch hears no change.
         using HeldPort held = new();
@@ -1610,9 +1766,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
         return editor.TranslatePoint(top + new Vector(2, editor.LineHeight / 2), window)!.Value;
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_build_that_cannot_start_says_why_and_leaves_nothing_waiting()
+    private void A_build_that_cannot_start_says_why_and_leaves_nothing_waiting()
     {
         MainWindow window = Open();
         TestFolders.Delete(Folder);
@@ -1680,9 +1834,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
 
     /// <summary>A program that runs until it is ended: the Run window's Rerun while it runs stops it and runs it again, and the
     /// one run again, still running when the window closes, ends with it.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void The_run_windows_rerun_while_the_program_runs_stops_it_and_runs_it_again_and_a_program_still_running_ends_with_the_window()
+    private void The_run_windows_rerun_while_the_program_runs_stops_it_and_runs_it_again_and_a_program_still_running_ends_with_the_window()
     {
         string runs = Path.Combine(Folder, "program.pids");
         string started = Path.Combine(Folder, "program.pid");
@@ -1724,9 +1876,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     /// terminal's shell is told its folder by its real path, as the IDE's builds name it, since a build through another
     /// spelling of a project's path deletes what the IDE's build wrote and it did not (IncrementalClean),
     /// runtimeconfig.json and deps.json among them.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_program_run_built_and_built_again_in_the_terminal_starts_with_no_build_before_it()
+    private void A_program_run_built_and_built_again_in_the_terminal_starts_with_no_build_before_it()
     {
         string folder = Folder;
         // Windows' shells read no PWD.
@@ -1787,9 +1937,7 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
             TerminalTests.Screen(shell).Split('\n').Select(line => line.Trim()).LastOrDefault(line => line is "built-0" or "built-1");
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_build_still_running_when_the_window_closes_ends_with_it()
+    private void A_build_still_running_when_the_window_closes_ends_with_it()
     {
         // A step of the build that would run for ten minutes, as a slow tool or a hung test would: its process names itself.
         Write("src/Hello/Hello.csproj", $"""
@@ -1861,6 +2009,19 @@ public sealed class BuildRunTests : IClassFixture<RestoredFolders>, IDisposable
     }
 
     private void Write(string relative, string text) => TestFolders.Write(Folder, relative, text);
+
+    /// <summary>What a program's id file says and when it was last written, for a wait on a program's start to say.</summary>
+    private static string IdSaid(string file)
+    {
+        try
+        {
+            return File.Exists(file) ? $"says \"{File.ReadAllText(file)}\", written {FileStamp.WrittenAt(file):HH:mm:ss.fff}" : "is not there";
+        }
+        catch (IOException error)
+        {
+            return $"could not be read: {error.Message}";
+        }
+    }
 
     /// <summary>MSBuild of a test's own, for what the IDE starts while it lasts (the IDE passes its environment on): a handshake
     /// salt no other build has, so no server or node another left is used and the test's builds start their own, as on a

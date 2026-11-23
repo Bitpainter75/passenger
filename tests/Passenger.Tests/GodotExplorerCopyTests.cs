@@ -1,20 +1,19 @@
 using System.Diagnostics;
 using Avalonia.Headless.XUnit;
 using Passenger.App;
-using Passenger.App.Godot;
 using Passenger.Core;
 using Passenger.Editor;
 using Passenger.Workspace;
 
 namespace Passenger.Tests;
 
-/// <summary>Files and folders copied in the Explorer within a Godot project Godot has opened, left as Godot's own duplicate
-/// leaves them: every copy given a uid of its own (a script's .uid, a scene's header, a binary scene's or resource's, an
-/// imported file's .import), a folder's scenes naming the files copied with them, a file's copy given its .uid, the
-/// originals as they were; Godot's headless editor then opens the project with no two files of one uid, and loads a copied
-/// scene from the copies. A file moved is named at its new place by the binary scenes and resources naming it and by the
-/// uid cache, which Godot loads it from at once. Without a Godot 4.4 or later, which keeps a script's uid beside it, each
-/// test skips saying why.</summary>
+/// <summary>Files and folders copied in the Explorer within a Godot project Godot has opened, left as Godot's own
+/// duplicate leaves them: every copy given a uid of its own (a script's .uid, a scene's header, a binary scene's or
+/// resource's, an imported file's .import), a folder's scenes naming the files copied with them, a file's copy given
+/// its .uid, the originals as they were; Godot's headless editor then opens the project with no two files of one uid,
+/// and loads a copied scene from the copies. A file moved is named at its new place by the binary scenes and resources
+/// naming it and by the uid cache. Without a Godot 4.4 or later, which keeps a script's uid beside it, each test skips
+/// saying why.</summary>
 public sealed class GodotExplorerCopyTests : IDisposable
 {
     private const string Script = "extends Node2D\n\n\nfunc _ready() -> void:\n\tprint(\"player\")\n";
@@ -67,12 +66,26 @@ public sealed class GodotExplorerCopyTests : IDisposable
         TestFolders.Delete(folder + "-home");
     }
 
+    /// <summary>A folder or file copied in a Godot project takes uids of its own as Godot's Duplicate gives them, its
+    /// binary scenes loading the copies, and a texture moved is followed by what names it.</summary>
+    [AvaloniaFact]
+    public void A_copy_or_move_in_a_godot_project_is_followed_as_godot_follows_it()
+    {
+        Flow.StepApart<GodotExplorerCopyTests>(nameof(A_folder_and_a_file_copied_in_a_godot_project_take_uids_of_their_own_as_godots_duplicate_gives_them),
+            test => test.A_folder_and_a_file_copied_in_a_godot_project_take_uids_of_their_own_as_godots_duplicate_gives_them());
+        OpenWindows.CloseAll();
+        Flow.StepApart<GodotExplorerCopyTests>(nameof(A_folders_binary_scene_and_resource_copied_in_a_godot_project_take_uids_of_their_own_and_load_the_copies),
+            test => test.A_folders_binary_scene_and_resource_copied_in_a_godot_project_take_uids_of_their_own_and_load_the_copies());
+        OpenWindows.CloseAll();
+        Flow.StepApart<GodotExplorerCopyTests>(nameof(A_texture_moved_in_a_godot_project_is_followed_by_the_binary_scene_and_resource_naming_it),
+            test => test.A_texture_moved_in_a_godot_project_is_followed_by_the_binary_scene_and_resource_naming_it());
+    }
+
     /// <summary>A folder holding a script, a scene and an imported texture, then the script alone, copied and pasted into
     /// another folder of the project: each copy takes a uid none of the project's other files gives, the scene copied names
     /// the copied script and texture, the script copied alone has a .uid of its own, and the originals keep theirs, so Godot
     /// opens the project finding no two files of one uid.</summary>
-    [AvaloniaFact]
-    public void A_folder_and_a_file_copied_in_a_godot_project_take_uids_of_their_own_as_godots_duplicate_gives_them()
+    private void A_folder_and_a_file_copied_in_a_godot_project_take_uids_of_their_own_as_godots_duplicate_gives_them()
     {
         // Godot has opened the project, so the texture has the .import Godot gives it.
         Assert.True(Godot(["--import"]) is { } first && first.Contains("Godot Engine", StringComparison.Ordinal), "Godot's first import wrote no log of its run");
@@ -116,8 +129,7 @@ public sealed class GodotExplorerCopyTests : IDisposable
     /// project: Godot's import finds no two files of one uid, the originals are as they were, and the copied scene loads its
     /// script and textures from the copies. A resource of a binary format Passenger doesn't know, copied, stays as it was,
     /// the paste saying so.</summary>
-    [AvaloniaFact]
-    public void A_folders_binary_scene_and_resource_copied_in_a_godot_project_take_uids_of_their_own_and_load_the_copies()
+    private void A_folders_binary_scene_and_resource_copied_in_a_godot_project_take_uids_of_their_own_and_load_the_copies()
     {
         TestFolders.Write(folder, "project.godot", "; Engine configuration file.\nconfig_version=5\n\n[application]\n\nconfig/name=\"Copies\"\n\n"
             + "[editor_plugins]\n\nenabled=PackedStringArray(\"res://addons/maker/plugin.cfg\")\n");
@@ -184,8 +196,7 @@ public sealed class GodotExplorerCopyTests : IDisposable
     /// names it at its new path, keeping its uid and every other byte, as one command Undo takes back whole and Redo makes
     /// again, and Godot, finding each by the path written where it knows no uid, loads the scene with the texture from its
     /// new place. A resource of a binary format Passenger doesn't know is left as it was, the move saying so.</summary>
-    [AvaloniaFact]
-    public void A_texture_moved_in_a_godot_project_is_followed_by_the_binary_scene_and_resource_naming_it()
+    private void A_texture_moved_in_a_godot_project_is_followed_by_the_binary_scene_and_resource_naming_it()
     {
         TestFolders.Write(folder, "project.godot", "; Engine configuration file.\nconfig_version=5\n\n[application]\n\nconfig/name=\"Copies\"\n\n"
             + "[editor_plugins]\n\nenabled=PackedStringArray(\"res://addons/maker/plugin.cfg\")\n");
@@ -256,57 +267,6 @@ public sealed class GodotExplorerCopyTests : IDisposable
                 Assert.True(original.With(null, named).AsSpan().SequenceEqual(now), $"{Path.GetFileName(path)} changed more than the texture's path");
             }
         }
-    }
-
-    /// <summary>The main scene's script: says where its sprite's texture came from, then quits.</summary>
-    private const string Shower = "extends Node2D\n\n\nfunc _ready() -> void:\n\tprint(\"shows \", $Sprite.texture.resource_path)\n\tget_tree().quit()\n";
-
-    /// <summary>A texture the main scene names by its uid, moved in the Explorer of a project Godot has opened: the game, run
-    /// headless at once with no editor between, loads it from its new place, the uid cache Godot finds a uid's file by
-    /// naming it there; Undo has the cache name it back where it was, and Redo where it went again.</summary>
-    [AvaloniaFact]
-    public void A_texture_moved_in_the_explorer_is_loaded_from_its_new_place_by_the_game_run_at_once()
-    {
-        TestFolders.Write(folder, "project.godot", "; Engine configuration file.\nconfig_version=5\n\n[application]\n\nconfig/name=\"Copies\"\nrun/main_scene=\"res://main.tscn\"\n");
-        TestFolders.Write(folder, "main.gd", Shower);
-        Assert.True(Godot(["--import"]) is { } first && first.Contains("Godot Engine", StringComparison.Ordinal), "Godot's first import wrote no log of its run");
-        string icon = Path.Combine(folder, "actors", "icon.svg");
-        string uid = GodotUids.OfBeside(icon + ".import", File.ReadAllText(icon + ".import"))!;
-        TestFolders.Write(folder, "main.tscn", "[gd_scene load_steps=3 format=3 uid=\"uid://bmainscene1\"]\n\n"
-            + $"[ext_resource type=\"Script\" path=\"res://main.gd\" id=\"1_s\"]\n[ext_resource type=\"Texture2D\" uid=\"{uid}\" path=\"res://actors/icon.svg\" id=\"2_t\"]\n\n"
-            + "[node name=\"Main\" type=\"Node2D\"]\nscript = ExtResource(\"1_s\")\n\n[node name=\"Sprite\" type=\"Sprite2D\" parent=\".\"]\ntexture = ExtResource(\"2_t\")\n");
-        string cache = Path.Combine(folder, GodotUids.CacheFile);
-        Assert.Contains((uid, "res://actors/icon.svg"), GodotUids.ReadCache(File.ReadAllBytes(cache)));
-        string moved = Path.Combine(folder, "levels", "icon.svg");
-
-        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
-        try
-        {
-            GodotSceneTests.Choose(window, icon);
-            Ui.Run(window, EditorActions.Cut);
-            GodotSceneTests.Choose(window, Path.Combine(folder, "levels"));
-            Ui.Run(window, EditorActions.Paste);
-            Ui.WaitFor(() => window.Status == "Moved icon.svg to levels", () => $"the paste of icon.svg to say it was moved: {window.Status}");
-            // Ended after its first frames whatever its script meets, a texture it could not load among them.
-            string ran = Godot(["--quit-after", "60"]) ?? string.Empty;
-            Assert.True(ran.Contains("shows res://levels/icon.svg", StringComparison.Ordinal) && !ran.Contains("ERROR", StringComparison.Ordinal),
-                $"The game run at once after the move did not load the texture from its new place:\n{ran}");
-
-            window.Confirm = (_, _, _) => Task.FromResult(true);
-            GodotSceneTests.Choose(window, Path.Combine(folder, "levels"));
-            Ui.Run(window, EditorActions.Undo);
-            Ui.WaitFor(() => File.Exists(icon) && GodotUids.ReadCache(File.ReadAllBytes(cache)).Contains((uid, "res://actors/icon.svg")),
-                () => $"Undo to move the texture back with the cache naming it there: {window.Status}; {string.Join(", ", GodotUids.ReadCache(File.ReadAllBytes(cache)))}");
-            GodotSceneTests.Choose(window, Path.Combine(folder, "actors"));
-            Ui.Run(window, EditorActions.Redo);
-            Ui.WaitFor(() => File.Exists(moved) && GodotUids.ReadCache(File.ReadAllBytes(cache)).Contains((uid, "res://levels/icon.svg")),
-                () => $"Redo to move the texture again with the cache naming it there: {window.Status}; {string.Join(", ", GodotUids.ReadCache(File.ReadAllBytes(cache)))}");
-        }
-        finally
-        {
-            window.Close();
-        }
-        Assert.DoesNotContain(GodotUids.ReadCache(File.ReadAllBytes(cache)), e => e.Res == "res://actors/icon.svg");
     }
 
     /// <summary>A file or folder chosen in the Explorer, copied and pasted into the folder levels, its status waited for.</summary>

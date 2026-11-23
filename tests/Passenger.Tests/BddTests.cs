@@ -19,8 +19,12 @@ public sealed class BddTests : IClassFixture<RestoredFolders>, IDisposable
 {
     private readonly string folder;
 
+    /// <summary>Where each step of a flow takes its own folder from.</summary>
+    private readonly RestoredFolders folders;
+
     public BddTests(RestoredFolders folders)
     {
+        this.folders = folders;
         folder = PathNames.Canonical(folders.Take("bdd-", made => ReqnrollProjects.Write(made)));
     }
 
@@ -42,8 +46,66 @@ public sealed class BddTests : IClassFixture<RestoredFolders>, IDisposable
         return window;
     }
 
+    /// <summary>Bindings read from code and a referenced library with no build; an unbound step marked, a bound one's
+    /// card and declaration leading to its definition; Find Usages and completion of steps; a context action writing an
+    /// unbound step's definition; Rename of a definition and its steps, an outline's left as written; a feature in
+    /// another language than its project's marked; arguments checked as Reqnroll converts them; SpecFlow's steps.</summary>
     [AvaloniaFact]
-    public void A_projects_bindings_are_read_from_its_code_and_the_library_it_references_with_no_build()
+    public void A_projects_step_definitions_are_read_from_code_and_bind_mark_find_complete_and_rename_its_steps()
+    {
+        Flow.StepApart<BddTests>("a project's bindings are read from its code and the library it references with no build", () => new BddTests(folders), t =>
+        {
+            t.A_projects_bindings_are_read_from_its_code_and_the_library_it_references_with_no_build();
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<BddTests>("a step no definition binds is marked and a bound step's card and declaration lead to its definition", () => new BddTests(folders), t =>
+        {
+            t.A_step_no_definition_binds_is_marked_and_a_bound_steps_card_and_declaration_lead_to_its_definition();
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<BddTests>("find usages of a step definition lists its steps and completion offers the steps of a step's kind", () => new BddTests(folders), t =>
+        {
+            t.Find_usages_of_a_step_definition_lists_its_steps_and_completion_offers_the_steps_of_a_steps_kind();
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<BddTests>("show context actions on a step none binds writes its definition into the class binding the feature's steps", () => new BddTests(folders), t =>
+        {
+            t.Show_context_actions_on_a_step_none_binds_writes_its_definition_into_the_class_binding_the_features_steps();
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<BddTests>("rename on a step renames its definition's expression and every step it binds leaving an outline's as written", () => new BddTests(folders), t =>
+        {
+            t.Rename_on_a_step_renames_its_definitions_expression_and_every_step_it_binds_leaving_an_outlines_as_written();
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<BddTests>("a feature written in another language than its project's is marked saying so and the project's load problem names it", () => new BddTests(folders), t =>
+        {
+            t.A_feature_written_in_another_language_than_its_projects_is_marked_saying_so_and_the_projects_load_problem_names_it();
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<BddArgumentTests>("an argument, a table column or a count of arguments its step's definition cannot take as Reqnroll takes them is marked where written", () => new BddArgumentTests(folders), t =>
+        {
+            t.An_int_a_date_an_enum_a_transformation_a_table_column_and_a_count_of_arguments_its_definition_cannot_take_are_each_marked_saying_what_it_takes();
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<BddArgumentTests>("a date in a project whose features are in Austrian German is read as its run converts it", () => new BddArgumentTests(folders), t =>
+        {
+            t.A_date_in_a_project_whose_features_are_in_austrian_german_is_read_as_its_run_converts_it();
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<BddSpecFlowTests>("a SpecFlow project's steps are matched and a missing one is defined as a regular expression", () => new BddSpecFlowTests(folders), t =>
+        {
+            t.A_specflow_projects_steps_are_matched_and_a_missing_one_is_defined_as_a_regular_expression();
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<BddSpecFlowTests>("a step of a feature no class binds is defined in a new file whose lines end as its .editorconfig asks", () => new BddSpecFlowTests(folders), t =>
+        {
+            t.A_step_of_a_feature_no_class_binds_is_defined_in_a_new_file_whose_lines_end_as_its_editorconfig_asks();
+            OpenWindows.CloseAll();
+        });
+    }
+
+    private void A_projects_bindings_are_read_from_its_code_and_the_library_it_references_with_no_build()
     {
         MainWindow window = Open(out ProjectSteps steps);
         try
@@ -70,8 +132,7 @@ public sealed class BddTests : IClassFixture<RestoredFolders>, IDisposable
         }
     }
 
-    [AvaloniaFact]
-    public void A_step_no_definition_binds_is_marked_and_a_bound_steps_card_and_declaration_lead_to_its_definition()
+    private void A_step_no_definition_binds_is_marked_and_a_bound_steps_card_and_declaration_lead_to_its_definition()
     {
         MainWindow window = Open(out _);
         try
@@ -99,8 +160,7 @@ public sealed class BddTests : IClassFixture<RestoredFolders>, IDisposable
         }
     }
 
-    [AvaloniaFact]
-    public void Find_usages_of_a_step_definition_lists_its_steps_and_completion_offers_the_steps_of_a_steps_kind()
+    private void Find_usages_of_a_step_definition_lists_its_steps_and_completion_offers_the_steps_of_a_steps_kind()
     {
         MainWindow window = Open(out _);
         try
@@ -138,8 +198,7 @@ public sealed class BddTests : IClassFixture<RestoredFolders>, IDisposable
         }
     }
 
-    [AvaloniaFact]
-    public void Show_context_actions_on_a_step_none_binds_writes_its_definition_into_the_class_binding_the_features_steps()
+    private void Show_context_actions_on_a_step_none_binds_writes_its_definition_into_the_class_binding_the_features_steps()
     {
         MainWindow window = Open(out _);
         try
@@ -164,8 +223,7 @@ public sealed class BddTests : IClassFixture<RestoredFolders>, IDisposable
         }
     }
 
-    [AvaloniaFact]
-    public void Rename_on_a_step_renames_its_definitions_expression_and_every_step_it_binds_leaving_an_outlines_as_written()
+    private void Rename_on_a_step_renames_its_definitions_expression_and_every_step_it_binds_leaving_an_outlines_as_written()
     {
         MainWindow window = Open(out _);
         try
@@ -191,30 +249,11 @@ public sealed class BddTests : IClassFixture<RestoredFolders>, IDisposable
         }
     }
 
-    [AvaloniaFact]
-    public void Find_unused_step_definitions_lists_the_definitions_no_step_binds()
-    {
-        MainWindow window = Open(out _);
-        try
-        {
-            Assert.True(window.Perform(AppActions.FindUnusedStepDefinitions));
-            Ui.WaitFor(() => window.Find.Rows.Any(r => r.Usage is not null), () => $"the unused step definitions in the Find window ({window.Status})");
-            Passenger.App.ToolWindows.Usage unused = Assert.Single(window.Find.Rows.Select(r => r.Usage).OfType<Passenger.App.ToolWindows.Usage>());
-            Assert.Equal(PathNames.Canonical(StepsFile), unused.Path);
-            Assert.Contains("ThenNothingIsEverSaid", unused.LineText, StringComparison.Ordinal);
-        }
-        finally
-        {
-            window.Close();
-        }
-    }
-
     /// <summary>A project configured to read its features in Austrian German, whose feature is written in English with no
     /// <c># language:</c> line: Reqnroll's generator reads it in German, finds no feature and fails the project's load, so the
     /// load's problem names the file and says why, in the status bar and Problems as the load ends, and the feature is marked
     /// where it was to begin, saying the language it is read in, whence, and how a file is read in its own.</summary>
-    [AvaloniaFact]
-    public void A_feature_written_in_another_language_than_its_projects_is_marked_saying_so_and_the_projects_load_problem_names_it()
+    private void A_feature_written_in_another_language_than_its_projects_is_marked_saying_so_and_the_projects_load_problem_names_it()
     {
         TestFolders.Write(folder, "Calc.Specs/reqnroll.json", "{\n  \"language\": { \"feature\": \"de-AT\" },\n  \"bindingAssemblies\": [ { \"assembly\": \"Calc.Steps\" } ]\n}\n");
         const string Why = "Reqnroll reads this file in de-AT, the language.feature of its project's reqnroll.json, where a feature begins with Funktionalität: or "

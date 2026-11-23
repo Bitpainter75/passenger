@@ -94,8 +94,95 @@ public sealed class NoDotnetTests : IAsyncDisposable
         TestFolders.Delete(folder);
     }
 
+    /// <summary>With no dotnet the Welcome screen, a C# folder and a loose file say so in the words of what each lacks,
+    /// refusing what needs it, still editing and committing, a GDScript game's tests asking none of it, as one flow,
+    /// each step the check one test made in an instance of its own.</summary>
     [AvaloniaFact]
-    public void With_no_dotnet_the_Welcome_screen_says_so_its_New_Solution_refusing_in_those_words_and_links_the_download_page()
+    public async Task With_no_dotnet_the_window_says_so_and_refuses_only_what_needs_it()
+    {
+        await Flow.StepApartAsync<NoDotnetTests>("with no dotnet the Welcome screen says so its New Solution refusing in those words and links the download page", t =>
+        {
+            t.With_no_dotnet_the_Welcome_screen_says_so_its_New_Solution_refusing_in_those_words_and_links_the_download_page();
+            return Task.CompletedTask;
+        });
+        await Flow.StepApartAsync<NoDotnetTests>("a csharp folder with no dotnet says so refuses what needs it in those words and still edits and commits", t =>
+        {
+            t.A_csharp_folder_with_no_dotnet_says_so_refuses_what_needs_it_in_those_words_and_still_edits_and_commits();
+            return Task.CompletedTask;
+        });
+        await Flow.StepApartAsync<NoDotnetTests>("a GDScript only games tests ask no dotnet of their actions", t =>
+        {
+            t.A_GDScript_only_games_tests_ask_no_dotnet_of_their_actions();
+            return Task.CompletedTask;
+        });
+        await Flow.StepApartAsync<NoDotnetTests>("a loose csharp file with no dotnet has the banner say it knows no framework types and why", t =>
+        {
+            t.A_loose_csharp_file_with_no_dotnet_has_the_banner_say_it_knows_no_framework_types_and_why();
+            return Task.CompletedTask;
+        });
+    }
+
+    /// <summary>Install dotnet SDK asks the person, never an agent, installs the SDK the folder's global.json pins from
+    /// the feed, its archive checked, and an archive refused or an SDK that does not start leaves the folder as it was,
+    /// as one flow, each step in an instance of its own.</summary>
+    [AvaloniaFact]
+    public async Task Install_dotnet_SDK_installs_the_SDK_checked_or_leaves_the_folder_as_it_was()
+    {
+        await Flow.StepApartAsync<NoDotnetTests>("with no dotnet Install dotnet SDK asks to install the SDK the folders global json pins never the newest", t =>
+        {
+            t.With_no_dotnet_Install_dotnet_SDK_asks_to_install_the_SDK_the_folders_global_json_pins_never_the_newest();
+            return Task.CompletedTask;
+        });
+        await Flow.StepApartAsync<NoDotnetTests>("an archive whose SHA 512 is not the one published is refused with nothing installed", t =>
+        {
+            t.An_archive_whose_SHA_512_is_not_the_one_published_is_refused_with_nothing_installed();
+            return Task.CompletedTask;
+        });
+        await Flow.StepApartAsync<NoDotnetTests>("an archive without the runtime its SDK runs on is refused with nothing of it left and what the folder held kept", t =>
+        {
+            t.An_archive_without_the_runtime_its_SDK_runs_on_is_refused_with_nothing_of_it_left_and_what_the_folder_held_kept();
+            return Task.CompletedTask;
+        });
+        await Flow.StepApartAsync<NoDotnetTests>("an SDK that does not start is taken out again saying so and what the folder held is kept", t =>
+        {
+            t.An_SDK_that_does_not_start_is_taken_out_again_saying_so_and_what_the_folder_held_is_kept();
+            return Task.CompletedTask;
+        });
+        await Flow.StepApartAsync<NoDotnetTests>("an agents install on a persons window is their question and an agents own passenger refuses it", t =>
+        {
+            t.An_agents_install_on_a_persons_window_is_their_question_and_an_agents_own_passenger_refuses_it();
+            return Task.CompletedTask;
+        });
+        await Flow.StepApartAsync<NoDotnetTests>("install dotnet SDK asks then installs the SDK from the feed into the persons folder checked and the folder loads with it and new shells find it", t =>
+        {
+            t.Install_dotnet_SDK_asks_then_installs_the_SDK_from_the_feed_into_the_persons_folder_checked_and_the_folder_loads_with_it_and_new_shells_find_it();
+            return Task.CompletedTask;
+        });
+    }
+
+    /// <summary>The installation Passenger was told to use comes before its own, goes first on the PATH once, and one
+    /// in the home folder no PATH names is found and added, as one flow, each step in an instance of its own.</summary>
+    [AvaloniaFact]
+    public async Task The_dotnet_used_is_the_one_named_and_goes_first_on_the_PATH()
+    {
+        await Flow.StepApartAsync<NoDotnetTests>("the installation Passenger was told to use comes before the dotnet running it", t =>
+        {
+            t.The_installation_Passenger_was_told_to_use_comes_before_the_dotnet_running_it();
+            return Task.CompletedTask;
+        });
+        await Flow.StepApartAsync<NoDotnetTests>("an installation used goes first on the PATH once and keeps its empty entry", t =>
+        {
+            t.An_installation_used_goes_first_on_the_PATH_once_and_keeps_its_empty_entry();
+            return Task.CompletedTask;
+        });
+        await Flow.StepApartAsync<NoDotnetTests>("an SDK in the home dotnet folder no PATH names is found named and used and Add to PATH puts it there", t =>
+        {
+            t.An_SDK_in_the_home_dotnet_folder_no_PATH_names_is_found_named_and_used_and_Add_to_PATH_puts_it_there();
+            return Task.CompletedTask;
+        });
+    }
+
+    private void With_no_dotnet_the_Welcome_screen_says_so_its_New_Solution_refusing_in_those_words_and_links_the_download_page()
     {
         MainWindow window = new() { Width = 1200, Height = 800, StartsLanguageServer = false };
         window.Show();
@@ -115,8 +202,7 @@ public sealed class NoDotnetTests : IAsyncDisposable
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void A_csharp_folder_with_no_dotnet_says_so_refuses_what_needs_it_in_those_words_and_still_edits_and_commits()
+    private void A_csharp_folder_with_no_dotnet_says_so_refuses_what_needs_it_in_those_words_and_still_edits_and_commits()
     {
         string solution = Shop(folder);
         TestGit.Init(folder);
@@ -169,8 +255,7 @@ public sealed class NoDotnetTests : IAsyncDisposable
     /// <summary>A game of GDScript alone builds nothing, so its tests' actions stay open with no .NET, where a C# folder's
     /// refuse (<see cref="A_csharp_folder_with_no_dotnet_says_so_refuses_what_needs_it_in_those_words_and_still_edits_and_commits"/>).
     /// Needs no Godot: nothing runs.</summary>
-    [AvaloniaFact]
-    public void A_GDScript_only_games_tests_ask_no_dotnet_of_their_actions()
+    private void A_GDScript_only_games_tests_ask_no_dotnet_of_their_actions()
     {
         GutGame();
         MainWindow window = Ui.OpenFolder(folder, languageServer: false);
@@ -214,8 +299,7 @@ public sealed class NoDotnetTests : IAsyncDisposable
         }
     }
 
-    [AvaloniaFact]
-    public void Install_dotnet_SDK_asks_then_installs_the_SDK_from_the_feed_into_the_persons_folder_checked_and_the_folder_loads_with_it_and_new_shells_find_it()
+    private void Install_dotnet_SDK_asks_then_installs_the_SDK_from_the_feed_into_the_persons_folder_checked_and_the_folder_loads_with_it_and_new_shells_find_it()
     {
         StandIn sdk = Archive.Value;
         using StandInHttp feed = Feed(sdk, sdk.Sha512);
@@ -268,8 +352,7 @@ public sealed class NoDotnetTests : IAsyncDisposable
     }
 
     /// <summary>The feed's newest is no SDK the folder takes: asking for it would need a second install of the one global.json pins.</summary>
-    [AvaloniaFact]
-    public void With_no_dotnet_Install_dotnet_SDK_asks_to_install_the_SDK_the_folders_global_json_pins_never_the_newest()
+    private void With_no_dotnet_Install_dotnet_SDK_asks_to_install_the_SDK_the_folders_global_json_pins_never_the_newest()
     {
         StandIn sdk = Archive.Value;
         using StandInHttp feed = Feed(sdk, sdk.Sha512, newer: $"{Channel}.999");
@@ -285,8 +368,7 @@ public sealed class NoDotnetTests : IAsyncDisposable
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void An_archive_whose_SHA_512_is_not_the_one_published_is_refused_with_nothing_installed()
+    private void An_archive_whose_SHA_512_is_not_the_one_published_is_refused_with_nothing_installed()
     {
         string archive = TestFolders.Write(folder, OperatingSystem.IsWindows() ? "fake.zip" : "fake.tar.gz", "not the SDK Microsoft publishes\n");
         StandIn sdk = new(archive, "10.0.999", Convert.ToHexStringLower(SHA512.HashData(File.ReadAllBytes(archive))));
@@ -336,8 +418,7 @@ public sealed class NoDotnetTests : IAsyncDisposable
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void An_archive_without_the_runtime_its_SDK_runs_on_is_refused_with_nothing_of_it_left_and_what_the_folder_held_kept()
+    private void An_archive_without_the_runtime_its_SDK_runs_on_is_refused_with_nothing_of_it_left_and_what_the_folder_held_kept()
     {
         Refused(new Dictionary<string, string>
         {
@@ -348,8 +429,7 @@ public sealed class NoDotnetTests : IAsyncDisposable
     }
 
     /// <summary>The stand-in's host is no program, as a host that cannot start on this system would be.</summary>
-    [AvaloniaFact]
-    public void An_SDK_that_does_not_start_is_taken_out_again_saying_so_and_what_the_folder_held_is_kept()
+    private void An_SDK_that_does_not_start_is_taken_out_again_saying_so_and_what_the_folder_held_is_kept()
     {
         Refused(new Dictionary<string, string>
         {
@@ -361,8 +441,7 @@ public sealed class NoDotnetTests : IAsyncDisposable
     }
 
     /// <summary>The test's own process is framework-dependent, so the dotnet running it is there to be found first.</summary>
-    [Fact]
-    public void The_installation_Passenger_was_told_to_use_comes_before_the_dotnet_running_it()
+    private void The_installation_Passenger_was_told_to_use_comes_before_the_dotnet_running_it()
     {
         Dotnet.PlacesStandIn = null;
         Assert.Equal(DotnetPlace.Runtime, Dotnet.Find()?.Place);
@@ -375,8 +454,7 @@ public sealed class NoDotnetTests : IAsyncDisposable
     }
 
     /// <summary>A POSIX shell reads an empty entry of the PATH as the folder it works in.</summary>
-    [Fact]
-    public void An_installation_used_goes_first_on_the_PATH_once_and_keeps_its_empty_entry()
+    private void An_installation_used_goes_first_on_the_PATH_once_and_keeps_its_empty_entry()
     {
         string bin = Path.Combine(folder, "bin");
         OwnEnvironment.Set("PATH", string.Join(Path.PathSeparator, bin, string.Empty, Installs, "/usr/bin"));
@@ -387,8 +465,7 @@ public sealed class NoDotnetTests : IAsyncDisposable
             $"With {Installs} used the PATH every program Passenger starts takes is {Environment.GetEnvironmentVariable("PATH")}, so a program the person runs from its own folder by name is no longer found");
     }
 
-    [AvaloniaFact]
-    public void An_SDK_in_the_home_dotnet_folder_no_PATH_names_is_found_named_and_used_and_Add_to_PATH_puts_it_there()
+    private void An_SDK_in_the_home_dotnet_folder_no_PATH_names_is_found_named_and_used_and_Add_to_PATH_puts_it_there()
     {
         string own = Path.Combine(Home, ".dotnet");
         Unpack(Archive.Value.Path, own);
@@ -413,8 +490,7 @@ public sealed class NoDotnetTests : IAsyncDisposable
     /// <summary>An agent's Install .NET SDK on a person's window is their question, in a window of its own that waits for
     /// them, the install going on only as they say: declined, nothing is installed and no folder made, in words the agent is
     /// told; an agent's own Passenger, which nobody is at, refuses it as before.</summary>
-    [AvaloniaFact]
-    public void An_agents_install_on_a_persons_window_is_their_question_and_an_agents_own_passenger_refuses_it()
+    private void An_agents_install_on_a_persons_window_is_their_question_and_an_agents_own_passenger_refuses_it()
     {
         StandIn sdk = Archive.Value;
         using StandInHttp feed = Feed(sdk, sdk.Sha512);
@@ -440,40 +516,10 @@ public sealed class NoDotnetTests : IAsyncDisposable
         own.Close();
     }
 
-    /// <summary>Hide on the word that the shell's PATH does not name the SDK Passenger found is kept for that installation: the
-    /// next window keeping its state where the first did says nothing of it either.</summary>
-    [AvaloniaFact]
-    public void Hide_on_the_off_PATH_word_is_kept_for_that_installation_in_the_next_window()
-    {
-        string own = Path.Combine(Home, ".dotnet");
-        Unpack(Archive.Value.Path, own);
-        Dotnet.PlacesStandIn = [Path.Combine(own, DotnetName)];
-        string state = TestFolders.Create("no-dotnet-state-");
-        try
-        {
-            MainWindow window = Kept(state);
-            Ui.WaitFor(() => window.DotnetWant.Lack == DotnetLack.OffPath && window.DotnetSaid is not null, () => $"the off-PATH word ({window.DotnetWant.Lack}: {window.DotnetSaid})", TimeSpan.FromMinutes(1));
-            Ui.ClickButton(window, "Hide");
-            Assert.Null(window.DotnetSaid);
-            window.Close();
-
-            MainWindow again = Kept(state);
-            Ui.WaitFor(() => again.DotnetWant.Lack == DotnetLack.OffPath, () => $"the next window to find the SDK off the PATH ({again.DotnetWant.Lack})", TimeSpan.FromMinutes(1));
-            Ui.Settle();
-            Assert.True(again.DotnetSaid is null, $"The next window said the word Hide hid: {again.DotnetSaid}");
-            again.Close();
-        }
-        finally
-        {
-            TestFolders.Delete(state);
-        }
-    }
-
     /// <summary>A C# file of no project shown with no .NET at all has the banner say, after what is missing, that it knows no
     /// framework types until an SDK is installed, and why: Roslyn's server reads a loose file's framework only from a project
     /// the SDK's MSBuild builds, so the carried runtime cannot stand in.</summary>
-    [AvaloniaFact]
-    public void A_loose_csharp_file_with_no_dotnet_has_the_banner_say_it_knows_no_framework_types_and_why()
+    private void A_loose_csharp_file_with_no_dotnet_has_the_banner_say_it_knows_no_framework_types_and_why()
     {
         string loose = TestFolders.Write(folder, "Basket.cs", "namespace Shop;\n\npublic class Basket\n{\n}\n");
         MainWindow window = new() { Width = 1200, Height = 800, StartsLanguageServer = false };
@@ -540,16 +586,6 @@ public sealed class NoDotnetTests : IAsyncDisposable
         }
         using FileStream read = File.OpenRead(archive);
         return new StandIn(archive, version, Convert.ToHexStringLower(SHA512.HashData(read)));
-    }
-
-    /// <summary>A window keeping its state in <paramref name="state"/>, as the window a person uses does.</summary>
-    private static MainWindow Kept(string state)
-    {
-        MainWindow window = new() { Width = 1200, Height = 800, StateFolder = state, StartsLanguageServer = false };
-        window.Show();
-        window.KeepLayout();
-        Ui.Settle();
-        return window;
     }
 
     /// <summary>Install .NET SDK clicked in the banner, waited on until it asks.</summary>

@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Passenger.App.ToolWindows;
 using Passenger.Core;
 
 namespace Passenger.App.Explorer;
@@ -24,7 +25,7 @@ public sealed class DockerSupportDialog : IdeWindow
     public DockerSupportDialog(string project, bool hasDockerfile)
     {
         Title = "Add Docker Support";
-        Width = 520;
+        Width = DialogWidths.Form;
         SizeToContent = SizeToContent.Height;
         MinWidth = 360;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -46,7 +47,7 @@ public sealed class DockerSupportDialog : IdeWindow
             choice.Margin = new Thickness(0, 0, 0, Gaps.Normal);
             choice.HorizontalAlignment = HorizontalAlignment.Stretch;
         }
-        TextBlock heading = new() { Text = $"How {project}'s image is built", FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 0, 0, Gaps.Wide) };
+        TextBlock heading = new() { Classes = { StyleClasses.PaneTitle }, Text = $"How {project}'s image is built", Margin = new Thickness(0, 0, 0, Gaps.Wide) };
         Button ok = DialogFooter.Default();
         ok.Click += (_, _) => Accept();
         StackPanel page = new() { [DialogFooter.InsetProperty] = true, Children = { heading, dockerfile, sdk } };
@@ -67,39 +68,6 @@ public sealed class DockerSupportDialog : IdeWindow
     private static TextBlock Words(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap };
 }
 
-/// <summary>A project or a backing service Add > Docker Compose offers, checked while it is to be in compose.yaml; one the
-/// engine cannot run is greyed, unchecked.</summary>
-public sealed class ComposeChoice(string name, string detail, bool chosen, object value) : Observable, ICheckChoice
-{
-    private bool isChosen = chosen;
-
-    private bool canChoose = true;
-
-    public string Name { get; } = name;
-
-    public string Detail { get; } = detail;
-
-    public bool CanChoose
-    {
-        get => canChoose;
-        set
-        {
-            if (Set(ref canChoose, value) && !value)
-            {
-                IsChosen = false;
-            }
-        }
-    }
-
-    public object Value { get; } = value;
-
-    public bool IsChosen
-    {
-        get => isChosen;
-        set => Set(ref isChosen, value);
-    }
-}
-
 /// <summary>Add > Docker Compose on the solution: its projects that run, each checked, a project with no Dockerfile given
 /// one by Docker Support as it is written; and the databases, caches and brokers their packages point to, each checked,
 /// what the engine makes of one said under them (<see cref="Note"/>). Closes with true for OK, null when cancelled; what is
@@ -108,12 +76,12 @@ public sealed class DockerComposeDialog : IdeWindow
 {
     private readonly TextBlock note = MutedText.Wrapped(string.Empty);
 
-    public DockerComposeDialog(string solution, IReadOnlyList<ComposeChoice> projects, IReadOnlyList<ComposeChoice> services)
+    public DockerComposeDialog(string solution, IReadOnlyList<CheckChoice> projects, IReadOnlyList<CheckChoice> services)
     {
         Projects = projects;
         Services = services;
         Title = "Add Docker Compose";
-        Width = 560;
+        Width = DialogWidths.Form;
         Height = 460;
         MinWidth = 380;
         MinHeight = 300;
@@ -125,7 +93,7 @@ public sealed class DockerComposeDialog : IdeWindow
         page.Children.Add(List(projects, 1));
         page.Children.Add(Heading("Beside them, from their packages", 2));
         Control backing = services.Count == 0
-            ? new TextBlock { Classes = { StyleClasses.EmptyText }, Text = "No database, cache or broker among their packages", Margin = new Thickness(0, 0, 0, Gaps.Tight) }
+            ? new EmptyState("No database, cache or broker among their packages")
             : List(services, 3);
         Grid.SetRow(backing, 3);
         page.Children.Add(backing);
@@ -136,9 +104,9 @@ public sealed class DockerComposeDialog : IdeWindow
         Content = DialogFooter.Page(page, DialogFooter.OkCancel(ok, () => Close(null)));
     }
 
-    public IReadOnlyList<ComposeChoice> Projects { get; }
+    public IReadOnlyList<CheckChoice> Projects { get; }
 
-    public IReadOnlyList<ComposeChoice> Services { get; }
+    public IReadOnlyList<CheckChoice> Services { get; }
 
     /// <summary>What is said under the backing services of one of them (SQL Server's image on an Arm engine); null for nothing.</summary>
     public string? Note
@@ -153,16 +121,14 @@ public sealed class DockerComposeDialog : IdeWindow
 
     private static TextBlock Heading(string text, int row)
     {
-        TextBlock heading = new() { Text = text, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, row == 0 ? 0 : Gaps.Wide, 0, Gaps.Normal) };
+        TextBlock heading = new() { Classes = { StyleClasses.PaneTitle }, Text = text, Margin = new Thickness(0, row == 0 ? 0 : Gaps.Wide, 0, Gaps.Normal) };
         Grid.SetRow(heading, row);
         return heading;
     }
 
-    private static Border List(IReadOnlyList<ComposeChoice> choices, int row)
+    private static Border List(IReadOnlyList<CheckChoice> choices, int row)
     {
-        ListBox list = new() { Classes = { StyleClasses.Tree }, ItemsSource = choices };
-        ReusedRows.Use(list, CheckRows.Of);
-        Border framed = new() { Classes = { StyleClasses.Framed }, Child = list, MaxHeight = row == 3 ? 140 : double.PositiveInfinity };
+        Border framed = new() { Classes = { StyleClasses.Framed }, Child = CheckRows.List(choices), MaxHeight = row == 3 ? 140 : double.PositiveInfinity };
         Grid.SetRow(framed, row);
         return framed;
     }

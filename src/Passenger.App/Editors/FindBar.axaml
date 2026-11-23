@@ -11,34 +11,24 @@
         <StackPanel Spacing="{x:Static app:Gaps.Small}">
             <Panel Name="QueryRow">
                 <Panel Name="QueryRoom">
-                    <TextBox Name="Query" Classes="search" PlaceholderText="Find" Padding="{x:Static editors:FindBar.QueryPadding}" />
+                    <TextBox Name="Query" Classes="search" PlaceholderText="Find" AutomationProperties.Name="Find" Padding="{x:Static editors:FindBar.QueryPadding}" />
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="{x:Static editors:FindBar.OptionsMargin}" Spacing="{x:Static app:Gaps.Hair}">
-                        <ToggleButton Name="MatchCase" Classes="option" ToolTip.Tip="Match case" AutomationProperties.Name="Match case">
-                            <PathIcon Data="{StaticResource Icon.MatchCase}" />
-                        </ToggleButton>
-                        <ToggleButton Name="WholeWords" Classes="option" ToolTip.Tip="Words" AutomationProperties.Name="Words">
-                            <PathIcon Data="{StaticResource Icon.WholeWord}" />
-                        </ToggleButton>
-                        <ToggleButton Name="UseRegex" Classes="option" ToolTip.Tip="Regex" AutomationProperties.Name="Regex">
-                            <TextBlock Name="RegexGlyph" Text=".*" FontWeight="Bold" FontSize="12" />
-                        </ToggleButton>
+                        <!-- Each made an option, its look, mark, tip and key, by OptionToggles. -->
+                        <ToggleButton Name="MatchCase" />
+                        <ToggleButton Name="WholeWords" />
+                        <ToggleButton Name="UseRegex" />
                     </StackPanel>
                 </Panel>
                 <StackPanel Name="CountRow" Orientation="Horizontal" Spacing="{x:Static app:Gaps.Hair}" VerticalAlignment="Center">
                     <TextBlock Name="Count" Classes="muted" Margin="{x:Static editors:FindBar.CountMargin}" VerticalAlignment="Center" />
-                    <Button Name="PreviousButton" Classes="tool" ToolTip.Tip="Previous occurrence" AutomationProperties.Name="Previous occurrence">
-                        <PathIcon Data="{StaticResource Icon.ArrowUp}" />
-                    </Button>
-                    <Button Name="NextButton" Classes="tool" ToolTip.Tip="Next occurrence" AutomationProperties.Name="Next occurrence">
-                        <PathIcon Data="{StaticResource Icon.ArrowDown}" />
-                    </Button>
+                    <!-- Each made an icon button, its look, mark and tip, by ToolButtons. -->
+                    <Button Name="PreviousButton" />
+                    <Button Name="NextButton" />
                 </StackPanel>
-                <Button Name="CloseButton" Classes="tool" ToolTip.Tip="Close" AutomationProperties.Name="Close" VerticalAlignment="Center">
-                    <PathIcon Classes="small" Data="{StaticResource Icon.Close}" />
-                </Button>
+                <Button Name="CloseButton" VerticalAlignment="Center" />
             </Panel>
             <Panel Name="ReplaceRow" IsVisible="False">
-                <TextBox Name="ReplaceWith" Classes="search" PlaceholderText="Replace" />
+                <TextBox Name="ReplaceWith" Classes="search" PlaceholderText="Replace" AutomationProperties.Name="Replace" />
                 <StackPanel Name="ReplaceButtons" Orientation="Horizontal" Spacing="{x:Static app:Gaps.Small}">
                     <Button Name="ReplaceButton" Content="Replace" />
                     <Button Name="ReplaceAllButton" Content="Replace All" />

@@ -455,13 +455,14 @@ public sealed class LanguageServer : IAsyncDisposable
     public static async Task<LanguageServer> StartRoslynAsync(string folder, string logFolder, CancellationToken cancel, IReadOnlyDictionary<string, object>? options = null,
         string? stateCache = null)
     {
-        string carried = Path.Combine(RoslynServerFolder.Carried, RoslynServerFolder.Assembly);
+        string from = RoslynServerFolder.ServerFrom;
+        string carried = Path.Combine(from, RoslynServerFolder.Assembly);
         if (!File.Exists(carried))
         {
             throw new FileNotFoundException("The Roslyn language server is missing from the app's folder.", carried);
         }
-        string? copy = await RoslynServerFolder.CopyAsync(stateCache, cancel).ConfigureAwait(false);
-        string server = Path.Combine(copy ?? RoslynServerFolder.Carried, RoslynServerFolder.Assembly);
+        string? copy = await RoslynServerFolder.CopyAsync(from, stateCache, cancel).ConfigureAwait(false);
+        string server = Path.Combine(copy ?? from, RoslynServerFolder.Assembly);
         Directory.CreateDirectory(logFolder);
         List<string> arguments =
         [
@@ -476,6 +477,11 @@ public sealed class LanguageServer : IAsyncDisposable
         ProcessStartInfo start = ChildProcesses.ConservingMemory(ChildProcesses.NamingDotnet(ChildProcesses.HelperCommand(server, arguments), folder));
         // A server's MSBuild nodes are its own: a restart ends them, which would cut short a build that took one up.
         start.Environment[MSBuildNames.NodeHandshakeSalt] += $"-server-{Interlocked.Increment(ref started)}";
+        if (stateCache is not null)
+        {
+            // Its restores take the dotnet its PATH finds first: the folder's, though no window has put it on Passenger's yet.
+            ChildProcesses.FindingDotnet(start, folder, stateCache);
+        }
         // A temporary folder of its own, where no other server takes away the library code it writes for Go to Declaration.
         if (stateCache is not null && RoslynServerFolder.TemporaryOf(stateCache) is { } temporary)
         {
@@ -1147,7 +1153,7 @@ public sealed class LanguageServer : IAsyncDisposable
         List<(string Method, TimeSpan Age, bool WaitedOn)> told = Answering() ? [.. past.Where(p => p.WaitedOn)] : past;
         List<(string Method, TimeSpan Age, bool WaitedOn)> named = told.Count > 0 ? told : past;
         (string method, TimeSpan longest, _) = named.MaxBy(p => p.Age);
-        string more = named.Count > 1 ? $", with {named.Count - 1} more past {Durations.Said(Patience)}" : string.Empty;
+        string more = named.Count > 1 ? $", with {Numbers.Said(named.Count - 1)} more past {Durations.Said(Patience)}" : string.Empty;
         string unwaitedOn = told.Count > 0 ? string.Empty : named.Count > 1 ? ", none of them waited on" : ", nobody waiting on it";
         LongWait wait = new($"{method} has waited {Durations.Said(longest)}{more}{unwaitedOn}", Conversation(), told.Count > 0);
         Note($"{wait.Asked}: {wait.Conversation}");
@@ -1176,7 +1182,7 @@ public sealed class LanguageServer : IAsyncDisposable
             heard == 0 ? "it has sent nothing" : $"it last sent a message {Durations.Said(Stopwatch.GetElapsedTime(heard))} ago",
             unanswered.Count == 0 ? "Passenger owes it no answer"
                 : "Passenger has not yet answered its " + string.Join(", ", unanswered.Take(4).Select(u => $"{u.Method} ({Durations.Said(Stopwatch.GetElapsedTime(u.Since))})")),
-            unsent == 0 ? "every message Passenger wrote has reached it" : $"{unsent} of Passenger's messages have not yet reached its input",
+            unsent == 0 ? "every message Passenger wrote has reached it" : $"{Numbers.Said(unsent)} of Passenger's messages have not yet reached its input",
         ];
         return $"{who}: {string.Join("; ", parts)}. Its last messages: {string.Join(", ", messages.Recent())}";
     }

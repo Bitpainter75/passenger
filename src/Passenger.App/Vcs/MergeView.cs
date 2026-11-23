@@ -1,3 +1,4 @@
+using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -84,13 +85,14 @@ public sealed class MergeView : DockPanel
         foreach (CodeEditor pane in (CodeEditor[])[Left, Result, Right])
         {
             ThemeLanguages.Follow(pane, language);
+            DiffSigns.Give(pane);
         }
         state = [.. chunks.Select(c => new Resolution(c.BaseStart, c.BaseEnd, !c.LeftChanged, !c.RightChanged, false))];
         states[started] = state;
         leftStrip = Strip(MergeSide.Left);
         rightStrip = Strip(MergeSide.Right);
 
-        Grid sides = new() { ColumnDefinitions = new ColumnDefinitions($"*,{StripWidth},*,{StripWidth},*"), RowDefinitions = new RowDefinitions("Auto,*") };
+        Grid sides = new() { ColumnDefinitions = new ColumnDefinitions(string.Create(CultureInfo.InvariantCulture, $"*,{StripWidth},*,{StripWidth},*")), RowDefinitions = new RowDefinitions("Auto,*") };
         sides.Children.Add(DiffLines.Title(texts.Sides.LeftTitle, 0));
         sides.Children.Add(DiffLines.Title("Result", 2));
         sides.Children.Add(DiffLines.Title(texts.Sides.RightTitle, 4));
@@ -103,14 +105,12 @@ public sealed class MergeView : DockPanel
         }
 
         status = new TextBlock();
-        applyNonConflicting = ToolButtons.Of(IconKeys.ApplyNonConflicts, "Apply All Non-Conflicting Changes", ApplyNonConflicting);
         // Two arrows meeting in the middle: the vertical one turned on its side.
-        applyNonConflicting.Content = new PathIcon { RenderTransform = new RotateTransform(90) };
-        ((PathIcon)applyNonConflicting.Content).Bind(PathIcon.DataProperty, applyNonConflicting.GetResourceObservable(IconKeys.ApplyNonConflicts));
+        PathIcon meeting = new() { RenderTransform = new RotateTransform(90) };
+        meeting.Bind(PathIcon.DataProperty, meeting.GetResourceObservable(IconKeys.ApplyNonConflicts));
+        applyNonConflicting = ToolButtons.Of(meeting, "Apply All Non-Conflicting Changes", ApplyNonConflicting);
         resolveSimple = ToolButtons.Of(IconKeys.Wand, "Resolve Simple Conflicts", ResolveSimpleConflicts);
-        Border rule = new() { Width = 1, Height = 16, Margin = new Thickness(Gaps.Small, 0) };
-        rule.Bind(Border.BackgroundProperty, rule.GetResourceObservable(TokenKeys.Divider));
-        Children.Add(DiffLines.Bar(name, Step, status, [applyNonConflicting, resolveSimple, rule]));
+        Children.Add(DiffLines.Bar(name, Step, status, [applyNonConflicting, resolveSimple, ToolWindows.ToolBars.Rule()]));
         Children.Add(sides);
 
         Left.ScrollChanged += (_, _) => Follow(Left);
@@ -689,7 +689,7 @@ public sealed class MergeView : DockPanel
     private DiffStrip Strip(MergeSide side) =>
         new(() => Bands(side), side, side == MergeSide.Left ? Left : Right, () => true, ignores: true, (_, ignore) => ignore
             ? ($"Ignore {side} Side", null)
-            : ($"Accept {side} Side", AcceptKeys(side).Display()), (band, ignore, keys) =>
+            : ($"Accept {side} Side", KeyWords.Of(AcceptKeys(side))), (band, ignore, keys) =>
         {
             if (ignore)
             {

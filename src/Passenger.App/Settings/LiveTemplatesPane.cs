@@ -5,6 +5,8 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Passenger.App.CSharp;
+using Passenger.App.ToolWindows;
+using Passenger.Core;
 using Passenger.Editor;
 using Passenger.Languages.CSharp;
 
@@ -33,7 +35,7 @@ public sealed class LiveTemplatesPane : ListPane
     private readonly List<LiveTemplate> templates;
     private readonly ListBox list = new() { Classes = { StyleClasses.Tree } };
     private readonly Control form;
-    private readonly TextBlock nothing = new() { Classes = { StyleClasses.Muted }, Text = "No template is chosen", Margin = new Thickness(0, Gaps.Wide) };
+    private readonly EmptyState nothing = new("No template is chosen");
     private readonly TextBlock mnemonicSaid = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Normal, 0, 0, 0) };
     private readonly TextBlock variablesSaid = new() { Classes = { StyleClasses.Muted }, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
 
@@ -56,8 +58,8 @@ public sealed class LiveTemplatesPane : ListPane
         ReusedRows.Use(list, RowView);
         list.SelectionChanged += (_, _) => ShowChosen();
 
-        ShortcutBox = Field();
-        DescriptionBox = Field();
+        ShortcutBox = new TextBox();
+        DescriptionBox = new TextBox();
         ShortcutBox.TextChanged += (_, _) => Edit(t => t with { Abbreviation = ShortcutBox.Text?.Trim() ?? string.Empty }, relist: true);
         DescriptionBox.TextChanged += (_, _) => Edit(t => t with { Description = DescriptionBox.Text ?? string.Empty }, relist: true);
         ReformatBox = new CheckBox { Content = "Reformat" };
@@ -70,20 +72,19 @@ public sealed class LiveTemplatesPane : ListPane
         GenerationButton = Use("Generation", TemplateUse.Generation);
         SurroundButton = Use("Surround", TemplateUse.Surround);
         BothButton = Use("Both", TemplateUse.Both);
-        MnemonicBox = new TextBox { Classes = { StyleClasses.Search }, Width = 44 };
+        MnemonicBox = new TextBox { Width = 44, [Avalonia.Automation.AutomationProperties.NameProperty] = "Mnemonic" };
         MnemonicBox.TextChanged += (_, _) => Mnemonic();
         EditVariablesButton = new Button { Content = "Edit variables" };
         EditVariablesButton.Click += (_, _) => IdeErrors.Observe(EditVariables());
         TextBox = new TextBox
         {
+            [Avalonia.Automation.AutomationProperties.NameProperty] = "Template text",
             AcceptsReturn = true,
             AcceptsTab = true,
             TextWrapping = TextWrapping.NoWrap,
-            FontSize = 12.5,
-            VerticalContentAlignment = VerticalAlignment.Top,
-            Classes = { StyleClasses.Search },
+            Classes = { StyleClasses.Code },
             Margin = new Thickness(0, Gaps.Wide, 0, 0),
-        }.InCodeFont();
+        };
         TextBox.TextChanged += (_, _) => Edit(t => WithText(t, (TextBox.Text ?? string.Empty).Replace("\r\n", "\n", StringComparison.Ordinal)));
 
         StackPanel rows = new()
@@ -91,12 +92,12 @@ public sealed class LiveTemplatesPane : ListPane
             Spacing = Gaps.Normal,
             Children =
             {
-                Row("Shortcut:", ShortcutBox),
-                Row("Description:", DescriptionBox),
-                Row("Options:", ReformatBox),
-                Row("Availability:", new DockPanel { Children = { Docked(AvailabilityButton, Dock.Right), AvailabilityText } }),
-                Row("Use in:", new WrapPanel { ItemSpacing = Gaps.Group, LineSpacing = Gaps.Tight, Children = { GenerationButton, SurroundButton, BothButton } }),
-                Row("Mnemonic:", new StackPanel { Orientation = Orientation.Horizontal, Children = { MnemonicBox, mnemonicSaid } }),
+                Row("Shortcut", ShortcutBox),
+                Row("Description", DescriptionBox),
+                Row("Options", ReformatBox),
+                Row("Availability", new DockPanel { Children = { Docked(AvailabilityButton, Dock.Right), AvailabilityText } }),
+                Row("Use in", new WrapPanel { ItemSpacing = Gaps.Group, LineSpacing = Gaps.Tight, Children = { GenerationButton, SurroundButton, BothButton } }),
+                Row("Mnemonic", new StackPanel { Orientation = Orientation.Horizontal, Children = { MnemonicBox, mnemonicSaid } }),
                 Row(string.Empty, new DockPanel { Children = { Docked(EditVariablesButton, Dock.Left), variablesSaid } }),
             },
         };
@@ -189,7 +190,7 @@ public sealed class LiveTemplatesPane : ListPane
         {
             0 => "nowhere",
             <= 3 => string.Join(", ", names),
-            _ => $"{names[0]}, {names[1]}, and {names.Length - 2} more…",
+            _ => $"{names[0]}, {names[1]}, and {Numbers.Said(names.Length - 2)} more…",
         };
     }
 
@@ -474,6 +475,4 @@ public sealed class LiveTemplatesPane : ListPane
         SetDock(control, dock);
         return control;
     }
-
-    private static TextBox Field() => new() { Classes = { StyleClasses.Search } };
 }

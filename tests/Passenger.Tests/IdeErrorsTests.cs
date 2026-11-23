@@ -6,6 +6,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Passenger.App;
 using Passenger.App.ToolWindows;
+using Passenger.Core;
 
 namespace Passenger.Tests;
 
@@ -29,9 +30,71 @@ public sealed class IdeErrorsTests : IDisposable
         TestFolders.Delete(folder);
     }
 
+    /// <summary>The gate's checks of the IDE's errors but its rule over src, as one flow: a command or a change handler
+    /// that throws leaving the window up and in step, errors counted, capped and logged, a window test failing on an
+    /// error, and a language server started again or never started for a window gone.</summary>
     [Gate]
     [AvaloniaFact]
-    public void A_command_that_throws_leaves_the_window_up_with_the_error_in_the_log_and_the_status_bar()
+    public void The_gates_IDE_errors_hold_as_one_flow()
+    {
+        Flow.StepApart<IdeErrorsTests>("a command that throws leaves the window up with the error in the log and the status bar", t => t.A_command_that_throws_leaves_the_window_up_with_the_error_in_the_log_and_the_status_bar());
+        Flow.StepApart<IdeErrorsTests>("a handler of a files changes that throws leaves those after it in step with the text", t => t.A_handler_of_a_files_changes_that_throws_leaves_those_after_it_in_step_with_the_text());
+        Flow.StepApart<IdeErrorsTests>("the same error again and again is one row with its count and a log rotated under its size cap", t => t.The_same_error_again_and_again_is_one_row_with_its_count_and_a_log_rotated_under_its_size_cap());
+        Flow.StepApart<IdeErrorsTests>("past a hundred different errors the rest are only in the log and the count says there are more", t => t.Past_a_hundred_different_errors_the_rest_are_only_in_the_log_and_the_count_says_there_are_more());
+        Flow.StepApart<IdeErrorsTests>("a window test in which the ide caught an error fails naming it", t => t.A_window_test_in_which_the_ide_caught_an_error_fails_naming_it());
+        Flow.StepApart<IdeErrorsTests>("a window closed before its folders projects are found starts no language server", t => t.A_window_closed_before_its_folders_projects_are_found_starts_no_language_server());
+        Flow.StepApart<IdeErrorsTests>("a language server that ends during its start is started again saying so", t => t.A_language_server_that_ends_during_its_start_is_started_again_saying_so());
+    }
+
+    /// <summary>An error in what Replace All, Abort Merge or the question of a file changed on disk set going is shown
+    /// and logged as it happens, the merge and the disk's text kept, as one flow, each step the check one test made in
+    /// an instance of its own.</summary>
+    [AvaloniaFact]
+    public void An_error_in_work_the_window_set_going_is_shown_and_logged_as_it_happens()
+    {
+        Flow.StepApart<IdeErrorsTests>("an error in what replace all set going is shown and logged as it happens not once its task is collected", t => t.An_error_in_what_replace_all_set_going_is_shown_and_logged_as_it_happens_not_once_its_task_is_collected());
+        Flow.StepApart<IdeErrorsTests>("an error in what the Git menus Abort Merge set going is shown and logged as it happens and the merge stays", t => t.An_error_in_what_the_Git_menus_Abort_Merge_set_going_is_shown_and_logged_as_it_happens_and_the_merge_stays());
+        Flow.StepApart<IdeErrorsTests>("an error in the question a file changed here and on disk asks is shown and logged as it happens and the disk keeps its text", t => t.An_error_in_the_question_a_file_changed_here_and_on_disk_asks_is_shown_and_logged_as_it_happens_and_the_disk_keeps_its_text());
+    }
+
+    /// <summary>A language server that ends, stops answering or ends at every start is started again with the open file
+    /// or left stopped saying so, another folder leaves only its own running, a request cancelled as it ends leaves no
+    /// error, and a window or test that ends leaves no server or work for the next, as one flow, each step in an
+    /// instance of its own.</summary>
+    [AvaloniaFact]
+    public void A_language_server_that_ends_or_stops_answering_is_started_again_and_a_window_leaves_nothing_running()
+    {
+        Flow.StepApart<IdeErrorsTests>("a language server that ends is started again each time with the open file and a log of its own beside the ides", t => t.A_language_server_that_ends_is_started_again_each_time_with_the_open_file_and_a_log_of_its_own_beside_the_ides());
+        Flow.StepApart<IdeErrorsTests>("opening another folder while csharp starts leaves only the new folders language server running", t => t.Opening_another_folder_while_csharp_starts_leaves_only_the_new_folders_language_server_running());
+        Flow.StepApart<IdeErrorsTests>("a language server that stops answering is reported not responding and started again", t => t.A_language_server_that_stops_answering_is_reported_not_responding_and_started_again());
+        Flow.StepApart<IdeErrorsTests>("a request cancelled as its language server ends leaves no error once collected", t => t.A_request_cancelled_as_its_language_server_ends_leaves_no_error_once_collected());
+        Flow.StepApart<IdeErrorsTests>("a language server that ends just as it starts is started again", t => t.A_language_server_that_ends_just_as_it_starts_is_started_again());
+        Flow.StepApart<IdeErrorsTests>("a language server that ends during every start is left stopped saying so and its words start it again", t => t.A_language_server_that_ends_during_every_start_is_left_stopped_saying_so_and_its_words_start_it_again());
+        Flow.StepApart<IdeErrorsTests>("call hierarchy asked while the language server starts again says why and the window shown before still opens a row after it", t => t.Call_hierarchy_asked_while_the_language_server_starts_again_says_why_and_the_window_shown_before_still_opens_a_row_after_it());
+        Flow.StepApart<IdeErrorsTests>("a window test that throws right after opening a project leaves no language server and no work for the next", t => t.A_window_test_that_throws_right_after_opening_a_project_leaves_no_language_server_and_no_work_for_the_next());
+        Flow.StepApart<IdeErrorsTests>("a window closed while a C sharp files parse after a key is held leaves the next window quiet", t => t.A_window_closed_while_a_C_sharp_files_parse_after_a_key_is_held_leaves_the_next_window_quiet());
+        Flow.StepApart<IdeErrorsTests>("a window test that closes its own window is over once what the window started has ended", t => t.A_window_test_that_closes_its_own_window_is_over_once_what_the_window_started_has_ended());
+    }
+
+    /// <summary>A rename that cannot write a file says so, and one whose write never lands takes the open file's change
+    /// back, as one flow, each step in an instance of its own.</summary>
+    [AvaloniaFact]
+    public void A_rename_that_cannot_write_a_file_says_so_and_leaves_nothing_half_done()
+    {
+        Flow.StepApart<IdeErrorsTests>("a rename that cannot write a file it changes says so in the status bar", t => t.A_rename_that_cannot_write_a_file_it_changes_says_so_in_the_status_bar());
+        Flow.StepApart<IdeErrorsTests>("a rename whose write to a file never lands takes back the open files change and leaves nothing to Undo", t => t.A_rename_whose_write_to_a_file_never_lands_takes_back_the_open_files_change_and_leaves_nothing_to_Undo());
+    }
+
+    /// <summary>On Windows a rename into a file another program holds, or its Undo, says it waits and lands once the
+    /// file is let go, as one flow of Windows's steps, each in an instance of its own.</summary>
+    [AvaloniaFact]
+    public void On_Windows_a_rename_or_its_Undo_into_a_held_file_waits_and_lands_once_it_is_let_go()
+    {
+        Flow.StepApart<IdeErrorsTests>("a rename into a file another program holds says it waits and renamed once the file is let go", t => t.A_rename_into_a_file_another_program_holds_says_it_waits_and_renamed_once_the_file_is_let_go());
+        Flow.StepApart<IdeErrorsTests>("Undo of a rename whose file another program holds says it waits and undone once the file is let go", t => t.Undo_of_a_rename_whose_file_another_program_holds_says_it_waits_and_undone_once_the_file_is_let_go());
+    }
+
+    private void A_command_that_throws_leaves_the_window_up_with_the_error_in_the_log_and_the_status_bar()
     {
         File.WriteAllText(Path.Combine(folder, "One.cs"), "class One { }\n");
         File.WriteAllText(Path.Combine(folder, "Two.cs"), "class Two { }\n");
@@ -81,9 +144,7 @@ public sealed class IdeErrorsTests : IDisposable
 
     /// <summary>A handler of a file's changes that throws is an error the IDE shows, and every handler after it still hears
     /// of the change: the file's parse keeps up with the keys, the first of which the handler threw on.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_handler_of_a_files_changes_that_throws_leaves_those_after_it_in_step_with_the_text()
+    private void A_handler_of_a_files_changes_that_throws_leaves_those_after_it_in_step_with_the_text()
     {
         File.WriteAllText(Path.Combine(folder, "One.cs"), "class One { }\n");
         MainWindow window = Ui.OpenFolder(folder, languageServer: false);
@@ -118,8 +179,7 @@ public sealed class IdeErrorsTests : IDisposable
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void An_error_in_what_replace_all_set_going_is_shown_and_logged_as_it_happens_not_once_its_task_is_collected()
+    private void An_error_in_what_replace_all_set_going_is_shown_and_logged_as_it_happens_not_once_its_task_is_collected()
     {
         File.WriteAllText(Path.Combine(folder, "Alpha.cs"), "class Alpha { int count; }\n");
         MainWindow window = Ui.OpenFolder(folder);
@@ -148,8 +208,7 @@ public sealed class IdeErrorsTests : IDisposable
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void An_error_in_what_the_Git_menus_Abort_Merge_set_going_is_shown_and_logged_as_it_happens_and_the_merge_stays()
+    private void An_error_in_what_the_Git_menus_Abort_Merge_set_going_is_shown_and_logged_as_it_happens_and_the_merge_stays()
     {
         string shop = Path.Combine(folder, "Shop.cs");
         File.WriteAllText(shop, "class Shop { int count; }\n");
@@ -186,8 +245,7 @@ public sealed class IdeErrorsTests : IDisposable
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void An_error_in_the_question_a_file_changed_here_and_on_disk_asks_is_shown_and_logged_as_it_happens_and_the_disk_keeps_its_text()
+    private void An_error_in_the_question_a_file_changed_here_and_on_disk_asks_is_shown_and_logged_as_it_happens_and_the_disk_keeps_its_text()
     {
         string path = Path.Combine(folder, "One.cs");
         File.WriteAllText(path, "class One { }\n");
@@ -226,8 +284,9 @@ public sealed class IdeErrorsTests : IDisposable
 
     /// <summary>Every place src's code lets go of a task it started (DroppedTasks): a discard, a call as a statement, a
     /// lambda for a delegate that returns nothing, a continuation that only marks a fault seen among them (that is
-    /// UnawaitedWork.Dismiss's). Passed over: a folder of no .NET project (the debugger's relay is C), a project not built,
-    /// the container tools (only the solution's build and the release make them).</summary>
+    /// UnawaitedWork.Dismiss's), a timed wait's own task waited on through Ended. Passed over: a folder of no .NET
+    /// project (the debugger's relay is C), a project not built, the container tools (only the solution's build and the
+    /// release make them).</summary>
     [Gate]
     [AvaloniaFact]
     public void Nothing_in_src_leaves_a_fault_in_the_work_it_starts_for_the_garbage_collector_to_find()
@@ -257,12 +316,11 @@ public sealed class IdeErrorsTests : IDisposable
         }
         Assert.Contains("Passenger.App", read);
         Assert.True(found.Count == 0, $"Work whose task is let go reports its fault only once the task is collected, which may be never; "
-            + $"give it to IdeErrors.Observe (Core.UnawaitedWork.Observe below the app), or to UnawaitedWork.Dismiss where its fault is no one's to hear:\n{string.Join('\n', found.Order(StringComparer.Ordinal))}");
+            + $"give it to IdeErrors.Observe (Core.UnawaitedWork.Observe below the app), or to UnawaitedWork.Dismiss where its fault is no one's to hear, "
+            + $"and a timed wait waited on however it ends to UnawaitedWork.EndedWithin, never WaitAsync's own task to Ended:\n{string.Join('\n', found.Order(StringComparer.Ordinal))}");
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void The_same_error_again_and_again_is_one_row_with_its_count_and_a_log_rotated_under_its_size_cap()
+    private void The_same_error_again_and_again_is_one_row_with_its_count_and_a_log_rotated_under_its_size_cap()
     {
         long limit = IdeErrors.LogLimit;
         IdeErrors.LogLimit = 16 * 1024;
@@ -288,11 +346,11 @@ public sealed class IdeErrorsTests : IDisposable
             ListBoxItem row = Assert.Single(popup.GetVisualDescendants().OfType<ListBoxItem>());
             string?[] shown = [.. row.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text)];
             Assert.Contains(shown, t => t?.EndsWith("  InvalidOperationException: The timer went wrong", StringComparison.Ordinal) == true);
-            Assert.Contains("3000 times", shown);
-            Assert.Contains(popup.GetVisualDescendants().OfType<TextBlock>(), t => t.Text?.StartsWith("Occurred 3000 times, from ", StringComparison.Ordinal) == true);
+            Assert.Contains($"{Numbers.Said(3000)} times", shown);
+            Assert.Contains(popup.GetVisualDescendants().OfType<TextBlock>(), t => t.Text?.StartsWith($"Occurred {Numbers.Said(3000)} times, from ", StringComparison.Ordinal) == true);
 
             // The log's own thread writes the last repeat unasked, a line of its own: the details are the first time's.
-            Ui.WaitFor(() => Ui.Shared(IdeErrors.LogPath).Contains("Error, occurred 3000 times: InvalidOperationException: The timer went wrong", StringComparison.Ordinal),
+            Ui.WaitFor(() => Ui.Shared(IdeErrors.LogPath).Contains($"Error, occurred {Numbers.Said(3000)} times: InvalidOperationException: The timer went wrong", StringComparison.Ordinal),
                 "the log's thread to write the last repeat");
             IdeErrors.Flush();
             string[] logs = Directory.GetFiles(IdeErrors.LogFolder, "passenger*.log");
@@ -313,9 +371,7 @@ public sealed class IdeErrorsTests : IDisposable
         }
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Past_a_hundred_different_errors_the_rest_are_only_in_the_log_and_the_count_says_there_are_more()
+    private void Past_a_hundred_different_errors_the_rest_are_only_in_the_log_and_the_count_says_there_are_more()
     {
         MainWindow window = new() { Width = 1200, Height = 800 };
         window.Show();
@@ -341,24 +397,26 @@ public sealed class IdeErrorsTests : IDisposable
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_window_test_in_which_the_ide_caught_an_error_fails_naming_it()
+    private void A_window_test_in_which_the_ide_caught_an_error_fails_naming_it()
     {
         MainWindow window = new() { Width = 800, Height = 600 };
         window.Show();
         Dispatcher.UIThread.Post(() => throw new ArgumentException("A posted job went wrong in a test"));
+        // A timed wait's fault is never thrown, so it carries no stack: where its task was observed stands in for one.
+        IdeErrors.Observe(new TaskCompletionSource().Task.WaitAsync(TimeSpan.Zero, TestContext.Current.CancellationToken));
         Ui.Settle();
         FailOnIdeErrorsAttribute check = new();
-        System.Reflection.MethodInfo self = typeof(IdeErrorsTests).GetMethod(nameof(A_window_test_in_which_the_ide_caught_an_error_fails_naming_it))!;
+        // The window test this runs in, as the check is handed after each.
+        System.Reflection.MethodInfo self = Assert.IsAssignableFrom<Xunit.v3.IXunitTestMethod>(TestContext.Current.TestMethod).Method;
         InvalidOperationException failed = Assert.Throws<InvalidOperationException>(() => check.After(self, null!));
         Assert.Contains("ArgumentException: A posted job went wrong in a test", failed.Message, StringComparison.Ordinal);
+        Assert.Contains($"TimeoutException: The operation has timed out.\n   at {nameof(A_window_test_in_which_the_ide_caught_an_error_fails_naming_it)} in ", failed.Message, StringComparison.Ordinal);
+        Assert.Contains($"{nameof(IdeErrorsTests)}.cs:line ", failed.Message, StringComparison.Ordinal);
         Assert.Empty(IdeErrors.Errors);
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void A_language_server_that_ends_is_started_again_each_time_with_the_open_file_and_a_log_of_its_own_beside_the_ides()
+    private void A_language_server_that_ends_is_started_again_each_time_with_the_open_file_and_a_log_of_its_own_beside_the_ides()
     {
         MainWindow window = OpenProgram();
         List<int> ended = [];
@@ -382,8 +440,7 @@ public sealed class IdeErrorsTests : IDisposable
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void Opening_another_folder_while_csharp_starts_leaves_only_the_new_folders_language_server_running()
+    private void Opening_another_folder_while_csharp_starts_leaves_only_the_new_folders_language_server_running()
     {
         string other = TestFolders.Create("other-");
         WriteProgram(folder);
@@ -409,9 +466,7 @@ public sealed class IdeErrorsTests : IDisposable
 
     /// <summary>A folder without a solution has its projects found by a walk off the window's thread, and its language
     /// server starts once that walk lands: a window closed before then starts none, which nothing would end.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_window_closed_before_its_folders_projects_are_found_starts_no_language_server()
+    private void A_window_closed_before_its_folders_projects_are_found_starts_no_language_server()
     {
         WriteProgram(folder);
         MainWindow window = new() { Width = 1200, Height = 800 };
@@ -425,8 +480,7 @@ public sealed class IdeErrorsTests : IDisposable
             $"A language server started for the window after it had closed, which nothing ends before the IDE's own end: {string.Join(", ", started.Select(log => Processes.Describe(ServerOf(log))))}");
     }
 
-    [AvaloniaFact]
-    public void A_window_test_that_throws_right_after_opening_a_project_leaves_no_language_server_and_no_work_for_the_next()
+    private void A_window_test_that_throws_right_after_opening_a_project_leaves_no_language_server_and_no_work_for_the_next()
     {
         WriteProgram(folder);
         int server = 0;
@@ -445,7 +499,7 @@ public sealed class IdeErrorsTests : IDisposable
 
         // What runs after every window test, however it ended.
         new TestsLeaveNothingBehindAttribute().After(
-            typeof(IdeErrorsTests).GetMethod(nameof(A_window_test_that_throws_right_after_opening_a_project_leaves_no_language_server_and_no_work_for_the_next))!,
+            typeof(IdeErrorsTests).GetMethod(nameof(A_language_server_that_ends_or_stops_answering_is_started_again_and_a_window_leaves_nothing_running))!,
             (Xunit.v3.IXunitTest)TestContext.Current.Test!);
 
         Assert.True(Processes.Gone(server), $"The language server (process {server}) still runs after the window test that opened it failed, loading a folder for nobody into the next test");
@@ -454,8 +508,7 @@ public sealed class IdeErrorsTests : IDisposable
 
     /// <summary>A window closed while its C# file's parse after a key has yet to land lets go of that parse with the file, as
     /// nothing draws it again, so a window opened after it is quiet at once rather than waiting for good on its colours.</summary>
-    [AvaloniaFact]
-    public void A_window_closed_while_a_C_sharp_files_parse_after_a_key_is_held_leaves_the_next_window_quiet()
+    private void A_window_closed_while_a_C_sharp_files_parse_after_a_key_is_held_leaves_the_next_window_quiet()
     {
         File.WriteAllText(Path.Combine(folder, "Program.cs"), "class Program\n{\n}\n");
         TaskCompletionSource parse = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -489,8 +542,7 @@ public sealed class IdeErrorsTests : IDisposable
     /// <summary>A window test that closes its own window, as most do, is over only once what that window started has ended,
     /// as one it left open is: here a language server that answers nothing, which the window's end kills at its limit. On
     /// Windows a program still ending holds the DLLs it loaded, which the next test's reset of a shared project deletes.</summary>
-    [AvaloniaFact]
-    public void A_window_test_that_closes_its_own_window_is_over_once_what_the_window_started_has_ended()
+    private void A_window_test_that_closes_its_own_window_is_over_once_what_the_window_started_has_ended()
     {
         MainWindow window = OpenProgram();
         int server = window.CSharpService!.Session!.Server.ProcessId;
@@ -502,7 +554,7 @@ public sealed class IdeErrorsTests : IDisposable
 
             // What runs after every window test, however it ended.
             new TestsLeaveNothingBehindAttribute().After(
-                typeof(IdeErrorsTests).GetMethod(nameof(A_window_test_that_closes_its_own_window_is_over_once_what_the_window_started_has_ended))!,
+                typeof(IdeErrorsTests).GetMethod(nameof(A_language_server_that_ends_or_stops_answering_is_started_again_and_a_window_leaves_nothing_running))!,
                 (Xunit.v3.IXunitTest)TestContext.Current.Test!);
 
             Assert.True(window.Ended is { IsCompleted: true },
@@ -516,8 +568,7 @@ public sealed class IdeErrorsTests : IDisposable
         }
     }
 
-    [AvaloniaFact]
-    public void A_language_server_that_stops_answering_is_reported_not_responding_and_started_again()
+    private void A_language_server_that_stops_answering_is_reported_not_responding_and_started_again()
     {
         MainWindow window = OpenProgram();
         Passenger.Lsp.LanguageServer server = window.CSharpService!.Session!.Server;
@@ -555,94 +606,10 @@ public sealed class IdeErrorsTests : IDisposable
         window.Close();
     }
 
-    /// <summary>The check that a language server still answers asks of a document the server takes for no file, on any
-    /// system: it answers that it found none and logs nothing of it. A file's URI had it make a loose file of the check's
-    /// each time, and on Windows, where that URI names no drive, log an error.</summary>
-    [AvaloniaFact]
-    public void The_check_that_a_language_server_still_answers_asks_of_no_file_it_would_load()
-    {
-        MainWindow window = OpenProgram();
-        Passenger.Lsp.RoslynSession session = window.CSharpService!.Session!;
-        Passenger.Lsp.LanguageServer server = session.Server;
-        int process = server.ProcessId;
-        // Checked once a request has waited a second, on this server alone.
-        server.SlowRequest = TimeSpan.FromSeconds(1);
-        Lock reading = new();
-        List<string> failures = [];
-        string? asked = null;
-        string? answer = null;
-        server.Logged += (_, said) =>
-        {
-            if (said.Type is Passenger.Lsp.MessageType.Error or Passenger.Lsp.MessageType.Warning)
-            {
-                lock (reading)
-                {
-                    failures.Add(said.Message);
-                }
-            }
-        };
-        Passenger.Lsp.LanguageServer.Trace = (from, message) =>
-        {
-            lock (reading)
-            {
-                if (from != process || answer is not null)
-                {
-                    return;
-                }
-                if (asked is null && message.StartsWith("-->", StringComparison.Ordinal)
-                    && message.Contains($"\"method\":\"{Passenger.Lsp.LspMethods.FoldingRange}\"", StringComparison.Ordinal))
-                {
-                    asked = Regex.Match(message, "\"id\":(\\d+)").Groups[1].Value;
-                }
-                else if (asked is not null && message.StartsWith($"<-- {{\"jsonrpc\":\"2.0\",\"id\":{asked},", StringComparison.Ordinal)
-                    && !message.Contains("\"method\"", StringComparison.Ordinal))
-                {
-                    answer = message;
-                }
-            }
-        };
-        TaskCompletionSource checkedOnce = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task<IReadOnlyList<Passenger.Lsp.SymbolInformation>> held;
-        try
-        {
-            // Held unsent, as by a server slow to answer it, until a check has been answered.
-            Task holding = server.HoldNext(Passenger.Lsp.LspMethods.WorkspaceSymbol, _ => true, checkedOnce.Task);
-            held = session.SymbolsAsync("Main");
-            Ui.PumpUntil(() => holding.IsCompleted, "the request for symbols to be held");
-            Ui.PumpUntil(() =>
-            {
-                lock (reading)
-                {
-                    return answer is not null;
-                }
-            }, "the server to answer Passenger's check while a request waited on it");
-        }
-        finally
-        {
-            Passenger.Lsp.LanguageServer.Trace = null;
-            checkedOnce.TrySetResult();
-        }
-        Ui.AwaitPumped(held, "the request held to be answered once let go");
-        lock (reading)
-        {
-            Assert.True(answer is { } said && said.EndsWith("\"result\":null}", StringComparison.Ordinal),
-                $"The server made a document of Passenger's check, as of a file to load, to answer it: {answer}");
-        }
-        string log = Assert.Single(ServerLogs(), l => ServerOf(l) == process);
-        window.Close();
-        // Its log closed, the server has ended, and nothing more of what it logged is to come.
-        Ui.WaitFor(() => LetGo(log), $"the server's log {Path.GetFileName(log)} to be closed with the server");
-        lock (reading)
-        {
-            Assert.True(failures.Count == 0, $"The server logged a failure while Passenger checked it: {string.Join(" | ", failures)}");
-        }
-    }
-
     /// <summary>A request cancelled as its language server's connection goes is said to no one: the word of the
     /// cancellation finds no server to tell, which is no error, and the request's caller alone hears how it ended. A
     /// failure nothing observed shows once its task is collected.</summary>
-    [AvaloniaFact]
-    public void A_request_cancelled_as_its_language_server_ends_leaves_no_error_once_collected()
+    private void A_request_cancelled_as_its_language_server_ends_leaves_no_error_once_collected()
     {
         MainWindow window = OpenProgram();
         Passenger.Lsp.RoslynSession session = window.CSharpService!.Session!;
@@ -690,8 +657,7 @@ public sealed class IdeErrorsTests : IDisposable
 
     /// <summary>A server that ends as its start comes back to the window, before the window listens for its end, is
     /// started again as one that ends later is, never left loading.</summary>
-    [AvaloniaFact]
-    public void A_language_server_that_ends_just_as_it_starts_is_started_again()
+    private void A_language_server_that_ends_just_as_it_starts_is_started_again()
     {
         MainWindow window = OpenProgram();
         Passenger.App.CSharp.CSharpService csharp = window.CSharpService!;
@@ -765,9 +731,7 @@ public sealed class IdeErrorsTests : IDisposable
     /// <summary>A server whose process ends during its own start, before it has answered, is started again as one that ends
     /// later is, the window saying so, and C# comes back for the file open; asked to, the IDE starts it again in place of
     /// the one running.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_language_server_that_ends_during_its_start_is_started_again_saying_so()
+    private void A_language_server_that_ends_during_its_start_is_started_again_saying_so()
     {
         WriteProgram(folder);
         MainWindow window = new() { Width = 1200, Height = 800 };
@@ -800,8 +764,7 @@ public sealed class IdeErrorsTests : IDisposable
     /// <summary>A server that ends during every start is started again only as often as one that ends later is, then left
     /// stopped, the window saying why and where to start it again; once what ended it is gone, its words start it again,
     /// as Restart C# Language Server does, without the folder opened again.</summary>
-    [AvaloniaFact]
-    public void A_language_server_that_ends_during_every_start_is_left_stopped_saying_so_and_its_words_start_it_again()
+    private void A_language_server_that_ends_during_every_start_is_left_stopped_saying_so_and_its_words_start_it_again()
     {
         WriteProgram(folder);
         MainWindow window = new() { Width = 1200, Height = 800 };
@@ -840,8 +803,7 @@ public sealed class IdeErrorsTests : IDisposable
     /// <summary>Call Hierarchy asked of a server that stops before it answers says so, and asked while the next one starts
     /// says it needs the server; once it is back, the Hierarchy window shown before it ended still opens a row, its callers
     /// asked of the server running now, and Call Hierarchy works again.</summary>
-    [AvaloniaFact]
-    public void Call_hierarchy_asked_while_the_language_server_starts_again_says_why_and_the_window_shown_before_still_opens_a_row_after_it()
+    private void Call_hierarchy_asked_while_the_language_server_starts_again_says_why_and_the_window_shown_before_still_opens_a_row_after_it()
     {
         MainWindow window = OpenProgram(Calls);
         Ui.PlaceAfter(window.EditorArea.CodeEditor, "static void Ot");
@@ -889,8 +851,7 @@ public sealed class IdeErrorsTests : IDisposable
     /// <summary>A rename whose write to a file it changes is refused says so, the file left as it was: at once where the disk
     /// refuses it, and on Windows, where another program holding the file refuses it, once the write has waited for the
     /// file to be let go and given up, the status bar saying meanwhile that it waits for that file, never that it renamed.</summary>
-    [AvaloniaFact]
-    public void A_rename_that_cannot_write_a_file_it_changes_says_so_in_the_status_bar()
+    private void A_rename_that_cannot_write_a_file_it_changes_says_so_in_the_status_bar()
     {
         string helper = HelperOfProgram(out MainWindow window);
         List<string> said = [];
@@ -914,8 +875,7 @@ public sealed class IdeErrorsTests : IDisposable
     /// <summary>On Windows a rename's write to a file another program holds waits for it off the window's thread: while it
     /// is held the status bar says the rename waits for that file, never that it renamed, and once the program lets go the
     /// write lands and the rename says it renamed in every file.</summary>
-    [AvaloniaFact]
-    public void A_rename_into_a_file_another_program_holds_says_it_waits_and_renamed_once_the_file_is_let_go()
+    private void A_rename_into_a_file_another_program_holds_says_it_waits_and_renamed_once_the_file_is_let_go()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows refuses to replace or write a file another program holds");
         string helper = HelperOfProgram(out MainWindow window);
@@ -937,8 +897,7 @@ public sealed class IdeErrorsTests : IDisposable
     /// <summary>On Windows Undo of a rename puts back a file not open that another program holds as the rename wrote it: while
     /// it is held the status bar says Undo waits for that file, never that it undid the rename, and once the program lets go
     /// the file has its old name back and Undo says it undid the rename.</summary>
-    [AvaloniaFact]
-    public void Undo_of_a_rename_whose_file_another_program_holds_says_it_waits_and_undone_once_the_file_is_let_go()
+    private void Undo_of_a_rename_whose_file_another_program_holds_says_it_waits_and_undone_once_the_file_is_let_go()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows refuses to replace or write a file another program holds");
         string helper = HelperOfProgram(out MainWindow window);
@@ -969,8 +928,7 @@ public sealed class IdeErrorsTests : IDisposable
     /// <summary>A rename whose write to a file it changes never lands (refused at once, or on Windows held by another program
     /// past the save's wait) takes back all it did as it says so: the open file's change goes back, nothing left unsaved
     /// and nothing asked, no command is left for Undo, and the file stays as the disk has it.</summary>
-    [AvaloniaFact]
-    public void A_rename_whose_write_to_a_file_never_lands_takes_back_the_open_files_change_and_leaves_nothing_to_Undo()
+    private void A_rename_whose_write_to_a_file_never_lands_takes_back_the_open_files_change_and_leaves_nothing_to_Undo()
     {
         string helper = HelperOfProgram(out MainWindow window);
         List<string> asked = [];

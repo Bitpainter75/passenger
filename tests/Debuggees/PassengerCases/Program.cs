@@ -69,6 +69,16 @@ if (args is ["corelib"])
 	CoreLibCalls.Run();
 	return;
 }
+if (args is ["turns"])
+{
+	Turns.Run();
+	return;
+}
+if (args is ["dispatches"])
+{
+	Dispatches.Run();
+	return;
+}
 if (args is ["leaves"])
 {
 	Leaves.Run();
@@ -77,6 +87,11 @@ if (args is ["leaves"])
 if (args is ["lets go"])
 {
 	LetsGo.Run();
+	return;
+}
+if (args is ["lets go", "then reads"])
+{
+	LetsGo.Run(readsFirst: true);
 	return;
 }
 if (args is ["locks"])
@@ -783,6 +798,73 @@ internal static class CoreLibCalls
 	}
 }
 
+// Lambdas a library calls one after another, each a step off the one before lands in: ForEach's next call, and the next
+// lambda of a LINQ pipeline, called by an iterator a frame below or by one the pipeline calls anew for the next element.
+internal static class Turns
+{
+	public static void Run()
+	{
+		List<int> each = [1, 2, 3];
+		each.ForEach(value =>
+		{
+			Console.WriteLine($"each {value}");
+		});
+		int[] kept = [.. each.Select(selected =>
+		{
+			return selected * 10;
+		}).Where(filtered =>
+		{
+			return filtered > 10;
+		})];
+		foreach (int shown in each.Where(tested =>
+		{
+			return tested != 2;
+		}).Select(mapped =>
+		{
+			return mapped + 1;
+		}))
+		{
+			Console.WriteLine($"shown {shown}");
+		}
+		Console.WriteLine($"kept {kept.Length}");
+	}
+}
+
+// A loop of code that is not the user's, as a window's or a dispatcher's is, which waits for each line of input and hands
+// it through frames of its own to the user's handler: a step off the handler never stops in its call for the next line.
+internal static class Dispatches
+{
+	private static int handled;
+
+	public static void Run()
+	{
+		Loop.Run(Handle);
+		Console.WriteLine($"handled {handled} lines");
+	}
+
+	private static void Handle(string line)
+	{
+		handled++;
+		Console.WriteLine($"handling {line}");
+	}
+
+	[DebuggerNonUserCode]
+	private static class Loop
+	{
+		public static void Run(Action<string> handler)
+		{
+			while (Console.ReadLine() is { } line)
+			{
+				Dispatch(line, handler);
+			}
+		}
+
+		private static void Dispatch(string line, Action<string> handler) => Raise(line.Trim(), handler);
+
+		private static void Raise(string line, Action<string> handler) => handler(line);
+	}
+}
+
 // A stop whose values are slow to read: a getter that says it runs and never returns, and one that counts its evaluations,
 // which a stop the program has left must never run.
 internal static class Leaves
@@ -824,11 +906,26 @@ internal static class LetsGo
 		}
 	}
 
-	public static void Run()
+	// Until the program is given a line, which a test gives once the evaluation is where it wants it.
+	public static string Held
+	{
+		get
+		{
+			Console.WriteLine("evaluating");
+			return Console.ReadLine() ?? "none";
+		}
+	}
+
+	// With readsFirst, it ends only once given a line, so a let-go it outlives waits for no end of its.
+	public static void Run(bool readsFirst = false)
 	{
 		for (int turn = 1; turn <= 100; turn++)
 		{
 			Thread.Sleep(10); // each turn of the program let go
+		}
+		if (readsFirst)
+		{
+			Console.ReadLine();
 		}
 		Console.WriteLine("ran on");
 	}
@@ -995,7 +1092,8 @@ internal static class Contexts
 }
 
 // By-ref slots an evaluation reads and writes through: ref, out and in parameters (a struct's among them), a ref local, a
-// struct method's this.
+// struct method's this; and ref and in parameters of a struct with a [DebuggerDisplay], a record struct and a DateTime,
+// and that struct's this in its property, shown beside copies of them.
 internal static class Refs
 {
 	private static readonly int[] Firsts = [1];
@@ -1014,6 +1112,20 @@ internal static class Refs
 		}
 		tile.Grow(2);
 		Console.WriteLine($"refs {counted} {assigned} {added} {Firsts[0]} {height} {tile.X} {tile.Y}");
+		Dial dial = new() { Level = 7 };
+		Spot spot = new(1, 2);
+		DateTime moment = new(2026, 11, 20, 10, 30, 0, DateTimeKind.Utc);
+		int shown = Shown(ref dial, in spot, ref moment, out int sum);
+		Console.WriteLine($"shown {shown} {sum} {dial.Doubled}");
+	}
+
+	private static int Shown(ref Dial dial, in Spot spot, ref DateTime moment, out int sum)
+	{
+		Dial dialCopy = dial;
+		Spot spotCopy = spot;
+		DateTime momentCopy = moment;
+		sum = dialCopy.Level + spotCopy.X + momentCopy.Day;
+		return sum;
 	}
 
 	private static int IncrementByRef(ref int value)
@@ -1069,6 +1181,21 @@ internal static class Typed<T>
 		List<T> list = [t];
 		V? maybe = v;
 		return $"{list.Count} {list[0]} {maybe}";
+	}
+}
+
+[DebuggerDisplay("Dial at {Level}")]
+internal struct Dial
+{
+	public int Level;
+
+	public int Doubled
+	{
+		get
+		{
+			int doubled = Level * 2;
+			return doubled;
+		}
 	}
 }
 

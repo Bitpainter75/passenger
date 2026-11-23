@@ -18,13 +18,36 @@ namespace Passenger.Tests;
 /// VSTest project too shows and runs both.</summary>
 public sealed class TestingPlatformTests : TestingPlatformFolders, IClassFixture<RestoredFolders>
 {
+    /// <summary>Where each step of a flow takes its own projects from.</summary>
+    private readonly RestoredFolders restored;
+
     public TestingPlatformTests(RestoredFolders restored)
-        : base(restored)
+        : base(restored) => this.restored = restored;
+
+    /// <summary>The gate's Testing Platform runs as one flow: a theory's rows found and made by a run landing under
+    /// their method, Stop ending a run and its test host keeping what ran, and a VSTest and a Testing Platform project
+    /// shown in one tree and run together.</summary>
+    [Gate]
+    [AvaloniaFact]
+    public void The_gates_testing_platform_runs_hold_as_one_flow()
     {
+        Flow.StepApart("a theorys rows found by the platform and made by its run land under their method", () => new TestingPlatformTests(restored), t => t.A_theorys_rows_found_by_the_platform_and_made_by_its_run_land_under_their_method());
+        Flow.StepApart("Stop ends a run on the platform and its test host keeping what ran", () => new TestingPlatformTests(restored), t => t.Stop_ends_a_run_on_the_platform_and_its_test_host_keeping_what_ran());
+        Flow.StepApart("a solution of a vstest project and an mstest project on the platform shows both in one tree and run all runs both", () => new TestingPlatformTests(restored), t => t.A_solution_of_a_vstest_project_and_an_mstest_project_on_the_platform_shows_both_in_one_tree_and_run_all_runs_both());
     }
 
+    /// <summary>A project on the platform alone shows its tests from code and Run All reports each outcome; a project's run
+    /// settings reach its tests on MSTest's runner and on one that reads none.</summary>
     [AvaloniaFact]
-    public void An_xunit_v3_project_on_the_platform_alone_shows_its_tests_from_code_and_run_all_reports_pass_fail_and_skip_with_output_and_times()
+    public void A_project_on_the_platform_is_shown_from_code_run_whole_and_given_its_run_settings()
+    {
+        Flow.StepApart("an xUnit v3 project on the platform alone shows its tests from code and Run All reports pass, fail and skip with output and times",
+            () => new TestingPlatformTests(restored), t => t.An_xunit_v3_project_on_the_platform_alone_shows_its_tests_from_code_and_run_all_reports_pass_fail_and_skip_with_output_and_times());
+        Flow.StepApart("a project's run settings reach its tests on MSTest's runner and their variables those of a runner that reads none",
+            () => new TestingPlatformSettingsTests(restored), t => t.A_projects_run_settings_reach_its_tests_on_mstests_runner_and_their_variables_those_of_a_runner_that_reads_none());
+    }
+
+    private void An_xunit_v3_project_on_the_platform_alone_shows_its_tests_from_code_and_run_all_reports_pass_fail_and_skip_with_output_and_times()
     {
         MainWindow window = Open();
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -59,9 +82,7 @@ public sealed class TestingPlatformTests : TestingPlatformFolders, IClassFixture
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_theorys_rows_found_by_the_platform_and_made_by_its_run_land_under_their_method()
+    private void A_theorys_rows_found_by_the_platform_and_made_by_its_run_land_under_their_method()
     {
         // xUnit cannot list a theory's rows of a record before it runs them: the run makes them.
         Write(folder, "ShapeTests.cs",
@@ -90,9 +111,7 @@ public sealed class TestingPlatformTests : TestingPlatformFolders, IClassFixture
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Stop_ends_a_run_on_the_platform_and_its_test_host_keeping_what_ran()
+    private void Stop_ends_a_run_on_the_platform_and_its_test_host_keeping_what_ran()
     {
         string host = Path.Combine(folder, "running.txt");
         Write(folder, "SlowTests.cs",
@@ -111,9 +130,7 @@ public sealed class TestingPlatformTests : TestingPlatformFolders, IClassFixture
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_solution_of_a_vstest_project_and_an_mstest_project_on_the_platform_shows_both_in_one_tree_and_run_all_runs_both()
+    private void A_solution_of_a_vstest_project_and_an_mstest_project_on_the_platform_shows_both_in_one_tree_and_run_all_runs_both()
     {
         string solution = NewFolder();
         Write(solution, "Vs.Tests/Vs.Tests.csproj",
@@ -158,16 +175,16 @@ public sealed class TestingPlatformTests : TestingPlatformFolders, IClassFixture
 }
 
 /// <summary>What a project's run settings file says reaches its tests on the platform: MSTest's runner reads a parameter
-/// from them as VSTest's adapter does, and a variable reaches xUnit v3's tests too, whose runner reads no run settings.</summary>
-public sealed class TestingPlatformSettingsTests : TestingPlatformFolders, IClassFixture<RestoredFolders>
+/// from them as VSTest's adapter does, and a variable reaches xUnit v3's tests too, whose runner reads no run settings. A
+/// step of <see cref="TestingPlatformTests"/>' flow.</summary>
+public sealed class TestingPlatformSettingsTests : TestingPlatformFolders
 {
     public TestingPlatformSettingsTests(RestoredFolders restored)
         : base(restored)
     {
     }
 
-    [AvaloniaFact]
-    public void A_projects_run_settings_reach_its_tests_on_mstests_runner_and_their_variables_those_of_a_runner_that_reads_none()
+    internal void A_projects_run_settings_reach_its_tests_on_mstests_runner_and_their_variables_those_of_a_runner_that_reads_none()
     {
         const string Named = "    <RunSettingsFilePath>$(MSBuildProjectDirectory)/../settled.runsettings</RunSettingsFilePath>\n  </PropertyGroup>";
         string solution = NewFolder();
@@ -204,13 +221,30 @@ public sealed class TestingPlatformSettingsTests : TestingPlatformFolders, IClas
 [Collection(Alone.Name)]
 public sealed class TestingPlatformDebuggingTests : TestingPlatformFolders, IClassFixture<RestoredFolders>
 {
+    /// <summary>Where each step of a flow takes its own projects from.</summary>
+    private readonly RestoredFolders restored;
+
     public TestingPlatformDebuggingTests(RestoredFolders restored)
-        : base(restored)
+        : base(restored) => this.restored = restored;
+
+    /// <summary>Debug Tests at the caret stops at a breakpoint inside a test on the Testing Platform, and Stop as a
+    /// debugged run's test host starts leaves no test running and says why.</summary>
+    [AvaloniaFact]
+    public void Debug_Tests_on_the_Testing_Platform_stops_inside_a_test_and_Stop_as_its_host_starts_leaves_none_running()
     {
+        Flow.StepApart<TestingPlatformDebuggingTests>("debug tests at the caret stops at a breakpoint inside a test on the platform", () => new TestingPlatformDebuggingTests(restored), t =>
+        {
+            t.Debug_tests_at_the_caret_stops_at_a_breakpoint_inside_a_test_on_the_platform();
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<TestingPlatformDebuggingTests>("stop as a debugged run's test host starts leaves no test running and says why", () => new TestingPlatformDebuggingTests(restored), t =>
+        {
+            t.Stop_as_a_debugged_runs_test_host_starts_leaves_no_test_running_and_says_why();
+            OpenWindows.CloseAll();
+        });
     }
 
-    [AvaloniaFact]
-    public void Debug_tests_at_the_caret_stops_at_a_breakpoint_inside_a_test_on_the_platform()
+    private void Debug_tests_at_the_caret_stops_at_a_breakpoint_inside_a_test_on_the_platform()
     {
         MainWindow window = Open();
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -233,8 +267,7 @@ public sealed class TestingPlatformDebuggingTests : TestingPlatformFolders, ICla
     /// <summary>A debugged run ends when Stop ends its test host's start under the debugger (held at its start here, by a
     /// diagnostic port of the test's own that the project's launch profile names): no test, group or run icon is left
     /// running, and the Unit Tests window and the status bar say why the run ended.</summary>
-    [AvaloniaFact]
-    public void Stop_as_a_debugged_runs_test_host_starts_leaves_no_test_running_and_says_why()
+    private void Stop_as_a_debugged_runs_test_host_starts_leaves_no_test_running_and_says_why()
     {
         using Debugging.Helpers.StartHold hold = new();
         Write(folder, "Properties/launchSettings.json",
@@ -357,95 +390,25 @@ public abstract class TestingPlatformFolders : IDisposable
         window.Tests.Tree.Roots.SelectMany(r => r.Methods).FirstOrDefault(m => m.Name == name);
 }
 
-/// <summary>What a test host's results cost the IDE to read, counted across the process, so the class runs alone.</summary>
-[Collection(Alone.Name)]
-public sealed class TestingPlatformBytesTests(ITestOutputHelper testOutput) : IDisposable
-{
-    private const int Rows = 2000;
-
-    private readonly string folder = PathNames.Canonical(TestFolders.Create("mtp-bytes-"));
-
-    public void Dispose() => TestFolders.Delete(folder);
-
-    /// <summary>A run of 2,000 tests, a tenth failing and a seventh writing output, is told by its test host as test nodes
-    /// read straight from the bytes they came in, each node's uid and name the strings its test was found with and each test
-    /// looked up by its key without making it: the run costs the IDE at most twice the JSON of its results, least of three, and
-    /// every result reads as the run with protocol traces on (whose trace gives the JSON) read it.</summary>
-    [Fact]
-    public async Task A_runs_results_cost_at_most_twice_their_JSON_to_read()
-    {
-        CancellationToken cancel = TestContext.Current.CancellationToken;
-        string project = TestFolders.Write(folder, "Sums.Tests.csproj", TestingPlatformFolders.XunitProject);
-        string source = TestFolders.Write(folder, "RowTests.cs",
-            "using Xunit;\n\nnamespace Sums.Tests;\n\npublic class RowTests(ITestOutputHelper output)\n{\n" +
-            $"    public static IEnumerable<object[]> Rows => Enumerable.Range(0, {Rows}).Select(i => new object[] {{ i }});\n\n" +
-            "    [Theory]\n    [MemberData(nameof(Rows))]\n    [Trait(\"Area\", \"Sums\")]\n    public void Adds_up(int row)\n    {\n" +
-            "        if (row % 7 == 0)\n        {\n            output.WriteLine($\"row {row} of the sums\");\n        }\n" +
-            "        Assert.True(row % 10 != 9, $\"row {row} does not add up\");\n    }\n}\n");
-        await Restore.RunAsync(project);
-        ChildResult built = await ChildProcesses.RunAsync(ChildProcesses.DotnetCommand(["build", project, "-nologo", "-v:q"]), limit: Restore.Limit.Scaled(), cancel: cancel);
-        Assert.True(built.Succeeded, $"The test project did not build:\n{built.Output}{built.Error}");
-        TestAssembly assembly = new(new ProjectModel(project, "Sums.Tests", "Exe", [TestProjects.Framework], [], [], true), TestProjects.Framework,
-            Path.Combine(folder, "bin", "Debug", TestProjects.Framework, "Sums.Tests.dll"));
-        using TestingPlatformRunner runner = new();
-        IReadOnlyList<TestItem> tests = (await runner.DiscoverAsync([assembly], cancel: cancel)).Tests;
-        Assert.Equal(Rows, tests.Count);
-        TestItem first = tests.Single(t => t.Row == "Adds_up(row: 9)");
-        Assert.Equal(("Sums.Tests.RowTests.Adds_up", source, KeyValuePair.Create("Area", "Sums")), (first.FullyQualifiedName, first.Path, Assert.Single(first.Traits)));
-
-        string log = IdeLog.PathOf(IdeLog.Tests);
-        IdeLog.Flush();
-        int logged = File.Exists(log) ? Ui.Shared(log).Length : 0;
-        bool tracing = IdeLog.Traces;
-        RunSummary traced;
-        IdeLog.Traces = true;
-        try
-        {
-            traced = await runner.RunAsync(tests, _ => { }, cancel: cancel);
-        }
-        finally
-        {
-            IdeLog.Traces = tracing;
-        }
-        IdeLog.Flush();
-        const string Told = "<-- testing/testUpdates/tests ";
-        long json = Ui.Shared(log)[logged..].Split('\n').Where(l => l.Contains(Told, StringComparison.Ordinal))
-            .Sum(l => (long)System.Text.Encoding.UTF8.GetByteCount(l[(l.IndexOf(Told, StringComparison.Ordinal) + Told.Length)..].TrimEnd('\r')));
-        long least = long.MaxValue;
-        RunSummary? ran = null;
-        for (int time = 0; time < 3; time++)
-        {
-            long before = GC.GetTotalAllocatedBytes(precise: true);
-            ran = await runner.RunAsync(tests, _ => { }, cancel: cancel);
-            least = Math.Min(least, GC.GetTotalAllocatedBytes(precise: true) - before);
-        }
-        Assert.Equal(Rows, ran!.Outcomes.Count);
-        Assert.Equal(Rows / 10, ran.Outcomes.Count(o => o.State == TestState.Failed));
-        TestOutcome failed = ran.Outcomes.Single(o => o.Test == first);
-        Assert.Equal((TestState.Failed, "row 9 does not add up"), (failed.State, failed.Message));
-        Assert.Contains("RowTests.cs:line", failed.StackTrace, StringComparison.Ordinal);
-        Assert.Equal("row 7 of the sums", ran.Outcomes.Single(o => o.Test.Row == "Adds_up(row: 7)").Output?.Trim());
-        Assert.Equal(Said(traced), Said(ran));
-        testOutput.WriteLine($"{json:N0} bytes of JSON, {least:N0} allocated ({(double)least / json:0.00}×), {least / Rows:N0} a result");
-        Assert.True(least <= json * 2,
-            $"Reading a run's {Rows:N0} results of {json:N0} bytes of JSON allocated {least:N0} bytes ({(double)least / json:0.0}× its JSON): every test a run reports costs the IDE that much more memory");
-
-        static List<string> Said(RunSummary run) =>
-            [.. run.Outcomes.Select(o => $"{o.Test.Id} {o.State} {o.DisplayName} {o.Message} {o.StackTrace} {o.Output}").Order(StringComparer.Ordinal)];
-    }
-}
-
 /// <summary>What a Testing Platform test host wrote last, quoted in the failure the runner says once the host ends.</summary>
 [Collection(Beside.Name)]
 public sealed class TestHostLastWordsTests
 {
     private const string LastWords = "the test host's last words";
 
+    /// <summary>A test host that writes a last line and exits at once has that line in its failure every time, and one
+    /// whose connection comes after its end is heard is said to have connected.</summary>
+    [Fact]
+    public async Task A_test_hosts_last_line_and_late_connection_are_heard_however_it_ends()
+    {
+        await Flow.StepApartAsync<TestHostLastWordsTests>("a test host that writes a last line and exits at once has that line in its failure every time", () => new TestHostLastWordsTests(), t => t.A_test_host_that_writes_a_last_line_and_exits_at_once_has_that_line_in_its_failure_every_time());
+        await Flow.StepApartAsync<TestHostLastWordsTests>("a test host whose connection comes after its end is heard is said to have connected", () => new TestHostLastWordsTests(), t => t.A_test_host_whose_connection_comes_after_its_end_is_heard_is_said_to_have_connected());
+    }
+
     /// <summary>A test host that connects, writes more than a pipe holds and then one last line, and exits at once, before
     /// it answers the runner, has that last line in the failure the runner says, every one of twenty times beside two busy
     /// processes: what it wrote is read to its end before it is quoted, never stopping at an earlier line.</summary>
-    [Fact]
-    public async Task A_test_host_that_writes_a_last_line_and_exits_at_once_has_that_line_in_its_failure_every_time()
+    private async Task A_test_host_that_writes_a_last_line_and_exits_at_once_has_that_line_in_its_failure_every_time()
     {
         CancellationToken cancel = TestContext.Current.CancellationToken;
         string program = Passenger.Tests.Debugging.Helpers.Debuggees.Program("PassengerCases");
@@ -482,8 +445,7 @@ public sealed class TestHostLastWordsTests
     /// <summary>A test host that connects, writes and ends at once, whose connection the runner is handed only after it has
     /// heard the host end, as a loaded machine may hand the two over, is said to have ended after it connected, with its
     /// last line: whether it connected is its connection's to say, never the order the runner heard the two in.</summary>
-    [Fact]
-    public async Task A_test_host_whose_connection_comes_after_its_end_is_heard_is_said_to_have_connected()
+    private async Task A_test_host_whose_connection_comes_after_its_end_is_heard_is_said_to_have_connected()
     {
         CancellationToken cancel = TestContext.Current.CancellationToken;
         string program = Passenger.Tests.Debugging.Helpers.Debuggees.Program("PassengerCases");

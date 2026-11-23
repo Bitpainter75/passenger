@@ -1,8 +1,15 @@
 using System.Globalization;
+using System.Text;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input.Platform;
+using Avalonia.Media;
+using Avalonia.Rendering.Composition;
+using Avalonia.Threading;
+using Passenger.App;
+using Passenger.Core;
 using Passenger.Editor;
 using Passenger.Text;
 
@@ -13,10 +20,22 @@ namespace Passenger.Tests;
 /// every row drawn afresh.</summary>
 public sealed class RetainedRowsTests
 {
+    /// <summary>The editor's retained rows show what rows drawn afresh show, scrolled by the wheel, where lines were
+    /// deleted, put back, pasted and worked on, and typed into after scrolling away, and a key draws again only the
+    /// rows it changed and those the caret left or entered.</summary>
     [AvaloniaFact]
-    public void A_view_the_wheel_scrolled_shows_every_row_as_the_rows_drawn_afresh_there_do()
+    public void Retained_rows_show_what_rows_drawn_afresh_show_and_a_key_draws_again_only_what_it_changed()
     {
-        EditorRig rig = new(string.Join('\n', Enumerable.Range(0, 400).Select(Line)));
+        Flow.StepApart<RetainedRowsTests>("a view the wheel scrolled shows every row as the rows drawn afresh there do", t => t.A_view_the_wheel_scrolled_shows_every_row_as_the_rows_drawn_afresh_there_do());
+        Flow.StepApart<RetainedRowsTests>("a key draws again only the rows it changed and those the caret left or entered", t => t.A_key_draws_again_only_the_rows_it_changed_and_those_the_caret_left_or_entered());
+        Flow.StepApart<RetainedRowsTests>("rows where lines were deleted or put back show what an editor opened on the text shows", t => t.Rows_where_lines_were_deleted_or_put_back_show_what_an_editor_opened_on_the_text_shows());
+        Flow.StepApart<RetainedRowsTests>("rows where lines were pasted and worked on show what an editor opened on the text shows", t => t.Rows_where_lines_were_pasted_and_worked_on_show_what_an_editor_opened_on_the_text_shows());
+        Flow.StepApart<RetainedRowsTests>("a line typed into after rows scrolled away shows what was typed", t => t.A_line_typed_into_after_rows_scrolled_away_shows_what_was_typed());
+    }
+
+    private void A_view_the_wheel_scrolled_shows_every_row_as_the_rows_drawn_afresh_there_do()
+    {
+        EditorRig rig = Steady(string.Join('\n', Enumerable.Range(0, 400).Select(Line)));
         CodeEditor editor = rig.Editor;
         TextSnapshot text = rig.Document.Snapshot;
         int Find(int line, string what) => text.GetLineStart(line) + text.GetLine(line).ToString().IndexOf(what, StringComparison.Ordinal);
@@ -67,10 +86,9 @@ public sealed class RetainedRowsTests
         }
     }
 
-    [AvaloniaFact]
-    public void A_key_draws_again_only_the_rows_it_changed_and_those_the_caret_left_or_entered()
+    private void A_key_draws_again_only_the_rows_it_changed_and_those_the_caret_left_or_entered()
     {
-        EditorRig rig = new(string.Join('\n', Enumerable.Range(0, 200).Select(Line)));
+        EditorRig rig = Steady(string.Join('\n', Enumerable.Range(0, 200).Select(Line)));
         CodeEditor editor = rig.Editor;
         TextSnapshot text = rig.Document.Snapshot;
         int Find(int line, string what) => text.GetLineStart(line) + text.GetLine(line).ToString().IndexOf(what, StringComparison.Ordinal);
@@ -122,11 +140,41 @@ public sealed class RetainedRowsTests
             $"After the keys the view differs from its rows drawn afresh at {differs / 4 % PixelWidth(rig, editor)}, {differs / 4 / PixelWidth(rig, editor)} (pixels): a row kept through a key shows what it showed before");
     }
 
-    [AvaloniaFact]
-    public void Rows_where_lines_were_deleted_or_put_back_show_what_an_editor_opened_on_the_text_shows()
+    /// <summary>The most rows of an editor a frame drew again since <see cref="Most"/> was set: those whose middle the
+    /// frame's clip reaches. A visual over the whole window, which the compositor draws in every frame, clipped to what it
+    /// changed.</summary>
+    private sealed class RowsRedrawn(Rect[] middles) : CompositionCustomVisualHandler
+    {
+        public int Most { get; set; }
+
+        public override void OnRender(ImmediateDrawingContext drawingContext)
+        {
+            int drawn = middles.Count(RenderClipIntersectes);
+            Most = Math.Max(Most, drawn);
+        }
+
+        /// <summary>Laid over a window, reading the rows of its editor showing lines <paramref name="first"/> to
+        /// <paramref name="last"/>, once the frame drawing it is drawn.</summary>
+        public static RowsRedrawn Over(TopLevel window, CodeEditor editor, int first, int last)
+        {
+            TextSnapshot text = editor.Document.Snapshot;
+            Point origin = editor.TranslatePoint(default, window)!.Value;
+            Rect[] middles = [.. Enumerable.Range(first, last - first + 1).Select(line => editor.PointOf(text.GetLineStart(line)).Y + (editor.LineHeight / 2))
+                .Where(middle => middle > 0 && middle < editor.Bounds.Height)
+                .Select(middle => new Rect(origin.X, origin.Y + middle - 0.5, editor.Bounds.Width, 1))];
+            RowsRedrawn rows = new(middles);
+            CompositionCustomVisual visual = ElementComposition.GetElementVisual(window)!.Compositor.CreateCustomVisual(rows);
+            visual.Size = new Vector(window.Bounds.Width, window.Bounds.Height);
+            ElementComposition.SetElementChildVisual(window, visual);
+            Ui.Settle();
+            return rows;
+        }
+    }
+
+    private void Rows_where_lines_were_deleted_or_put_back_show_what_an_editor_opened_on_the_text_shows()
     {
         // A file shorter than the view, as a new console project's Program.cs is.
-        EditorRig small = new(string.Join('\n', SmallFile));
+        EditorRig small = Steady(string.Join('\n', SmallFile));
         int LineStart(EditorRig rig, int line) => rig.Document.Snapshot.GetLineStart(line);
         List<Seen> seen = [];
         small.PlaceCaret(LineStart(small, 5));
@@ -150,7 +198,7 @@ public sealed class RetainedRowsTests
         See(seen, small, "Every line put back");
 
         // A file longer than the view, seen at its end, where no row comes into view in place of those deleted.
-        EditorRig large = new(string.Join('\n', Enumerable.Range(1, 120).Select(i => string.Create(CultureInfo.InvariantCulture, $"Console.WriteLine(\"line {i}\");"))));
+        EditorRig large = Steady(string.Join('\n', Enumerable.Range(1, 120).Select(i => string.Create(CultureInfo.InvariantCulture, $"Console.WriteLine(\"line {i}\");"))));
         large.Editor.ScrollToEnd();
         large.PlaceCaret(LineStart(large, 115));
         large.Press("shift DOWN");
@@ -166,10 +214,9 @@ public sealed class RetainedRowsTests
         }
     }
 
-    [AvaloniaFact]
-    public void Rows_where_lines_were_pasted_and_worked_on_show_what_an_editor_opened_on_the_text_shows()
+    private void Rows_where_lines_were_pasted_and_worked_on_show_what_an_editor_opened_on_the_text_shows()
     {
-        EditorRig rig = new(string.Join('\n', SmallFile));
+        EditorRig rig = Steady(string.Join('\n', SmallFile));
         int LineStart(int line) => rig.Document.Snapshot.GetLineStart(line);
         List<Seen> seen = [];
         rig.PlaceCaret(LineStart(1));
@@ -205,10 +252,9 @@ public sealed class RetainedRowsTests
         }
     }
 
-    [AvaloniaFact]
-    public void A_line_typed_into_after_rows_scrolled_away_shows_what_was_typed()
+    private void A_line_typed_into_after_rows_scrolled_away_shows_what_was_typed()
     {
-        EditorRig rig = new(string.Join('\n', SmallFile));
+        EditorRig rig = Steady(string.Join('\n', SmallFile));
         // A row scrolled out of view above and none come into view below, as a scroll in a short file leaves it.
         rig.Editor.ScrollTo(new Vector(0, rig.Editor.LineHeight));
         Ui.Settle();
@@ -244,7 +290,7 @@ public sealed class RetainedRowsTests
     /// shows, its rows each drawn once. The new editor takes the keys, so it is made only once every step is seen.</summary>
     private static void AssertDrawnAsAfresh(Seen seen)
     {
-        EditorRig fresh = new(seen.Text);
+        EditorRig fresh = Steady(seen.Text);
         try
         {
             fresh.Editor.Selections = seen.Selections;
@@ -260,6 +306,16 @@ public sealed class RetainedRowsTests
         {
             fresh.Window.Close();
         }
+    }
+
+    /// <summary>An editor alone in a window on <paramref name="text"/>, its caret standing still: a view compared pixel for
+    /// pixel with itself drawn again, or with another editor, would otherwise differ by the caret's blink between the two.</summary>
+    private static EditorRig Steady(string text)
+    {
+        EditorRig rig = new(text);
+        rig.Editor.CaretBlink = CaretBlink.Steady;
+        Ui.Settle();
+        return rig;
     }
 
     private static string Line(int i) => (i % 10) switch

@@ -14,7 +14,7 @@ namespace Passenger.App.ToolWindows;
 public class DetailsTables : DockPanel
 {
     private readonly StackPanel sections = new() { Margin = new Thickness(Gaps.Normal, 0, Gaps.Normal, Gaps.Normal) };
-    private readonly TextBlock said = new() { Classes = { StyleClasses.EmptyText } };
+    private readonly EmptyState said = new();
 
     /// <summary>The tables a <see cref="Show"/> is making, and what they show in words; null outside one.</summary>
     private List<Control>? making;
@@ -80,7 +80,7 @@ public class DetailsTables : DockPanel
     public void Section(string title, IReadOnlyList<(string Name, Control Value)> rows)
     {
         words?.Append(title).Append('\u0001');
-        TextBlock heading = new() { Text = title, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, Gaps.Wide, 0, Gaps.Tight) };
+        TextBlock heading = new() { Classes = { StyleClasses.PaneTitle }, Text = title, Margin = new Thickness(0, Gaps.Wide, 0, Gaps.Tight) };
         Grid table = new()
         {
             ColumnDefinitions = { new ColumnDefinition(GridLength.Auto) { SharedSizeGroup = "DetailsNames" }, new ColumnDefinition(GridLength.Star) },
@@ -140,16 +140,15 @@ public class DetailsTables : DockPanel
         .OfType<string>());
 
     /// <summary>A value to read and copy, wrapped rather than cut; a program's words in the editor's font.</summary>
-    public static SelectableTextBlock Words(string text, bool code = false, string? brush = null)
+    public static SelectableWords Words(string text, bool code = false, string? brush = null)
     {
-        SelectableTextBlock words = new()
+        SelectableWords words = new()
         {
             Text = text, TextWrapping = TextWrapping.Wrap, MinHeight = ListRow.Height, Padding = new Thickness(0, Gaps.Tight), VerticalAlignment = VerticalAlignment.Top,
         };
         if (code)
         {
-            words.InCodeFont();
-            words.FontSize = 12;
+            words.Classes.Add(StyleClasses.Code);
         }
         if (brush is not null)
         {

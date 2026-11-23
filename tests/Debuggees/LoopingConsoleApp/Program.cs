@@ -18,7 +18,9 @@
 // With "tiers" it loads its optimized copy and stops with the runtime's tiering worker waiting for work, where an
 // evaluation of Tiers.Warm has the worker compile that copy's Tiers.Hot again, and says whether it did meanwhile. With
 // "finalizes" it stops before its finalizer has run any of its code, where an evaluation of Finalizing.Collect leaves
-// litter with finalizers and collects it; let go, it says once the litter is finalized.
+// litter with finalizers and collects it; let go, it says once the litter is finalized. With "collects" it stops where
+// an evaluation of Starting.StartAndCollect starts a thread, gives it time to reach the program's code, and collects.
+// With "starts and throws" it starts a thread, Announced, waits for a line of input, then throws and catches.
 if (args is ["dispatch"])
 {
     Dispatcher.RunAsync(Handlers.TwiceAsync, 20).GetAwaiter().GetResult();
@@ -136,6 +138,25 @@ if (args is ["finalizes"])
         Thread.Sleep(10);
     }
     Console.WriteLine("finalized");
+    return;
+}
+if (args is ["collects"])
+{
+    Console.WriteLine("collects"); // stop where an evaluation starts a thread and collects
+    Thread.Sleep(Timeout.Infinite);
+}
+if (args is ["starts and throws"])
+{
+    new Thread(() => Thread.Sleep(Timeout.Infinite)) { IsBackground = true, Name = "Announced" }.Start();
+    Console.ReadLine();
+    try
+    {
+        throw new InvalidOperationException("thrown while a thread starts");
+    }
+    catch (InvalidOperationException)
+    {
+        Console.WriteLine("caught");
+    }
     return;
 }
 if (args is ["asleep"])
@@ -262,6 +283,24 @@ internal static class Finalizing
     private sealed class Litter
     {
         ~Litter() => Interlocked.Increment(ref finalized);
+    }
+}
+
+internal static class Starting
+{
+    // Starts a thread that sleeps for good and waits while it reaches the program's code, which under an evaluation's hold
+    // the runtime announces from the thread's first instruction; then collects: what it returns, once the collection ended.
+    public static int StartAndCollect()
+    {
+        new Thread(() => Thread.Sleep(Timeout.Infinite)) { IsBackground = true, Name = "Started" }.Start();
+        Thread.Sleep(500);
+        return Collect();
+    }
+
+    public static int Collect()
+    {
+        GC.Collect();
+        return 42;
     }
 }
 

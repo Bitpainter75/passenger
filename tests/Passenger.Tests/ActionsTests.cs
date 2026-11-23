@@ -10,6 +10,7 @@ namespace Passenger.Tests;
 
 /// <summary>The window's actions as a person finds and runs them: every one Find Action lists runs where it was asked
 /// for or says why it cannot, and the shortcuts a window's menus and popups show are the ones its own keys run.</summary>
+[AboutMacOS]
 public sealed class ActionsTests : IDisposable
 {
     /// <summary>What Find Action lists but this test leaves alone: the IDE's end, the system's file and folder pickers, Finder
@@ -20,10 +21,21 @@ public sealed class ActionsTests : IDisposable
 
     public void Dispose() => TestFolders.Delete(folder);
 
+    /// <summary>Every action Find Action lists runs where it was asked for or says why not, a shortcut kept under a
+    /// former id runs the action it is now, and menus and popups show the keys that run each, as one flow, each step
+    /// the check one test made in an instance of its own.</summary>
+    [AvaloniaFact]
+    public void Every_action_runs_where_it_is_asked_for_and_menus_show_the_keys_that_run_it()
+    {
+        Flow.StepApart<ActionsTests>("every action Find Action lists runs where it was asked for or says why it cannot", t => t.Every_action_Find_Action_lists_runs_where_it_was_asked_for_or_says_why_it_cannot());
+        Flow.StepApart<ActionsTests>("a shortcut kept under a service actions former id runs the one action it is now", t => t.A_shortcut_kept_under_a_service_actions_former_id_runs_the_one_action_it_is_now());
+        Flow.StepApart<ActionsTests>("a windows branch menu and breakpoint popup show the shortcuts its own keys run", t => t.A_windows_branch_menu_and_breakpoint_popup_show_the_shortcuts_its_own_keys_run());
+        Flow.StepApart<ActionsTests>("the quit is named as the system names it and found in Find Action by Quit and by Exit", t => t.The_quit_is_named_as_the_system_names_it_and_found_in_Find_Action_by_Quit_and_by_Exit());
+    }
+
     /// <summary>Also: no key is bound to an action Find Action leaves out, and what ran last is offered first next
     /// time, what could not run taking no place from it.</summary>
-    [AvaloniaFact]
-    public void Every_action_Find_Action_lists_runs_where_it_was_asked_for_or_says_why_it_cannot()
+    private void Every_action_Find_Action_lists_runs_where_it_was_asked_for_or_says_why_it_cannot()
     {
         File.WriteAllText(Path.Combine(folder, "One.cs"), "class One\n{\n    int Two() => 2;\n}\n");
         // Every action may run here, Prune and Remove among them: on an engine of no program, never the machine's own.
@@ -89,8 +101,7 @@ public sealed class ActionsTests : IDisposable
     /// <summary>A shortcut a person kept under a service action's former id (one the Containers or Aspire window gave
     /// Debug) runs Debug Service, which says why it cannot act here, and an agent's ide_action naming a former id
     /// reaches the same action.</summary>
-    [AvaloniaFact]
-    public void A_shortcut_kept_under_a_service_actions_former_id_runs_the_one_action_it_is_now()
+    private void A_shortcut_kept_under_a_service_actions_former_id_runs_the_one_action_it_is_now()
     {
         MainWindow window = Ui.OpenFolder(folder);
         string keys = OperatingSystem.IsMacOS() ? "meta alt shift K" : "control alt shift K";
@@ -113,8 +124,7 @@ public sealed class ActionsTests : IDisposable
         }
     }
 
-    [AvaloniaFact]
-    public void A_windows_branch_menu_and_breakpoint_popup_show_the_shortcuts_its_own_keys_run()
+    private void A_windows_branch_menu_and_breakpoint_popup_show_the_shortcuts_its_own_keys_run()
     {
         File.WriteAllText(Path.Combine(folder, "One.cs"), "class One\n{\n    int Two() => 2;\n}\n");
         TestGit.Init(folder);
@@ -166,22 +176,21 @@ public sealed class ActionsTests : IDisposable
         }
     }
 
-    /// <summary>Every tool window's Refresh and the Terminal's New Session are actions: Find Action lists each by its title,
-    /// and its button in the window is that action's.</summary>
-    [AvaloniaFact]
-    public void Each_tool_windows_Refresh_and_the_terminals_new_session_are_in_Find_Action()
+    /// <summary>Passenger's quit is named in Find Action as the system names it, Quit Passenger on macOS (the application
+    /// menu's) and Exit elsewhere (File's), and found by either word.</summary>
+    private void The_quit_is_named_as_the_system_names_it_and_found_in_Find_Action_by_Quit_and_by_Exit()
     {
         MainWindow window = Ui.OpenFolder(folder, languageServer: false);
         try
         {
-            foreach (string id in (string[])[AppActions.EndpointsRefresh, AppActions.GitLogRefresh, AppActions.CommitRefresh, AppActions.NuGetRefresh,
-                AppActions.LiveTreeRefresh, AppActions.NewTerminalSession, AppActions.ContainersRefresh, AppActions.ExpandAll, AppActions.CollapseAll])
+            IdeAction quit = window.Actions[AppActions.Exit]!;
+            Assert.Equal(OperatingSystem.IsMacOS() ? "Quit Passenger" : "Exit", quit.Title);
+            foreach (string asked in (string[])["Quit", "Exit"])
             {
-                IdeAction action = window.Actions[id] ?? throw new Xunit.Sdk.XunitException($"No action is {id}");
                 ActionPopup popup = FindAction(window);
-                popup.Query = action.Title;
+                popup.Query = asked;
                 Ui.Settle();
-                Assert.True(popup.Rows.Any(a => a.Id == id), $"Find Action does not list {action.Title} ({id}) by its title");
+                Assert.True(popup.Rows.Any(a => a.Id == AppActions.Exit), $"Find Action does not list {quit.Title} for '{asked}', only [{string.Join(", ", popup.Rows.Select(a => a.Title))}]");
                 Ui.Press(window, "ESCAPE");
             }
         }

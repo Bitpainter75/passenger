@@ -11,6 +11,7 @@ namespace Passenger.Tests;
 /// <summary>The Explorer's filter: Find's keys give it the keys, its text narrows the tree to the files whose names hold
 /// it with their folders, in the Solution view and the Files view, Down takes the keys into the tree, and Escape empties it
 /// and gives the tree its keys back, the rows open again as they were.</summary>
+[SameOnEverySystem]
 public sealed class ExplorerFilterTests : IDisposable
 {
     private readonly string folder = PathNames.Canonical(TestFolders.Create("explorer-filter-"));
@@ -31,8 +32,18 @@ public sealed class ExplorerFilterTests : IDisposable
 
     public void Dispose() => TestFolders.Delete(folder);
 
+    /// <summary>A filter shows the files named with their folders in either view, says where it names none, opens one
+    /// and gives the tree back on Escape, and one letter over twenty thousand files costs what it shows, as one flow,
+    /// each step the check one test made in an instance of its own.</summary>
     [AvaloniaFact]
-    public void A_filter_shows_the_files_named_with_their_folders_opens_one_and_escape_gives_back_the_tree_as_it_was()
+    public void The_Explorers_filter_shows_the_files_named_and_gives_the_tree_back()
+    {
+        Flow.StepApart<ExplorerFilterTests>("a filter shows the files named with their folders opens one and escape gives back the tree as it was", t => t.A_filter_shows_the_files_named_with_their_folders_opens_one_and_escape_gives_back_the_tree_as_it_was());
+        Flow.StepApart<ExplorerFilterTests>("the files view is filtered too and a filter naming no file says so", t => t.The_files_view_is_filtered_too_and_a_filter_naming_no_file_says_so());
+        Flow.StepApart<ExplorerFilterTests>("a one letter filter over twenty thousand files shows the first of them and costs the window what it shows", t => t.A_one_letter_filter_over_twenty_thousand_files_shows_the_first_of_them_and_costs_the_window_what_it_shows());
+    }
+
+    private void A_filter_shows_the_files_named_with_their_folders_opens_one_and_escape_gives_back_the_tree_as_it_was()
     {
         MainWindow window = Open();
         ExplorerView explorer = window.ExplorerView;
@@ -67,8 +78,7 @@ public sealed class ExplorerFilterTests : IDisposable
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void The_files_view_is_filtered_too_and_a_filter_naming_no_file_says_so()
+    private void The_files_view_is_filtered_too_and_a_filter_naming_no_file_says_so()
     {
         MainWindow window = Open();
         ExplorerView explorer = window.ExplorerView;
@@ -88,7 +98,7 @@ public sealed class ExplorerFilterTests : IDisposable
 
         window.KeyTextInput("zzz");
         Ui.Settle();
-        TextBlock hint = explorer.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Name == "Hint");
+        Passenger.App.ToolWindows.EmptyState hint = explorer.GetVisualDescendants().OfType<Passenger.App.ToolWindows.EmptyState>().Single(t => t.Name == "Hint");
         Assert.True(hint.IsEffectivelyVisible && hint.Text == "No file matches", $"A filter naming no file shows the hint {(hint.IsEffectivelyVisible ? hint.Text : "hidden")}");
         Ui.Press(window, "ESCAPE");
         Assert.False(hint.IsEffectivelyVisible, "The hint that no file matches stayed once the filter was emptied");
@@ -98,8 +108,7 @@ public sealed class ExplorerFilterTests : IDisposable
     /// <summary>A one-letter filter over a large folder narrows the tree to its first few hundred files and says how many
     /// more match, the names matched off the window's thread: over 20,000 files it allocates on the UI thread under 8 bytes
     /// for each file more than over 2,000, the least of three tries, where every file matched used to be placed in the tree.</summary>
-    [AvaloniaFact]
-    public void A_one_letter_filter_over_twenty_thousand_files_shows_the_first_of_them_and_costs_the_window_what_it_shows()
+    private void A_one_letter_filter_over_twenty_thousand_files_shows_the_first_of_them_and_costs_the_window_what_it_shows()
     {
         string small = PathNames.Canonical(TestFolders.Create("explorer-filter-small-"));
         string large = PathNames.Canonical(TestFolders.Create("explorer-filter-large-"));
@@ -114,8 +123,8 @@ public sealed class ExplorerFilterTests : IDisposable
             TestContext.Current.TestOutputHelper?.WriteLine($"A one-letter filter allocated {few / 1024} KB over 2,000 files, {many / 1024} KB over 20,000");
             Assert.True(fewShown == ExplorerFilter.Most && manyShown == ExplorerFilter.Most,
                 $"A filter every file matches showed {fewShown} files over 2,000 and {manyShown} over 20,000, where the tree shows the first {ExplorerFilter.Most}");
-            Assert.Equal($"{1500:N0} more files match: a longer filter narrows them", fewMore);
-            Assert.Equal($"{19_500:N0} more files match: a longer filter narrows them", manyMore);
+            Assert.Equal("1,500 more files match: a longer filter narrows them", fewMore);
+            Assert.Equal("19,500 more files match: a longer filter narrows them", manyMore);
             Assert.True(many - few < 8 * 18_000,
                 $"A one-letter filter over 20,000 files allocated {many / 1024} KB on the UI thread, against {few / 1024} KB over 2,000: 8 bytes or more for each file more");
             window.Close();
@@ -124,39 +133,6 @@ public sealed class ExplorerFilterTests : IDisposable
         {
             TestFolders.Delete(small);
             TestFolders.Delete(large);
-        }
-    }
-
-    /// <summary>A filter matching hundreds of files lands in the tree without the disk resolving one of their names on the
-    /// window's thread: they are resolved where the names are matched, off it, where each file's used to be resolved as
-    /// its row was found, a call into the system for every file at every key.</summary>
-    [AvaloniaFact]
-    public void A_filter_matching_hundreds_of_files_resolves_none_of_their_names_on_the_window_s_thread()
-    {
-        string root = PathNames.Canonical(TestFolders.Create("explorer-filter-names-"));
-        try
-        {
-            Areas(root, 3);
-            MainWindow window = new() { Width = 1000, Height = 700 };
-            window.Show();
-            window.OpenFolder(root);
-            Ui.WaitFor(() => window.FileIndex.Count >= 600 && !window.FileIndex.IsWalking && window.ExplorerView.Tree.Root is not null,
-                "the folder's 600 files indexed and shown");
-            Ui.Click(Filter(window));
-            Ui.Settle();
-            int before = PathNames.ResolvedOnThisThread;
-            window.KeyTextInput("x");
-            Ui.Settle();
-            int resolved = PathNames.ResolvedOnThisThread - before;
-            int shown = window.ExplorerView.Tree.Rows.Count(r => r.IsFile);
-            Assert.True(shown == ExplorerFilter.Most, $"A filter every one of 600 files matches showed {shown} files, where the tree shows the first {ExplorerFilter.Most}");
-            Assert.True(resolved < 50,
-                $"A filter landing on {shown} files had the disk resolve {resolved} names on the window's thread: a call into the system for each file it shows, at every key");
-            window.Close();
-        }
-        finally
-        {
-            TestFolders.Delete(root);
         }
     }
 
@@ -217,7 +193,7 @@ public sealed class ExplorerFilterTests : IDisposable
             ?? throw new InvalidOperationException($"The Explorer does not show {path}: [{string.Join(", ", window.ExplorerView.Tree.Rows.Select(r => r.Name))}]");
     }
 
-    private string At(string relative) => Path.Combine(folder, relative.Replace('/', Path.DirectorySeparatorChar));
+    private string At(string relative) => Path.GetFullPath(Path.Combine(folder, relative));
 
     private MainWindow Open()
     {

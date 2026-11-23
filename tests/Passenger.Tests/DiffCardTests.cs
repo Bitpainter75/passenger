@@ -15,6 +15,7 @@ namespace Passenger.Tests;
 /// the name the pointer rests on, under the name's line in the diff's own window, whether diffs open as tabs of the
 /// editors or in windows of their own; its other side, the last commit's text, which no language server has read, shows
 /// none.</summary>
+[AboutMacOS]
 public sealed class DiffCardTests : IDisposable
 {
     private const string Shop = "public sealed class Shop\n{\n    /// <summary>The price of a number of items.</summary>\n"
@@ -32,8 +33,17 @@ public sealed class DiffCardTests : IDisposable
 
     public void Dispose() => TestFolders.Delete(folder);
 
+    /// <summary>C# help on a diff's side of the file as one flow, each step the check one test made in an instance of
+    /// its own: resting on a name showing its card there and none on the last commit's side, and Go to Declaration by
+    /// click and keys landing at the declaration.</summary>
     [AvaloniaFact]
-    public void Resting_on_a_name_in_a_diffs_side_of_the_file_shows_its_card_and_on_the_last_commits_side_none()
+    public void A_diffs_side_of_the_file_shows_a_names_card_and_goes_to_its_declaration_as_the_editor_does()
+    {
+        Flow.StepApart<DiffCardTests>("resting on a name in a diffs side of the file shows its card and on the last commits side none", t => t.Resting_on_a_name_in_a_diffs_side_of_the_file_shows_its_card_and_on_the_last_commits_side_none());
+        Flow.StepApart<DiffCardTests>("go to declaration on a diffs side of the file by click and keys lands at the declaration", t => t.Go_to_declaration_on_a_diffs_side_of_the_file_by_click_and_keys_lands_at_the_declaration());
+    }
+
+    private void Resting_on_a_name_in_a_diffs_side_of_the_file_shows_its_card_and_on_the_last_commits_side_none()
     {
         MainWindow window = Ui.OpenFolder(folder);
         try
@@ -73,6 +83,50 @@ public sealed class DiffCardTests : IDisposable
             window.ApplySettings(new AppSettings());
             window.Close();
         }
+    }
+
+    /// <summary>On a diff's side that is the open file's own text, Go to Declaration goes from where it is asked as from the
+    /// file's editor: its gesture's keys held over a name underline it, and Cmd-click (Ctrl-click off the Mac) on it and its
+    /// keys at the caret each land at the name's declaration in the file, the diff's tab left open behind.</summary>
+    private void Go_to_declaration_on_a_diffs_side_of_the_file_by_click_and_keys_lands_at_the_declaration()
+    {
+        MainWindow window = Ui.OpenFolder(folder);
+        try
+        {
+            string shop = Path.Combine(folder, "Shop.cs");
+            window.ApplySettings(window.Settings with { OpenDiffsIn = DiffPlace.Tab });
+            window.OpenFile(shop);
+            Ui.Settle();
+            IDiffHost diff = DiffFromCommit(window);
+            DiffView view = OpenDiffs.ViewOf(diff);
+            Assert.True(view.IsEditable, "The diff of the open Shop.cs shows its file's side read-only");
+            Avalonia.Input.RawInputModifiers command = OperatingSystem.IsMacOS() ? Avalonia.Input.RawInputModifiers.Meta : Avalonia.Input.RawInputModifiers.Control;
+            int call = view.Right.Document.Snapshot.ToString().IndexOf("Price(3)", StringComparison.Ordinal);
+            Point on = view.Right.PointOf(call + 2) + new Vector(1, view.Right.LineHeight / 2);
+
+            Ui.Hover(view.Right, on, command);
+            Ui.WaitFor(() => view.Right.PointedRange is not null, () => "the held gesture's underline under Price on the diff's side of the file");
+            Assert.Equal(new Passenger.Text.TextRange(call, "Price".Length), view.Right.PointedRange);
+
+            Ui.Click(view.Right, on, command);
+            Landed(window, "a click with Go to Declaration's gesture on Price in the diff");
+            Assert.True(window.EditorArea.Diffs.Count == 1, "Going to the declaration from the diff's tab closed it");
+
+            DiffView again = OpenDiffs.ViewOf(DiffFromCommit(window));
+            again.Right.Focus();
+            again.Right.GoTo(again.Right.Document.Snapshot.GetPosition(call + 2));
+            Ui.Landed(() => again.Right.IsKeyboardFocusWithin, "the diff's side of the file to have the keys");
+            Ui.Press(window, Ui.Shortcut(AppActions.GoToDeclaration));
+            Landed(window, "Go to Declaration's keys on Price in the diff");
+        }
+        finally
+        {
+            window.Close();
+        }
+
+        static void Landed(MainWindow window, string how) => Ui.WaitFor(
+            () => window.EditorArea.Active is { Diff: null } file && file.Name == "Shop.cs" && window.EditorArea.CodeEditor.CaretPosition.Line == 3,
+            () => $"{how} to land at its declaration on Shop.cs's line 4, where {window.EditorArea.Active?.Title} is shown, its caret on line {window.EditorArea.CodeEditor.CaretPosition.Line + 1}");
     }
 
     /// <summary>The pointer brought to rest on some text in a side of the diff, as a person's mouse rests on it; gives the

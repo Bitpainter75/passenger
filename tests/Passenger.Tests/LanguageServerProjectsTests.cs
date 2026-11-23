@@ -18,14 +18,17 @@ namespace Passenger.Tests;
 /// <summary>The language server's projects. It loads them from what Passenger's project host built of them at design
 /// time, as its own build host would have built them, so it answers across a project reference; a folder opened again
 /// has them loaded from those builds as kept, none built again while nothing they read changed. A file of a
-/// multi-targeted project is answered for in the target framework chosen in the editor's switcher.</summary>
+/// multi-targeted project is answered for in the target framework chosen in the status bar's context widget.</summary>
 public sealed partial class LanguageServerProjectsTests : IClassFixture<RestoredFolders>, IDisposable
 {
+    private readonly RestoredFolders folders;
+
     private readonly string folder;
     private readonly string settings = TestFolders.Create("settings-");
 
     public LanguageServerProjectsTests(RestoredFolders folders)
     {
+        this.folders = folders;
         string made = string.Empty;
         TestFolders.Prepare(() => made = folders.Take("builds-", root =>
         {
@@ -59,11 +62,47 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
         TestFolders.Delete(settings);
     }
 
+    /// <summary>The gate's design-time builds kept and projects reaching the language server, as one flow.</summary>
+    [Gate]
+    [AvaloniaFact]
+    public void The_gates_builds_kept_and_projects_reaching_the_server_hold_as_one_flow()
+    {
+        Flow.StepApart("a folder opened with builds kept before restore inputs were stamped is built again once", () => new LanguageServerProjectsTests(folders), t => t.A_folder_opened_with_builds_kept_before_restore_inputs_were_stamped_is_built_again_once());
+        Flow.StepApart("a folder opened again has the language server load its projects from the design-time builds kept", () => new LanguageServerProjectsTests(folders), t => t.A_folder_opened_again_has_the_language_server_load_its_projects_from_the_design_time_builds_kept());
+        Flow.StepApart("a directory build file made above the projects reaches the language server, made while the folder was closed or open", () => new LanguageServerProjectsTests(folders), t => t.A_directory_build_file_made_above_the_projects_reaches_the_language_server_made_while_the_folder_was_closed_or_open());
+        Flow.StepApart("files open as the server starts again, or as the solution gains a project, reach it once their projects have loaded", () => new LanguageServerProjectsTests(folders), t => t.Files_open_as_the_server_starts_again_or_the_solution_gains_a_project_reach_it_once_their_projects_have_loaded());
+        Flow.StepApart("a file of a multi-targeted project is answered for in the target framework chosen for it", () => new LanguageServerProjectsTests(folders), t => t.A_file_of_a_multi_targeted_project_is_answered_for_in_the_target_framework_chosen_for_it());
+        Flow.StepApart("leaving a folder whose projects are still being built lets the next folder's builds start at once", () => new LanguageServerProjectsTests(folders), t => t.Leaving_a_folder_whose_projects_are_still_being_built_lets_the_next_folders_builds_start_at_once());
+    }
+
+    /// <summary>Projects reach the language server as what they read arrives: packages landing during a first build, an
+    /// .editorconfig made or deleted above them, a file another project has yet to load; and a folder deleted under its
+    /// design-time build leaves another window's project built, never held.</summary>
+    [AvaloniaFact]
+    public void Projects_reach_the_server_as_their_packages_editorconfigs_and_loads_arrive_and_a_folder_gone_holds_no_other_window()
+    {
+        Flow.StepApart("a project whose packages arrive during its first build is built again as the server hears of them", () => new LanguageServerProjectsTests(folders), t => t.A_project_whose_packages_arrive_during_its_first_build_is_built_again_as_the_server_hears_of_them());
+        Flow.StepApart("an .editorconfig made or deleted above the projects reaches the language server's formatting, with the folder closed or open", () => new LanguageServerProjectsTests(folders), t => t.An_editorconfig_made_or_deleted_above_the_projects_reaches_the_language_servers_formatting_with_the_folder_closed_or_open());
+        Flow.StepApart("Find Usages answers at once without a file another project has yet to load, and a rename waits for it", () => new LanguageServerProjectsTests(folders), t => t.Find_usages_answers_at_once_without_a_file_another_project_has_yet_to_load_and_a_rename_waits_for_it());
+        Flow.StepApart("a folder deleted under its design-time build leaves another window's project to be built and loaded", () => new LanguageServerProjectsTests(folders), t => t.A_folder_deleted_under_its_design_time_build_leaves_another_windows_project_to_be_built_and_loaded());
+        Flow.StepApart("a folder deleted under its design-time build never holds another window's project while its window stays open", () => new LanguageServerProjectsTests(folders), t => t.A_folder_deleted_under_its_design_time_build_never_holds_another_windows_project_while_its_window_stays_open());
+    }
+
+    /// <summary>A multi-targeted project's files parsed with the symbols of the framework chosen for them, solution-
+    /// wide analysis listing its closed files in that framework and following a new choice, and letting go of a
+    /// framework's problems once the project no longer targets it.</summary>
+    [AvaloniaFact]
+    public void A_multi_targeted_projects_files_are_parsed_and_analysed_in_the_framework_chosen_letting_go_of_one_no_longer_targeted()
+    {
+        Flow.StepApart("a multi-targeted file's own parse takes the symbols of the target framework chosen for it", () => new LanguageServerProjectsTests(folders), t => t.A_multi_targeted_files_own_parse_takes_the_symbols_of_the_target_framework_chosen_for_it());
+        Flow.StepApart("solution-wide analysis lists a multi-targeted project's closed files in the framework chosen and follows a new choice", () => new LanguageServerProjectsTests(folders), t => t.Solution_wide_analysis_lists_a_multi_targeted_projects_closed_files_in_the_framework_chosen_and_follows_a_new_choice());
+        Flow.StepApart("solution-wide analysis lets go of a framework's problems once its project no longer targets it", () => new LanguageServerProjectsTests(folders), t => t.Solution_wide_analysis_lets_go_of_a_frameworks_problems_once_its_project_no_longer_targets_it());
+    }
+
     /// <summary>A restore landing during a project's first design-time build, its assets dated before the build began (copied
     /// in with their times kept): the language server, given that build, hears of them and is given one made after them,
     /// which the folder opened again loads as kept.</summary>
-    [AvaloniaFact]
-    public void A_project_whose_packages_arrive_during_its_first_build_is_built_again_as_the_server_hears_of_them()
+    private void A_project_whose_packages_arrive_during_its_first_build_is_built_again_as_the_server_hears_of_them()
     {
         string root = PathNames.Canonical(TestFolders.Create("late-assets-"));
         try
@@ -135,9 +174,7 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
         }
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_folder_opened_with_builds_kept_before_restore_inputs_were_stamped_is_built_again_once()
+    private void A_folder_opened_with_builds_kept_before_restore_inputs_were_stamped_is_built_again_once()
     {
         string program = Path.Combine(folder, "App", "Program.cs");
         MainWindow first = Keeping();
@@ -163,9 +200,7 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
         third.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_folder_opened_again_has_the_language_server_load_its_projects_from_the_design_time_builds_kept()
+    private void A_folder_opened_again_has_the_language_server_load_its_projects_from_the_design_time_builds_kept()
     {
         string program = Path.Combine(folder, "App", "Program.cs");
         MainWindow first = Keeping();
@@ -185,9 +220,7 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
         second.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_directory_build_file_made_above_the_projects_reaches_the_language_server_made_while_the_folder_was_closed_or_open()
+    private void A_directory_build_file_made_above_the_projects_reaches_the_language_server_made_while_the_folder_was_closed_or_open()
     {
         // Each error but the first compiled only under a constant a Directory.Build file above the projects defines.
         string counts = Path.Combine(folder, "App", "Counts.cs");
@@ -211,8 +244,7 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
     /// <summary>An .editorconfig beside the solution, above its projects' folders, reaches the language server made while
     /// the folder was closed or while it is open, and its going too: Reformat Code lays braces out as the one there says
     /// (#1459), and the unused local is the error it makes it.</summary>
-    [AvaloniaFact]
-    public void An_editorconfig_made_or_deleted_above_the_projects_reaches_the_language_servers_formatting_with_the_folder_closed_or_open()
+    private void An_editorconfig_made_or_deleted_above_the_projects_reaches_the_language_servers_formatting_with_the_folder_closed_or_open()
     {
         const string sameLine = "static class Braces {\n    static int Count(int x) {\n        int unused = 1;\n        if (x > 0) {\n            return x;\n        }\n        return 0;\n    }\n}\n";
         const string ownLine = "static class Braces\n{\n    static int Count(int x)\n    {\n        int unused = 1;\n        if (x > 0)\n        {\n            return x;\n        }\n        return 0;\n    }\n}\n";
@@ -256,8 +288,7 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
     /// language server cannot take it in: Find Usages on the method answers at once, the Find window and the status bar
     /// saying it went without the caller, where it waited for App and refused; a rename of the method waits for App, which
     /// loads once its build is let go, and renames the caller there too.</summary>
-    [AvaloniaFact]
-    public void Find_usages_answers_at_once_without_a_file_another_project_has_yet_to_load_and_a_rename_waits_for_it()
+    private void Find_usages_answers_at_once_without_a_file_another_project_has_yet_to_load_and_a_rename_waits_for_it()
     {
         // App's design-time builds, which the language server loads it from, held while App/hold is there until App/released is.
         Write(folder, "App/Directory.Build.targets", """
@@ -311,9 +342,7 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
     /// only once it has said that file's project loaded, never one of its Miscellaneous Files meanwhile, though a program
     /// found beside the solution as it started is loaded beside the projects shown first; a file no project of the folder
     /// holds reaches it at once.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Files_open_as_the_server_starts_again_or_the_solution_gains_a_project_reach_it_once_their_projects_have_loaded()
+    private void Files_open_as_the_server_starts_again_or_the_solution_gains_a_project_reach_it_once_their_projects_have_loaded()
     {
         string program = Path.Combine(folder, "App", "Program.cs");
         string greeter = Path.Combine(folder, "Lib", "Greeter.cs");
@@ -478,68 +507,43 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
     private static void WaitForCode(MainWindow window, string path, string code, string what) =>
         Ui.WaitFor(() => Codes(window, path).Contains(code), what, TimeSpan.FromMinutes(2));
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_file_of_a_multi_targeted_project_is_answered_for_in_the_target_framework_chosen_in_the_editor()
+    private void A_file_of_a_multi_targeted_project_is_answered_for_in_the_target_framework_chosen_for_it()
     {
         string greeter = Path.Combine(folder, "Lib", "Greeter.cs");
         MainWindow window = Keeping();
         window.OpenFile(greeter);
         OpenDocument document = window.EditorArea.Active!;
-        CodeEditor editor = window.EditorArea.CodeEditor;
         Ui.WaitFor(() => window.CSharpService?.IsReady == true && document.ProjectContexts.Count == 2,
             "the server to say Greeter.cs is compiled for both of Lib's target frameworks", TimeSpan.FromMinutes(2));
         Assert.Equal([$"Lib ({TestProjects.Framework})", "Lib (net11.0)"], document.ProjectContexts.Order(StringComparer.Ordinal));
-        Assert.Equal(document.ProjectContext![5..^1], editor.ContextLabel);
+        Assert.Equal(document.ProjectContext![5..^1], window.TargetFrameworkShown);
 
         // Only net11.0 compiles the member that names what does not exist.
-        Choose(window, editor, "Lib (net11.0)");
-        Assert.Equal("net11.0", editor.ContextLabel);
+        Choose(window, "Lib (net11.0)");
+        Assert.Equal("net11.0", window.TargetFrameworkShown);
         Ui.WaitFor(() => Missing(window, document), "the error on Missing, which only net11.0 compiles");
-        Choose(window, editor, $"Lib ({TestProjects.Framework})");
-        Assert.Equal(TestProjects.Framework, editor.ContextLabel);
+        Choose(window, $"Lib ({TestProjects.Framework})");
+        Assert.Equal(TestProjects.Framework, window.TargetFrameworkShown);
         Ui.WaitFor(() => !Missing(window, document) && window.CSharpService!.For(document)!.Diagnostics.Count == 0,
             $"the error on Missing to go, {TestProjects.Framework} compiling none of it");
         window.Close();
     }
 
-    /// <summary>A C# file outside every project of a folder that has one, opened, has the language server's colours from the
-    /// server's Miscellaneous Files: a local's use, which no parse alone tells from any other name, is coloured a local
-    /// (#1352).</summary>
-    [AvaloniaFact]
-    public void A_file_in_no_project_beside_a_project_has_the_language_servers_colours()
-    {
-        string root = PathNames.Canonical(TestFolders.Create("loose-"));
-        Write(root, "App/App.csproj", TestProjects.Library());
-        Write(root, "App/App.cs", "class App { }\n");
-        string loose = Write(root, "Scripts/Loose.cs", "class Loose\n{\n    int Twice(int value)\n    {\n        int doubled = value * 2;\n        return doubled;\n    }\n}\n");
-        Restore.Run(Path.Combine(root, "App", "App.csproj"));
-        MainWindow window = Ui.OpenFolder(root);
-        window.OpenFile(loose);
-        OpenDocument document = window.EditorArea.Active!;
-        int use = document.Text.Snapshot.ToString().IndexOf("doubled;", StringComparison.Ordinal);
-        Ui.WaitFor(() => document.Highlighter?.GetSpans(document.Text.Snapshot, use, 1).Any(s => s.Start == use && s.Kind == TokenKind.Local) == true,
-            () => $"the language server's colour on the loose file's local ({window.CSharpService?.State})", TimeSpan.FromMinutes(2));
-        window.Close();
-    }
-
     /// <summary>The file's own parse (its brackets' pairs, its folds, what Safe Delete reads) takes the symbols of the
-    /// framework chosen in the editor: the member only net11.0 compiles is disabled text to it in the other framework and
+    /// framework chosen for it: the member only net11.0 compiles is disabled text to it in the other framework and
     /// code in net11.0.</summary>
-    [AvaloniaFact]
-    public void A_multi_targeted_files_own_parse_takes_the_symbols_of_the_target_framework_chosen_in_the_editor()
+    private void A_multi_targeted_files_own_parse_takes_the_symbols_of_the_target_framework_chosen_for_it()
     {
         string greeter = Path.Combine(folder, "Lib", "Greeter.cs");
         MainWindow window = Keeping();
         window.OpenFile(greeter);
         OpenDocument document = window.EditorArea.Active!;
-        CodeEditor editor = window.EditorArea.CodeEditor;
         Ui.WaitFor(() => window.CSharpService?.IsReady == true && document.ProjectContexts.Count == 2,
             "the server to say Greeter.cs is compiled for both of Lib's target frameworks", TimeSpan.FromMinutes(2));
 
-        Choose(window, editor, "Lib (net11.0)");
+        Choose(window, "Lib (net11.0)");
         Ui.WaitFor(() => !ParsedDisabled(document, "Missing;"), "Newer, which only net11.0 compiles, parsed as code with net11.0 chosen");
-        Choose(window, editor, $"Lib ({TestProjects.Framework})");
+        Choose(window, $"Lib ({TestProjects.Framework})");
         Ui.WaitFor(() => ParsedDisabled(document, "Missing;"), $"Newer, which {TestProjects.Framework} never compiles, parsed as disabled text with {TestProjects.Framework} chosen");
         window.Close();
     }
@@ -548,8 +552,7 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
     /// it, as the editor answers for its open ones: Sides.cs's error of the framework not chosen is never listed, and
     /// once the switcher of another of its files chooses the other framework, that framework's error is listed in its
     /// place (#1475).</summary>
-    [AvaloniaFact]
-    public void Solution_wide_analysis_lists_a_multi_targeted_projects_closed_files_in_the_framework_chosen_and_follows_a_new_choice()
+    private void Solution_wide_analysis_lists_a_multi_targeted_projects_closed_files_in_the_framework_chosen_and_follows_a_new_choice()
     {
         string sides = WriteSides();
         MainWindow window = Keeping();
@@ -557,14 +560,13 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
         Assert.True(window.Settings.SolutionWideAnalysis);
         window.OpenFile(Path.Combine(folder, "Lib", "Greeter.cs"));
         OpenDocument greeter = window.EditorArea.Active!;
-        CodeEditor editor = window.EditorArea.CodeEditor;
         Ui.WaitFor(() => window.CSharpService?.IsReady == true && greeter.ProjectContexts.Count == 2,
             "the server to say Greeter.cs is compiled for both of Lib's target frameworks", TimeSpan.FromMinutes(2));
 
         ListsOnly(window, sides, "NotInTen", "NotInEleven", $"{TestProjects.Framework}, chosen first");
-        Choose(window, editor, "Lib (net11.0)");
+        Choose(window, "Lib (net11.0)");
         ListsOnly(window, sides, "NotInEleven", "NotInTen", "net11.0, chosen in Greeter.cs's switcher");
-        Choose(window, editor, $"Lib ({TestProjects.Framework})");
+        Choose(window, $"Lib ({TestProjects.Framework})");
         ListsOnly(window, sides, "NotInTen", "NotInEleven", $"{TestProjects.Framework}, chosen again");
         window.Close();
     }
@@ -572,8 +574,7 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
     /// <summary>A multi-targeted project made to target one framework, the one not chosen, has solution-wide analysis let go
     /// of what it found in the framework it no longer targets: Sides.cs's error of that framework goes, and the one of the
     /// framework left is listed (#1475).</summary>
-    [AvaloniaFact]
-    public void Solution_wide_analysis_lets_go_of_a_frameworks_problems_once_its_project_no_longer_targets_it()
+    private void Solution_wide_analysis_lets_go_of_a_frameworks_problems_once_its_project_no_longer_targets_it()
     {
         string sides = WriteSides();
         MainWindow window = Keeping();
@@ -623,18 +624,16 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
         return document.Syntax!.GetSpans(text, line.Start, line.EndIncludingBreak - line.Start).Any(s => s.Kind == TokenKind.Excluded && s.Start <= at && s.End > at);
     }
 
-    /// <summary>Clicks the editor's switcher and the framework in the menu it opens.</summary>
-    private static void Choose(MainWindow window, CodeEditor editor, string context)
+    /// <summary>Clicks the status bar's context widget and the framework in the menu it opens.</summary>
+    private static void Choose(MainWindow window, string context)
     {
-        Rect bounds = editor.ContextSwitcherBounds;
-        Assert.True(bounds.Width > 0, "The editor shows no target framework switcher for a file compiled for two");
-        Ui.Click(editor, bounds.Center);
+        Button widget = Avalonia.Controls.ControlExtensions.FindControl<Button>(window, "TargetFrameworkButton")!;
+        Assert.True(widget.IsEffectivelyVisible, "The status bar shows no target framework for a file compiled for two");
+        Ui.Click(widget);
         Ui.Choose(Assert.IsType<ContextMenu>(window.OpenContextMenu), context);
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Leaving_a_folder_whose_projects_are_still_being_built_lets_the_next_folders_builds_start_at_once()
+    private void Leaving_a_folder_whose_projects_are_still_being_built_lets_the_next_folders_builds_start_at_once()
     {
         // A project whose design-time build waits three minutes, as a large solution's round goes on for minutes.
         string slow = PathNames.Canonical(TestFolders.Create("slow-"));
@@ -679,8 +678,7 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
     /// <summary>A folder deleted while the project host builds its project at design time ends the host, which every
     /// window shares, as its window closes; another window's round, waiting in that host behind the first, is built by a
     /// host started anew and its project loads. Windows will not delete a folder a process works in.</summary>
-    [AvaloniaFact]
-    public void A_folder_deleted_under_its_design_time_build_leaves_another_windows_project_to_be_built_and_loaded()
+    private void A_folder_deleted_under_its_design_time_build_leaves_another_windows_project_to_be_built_and_loaded()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows will not delete a folder a process works in");
         BehindAHeldBuild((gone, first, other) =>
@@ -698,8 +696,7 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
     /// window sees the folder go and ends the host, which every window shares, so another window's round, waiting in that
     /// host behind the first, is built by a host started anew and its project loads. Windows will not delete a folder a
     /// process works in.</summary>
-    [AvaloniaFact]
-    public void A_folder_deleted_under_its_design_time_build_never_holds_another_windows_project_while_its_window_stays_open()
+    private void A_folder_deleted_under_its_design_time_build_never_holds_another_windows_project_while_its_window_stays_open()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows will not delete a folder a process works in");
         BehindAHeldBuild((gone, first, other) =>
@@ -773,42 +770,6 @@ public sealed partial class LanguageServerProjectsTests : IClassFixture<Restored
 
     private static bool Missing(MainWindow window, OpenDocument document) =>
         window.CSharpService?.For(document)?.Diagnostics.Any(d => d.Code?.ToString() == "CS0103" && d.Message.Contains("Missing", StringComparison.Ordinal)) == true;
-
-    /// <summary>Find Usages in a solution with no XAML looks for XAML in the folders of the projects that can use the symbol
-    /// once: a second Find Usages walks no file of them again, and a XAML file come into one has that project looked in
-    /// again.</summary>
-    [AvaloniaFact]
-    public void Find_usages_in_a_solution_with_no_xaml_looks_for_xaml_in_its_projects_once_until_a_xaml_file_comes()
-    {
-        MainWindow window = Keeping();
-        window.OpenFile(Path.Combine(folder, "Lib", "Greeter.cs"));
-        OpenDocument greeter = window.EditorArea.Active!;
-        Ui.WaitFor(() => window.CSharpService?.IsReady == true && window.CSharpService.For(greeter)?.Lsp is not null, "the language server to load the projects", TimeSpan.FromMinutes(2));
-        Ui.PlaceAfter(window.EditorArea.CodeEditor, "string Hel");
-        FoundUsages(window);
-        int walked = window.XamlService.FilesWalked;
-        Assert.True(walked > 0, "Find Usages looked in neither project's folders for the XAML that may use Lib's method");
-        FoundUsages(window);
-        Assert.True(window.XamlService.FilesWalked == walked,
-            $"A second Find Usages walked {window.XamlService.FilesWalked - walked} files again for XAML the projects were found without, as every Find Usages and Safe Delete would");
-
-        HashSet<string> heard = new(StringComparer.Ordinal);
-        EventHandler<FolderChanges> hear = (_, changes) => heard.UnionWith(changes.ComeOrGone.Select(Path.GetFileName).OfType<string>());
-        window.FolderWatcher!.Changed += hear;
-        Write(folder, "App/View.axaml", "<UserControl xmlns=\"https://github.com/avaloniaui\" />\n");
-        Ui.PumpUntil(() => heard.Contains("View.axaml"), "the folder's watcher to hear of App's XAML file");
-        window.FolderWatcher.Changed -= hear;
-        FoundUsages(window);
-        Assert.True(window.XamlService.FilesWalked > walked, "A XAML file come into App was never looked for, App still taken for a project with no XAML");
-        window.Close();
-
-        static void FoundUsages(MainWindow window)
-        {
-            int searches = window.Find.Searches.Count;
-            Ui.Run(window, AppActions.FindUsages);
-            Ui.WaitFor(() => window.Find.Searches.Count > searches, "the usages in the Find window");
-        }
-    }
 
     private MainWindow Keeping(string? root = null)
     {

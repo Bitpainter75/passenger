@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -26,7 +27,7 @@ public sealed class ConflictsDialog : IdeWindow
     private const double StatusWidth = 170;
 
     /// <summary>The name's column, then yours and theirs.</summary>
-    private static readonly string ColumnWidths = $"*,{StatusWidth},{StatusWidth}";
+    private static readonly string ColumnWidths = string.Create(CultureInfo.InvariantCulture, $"*,{StatusWidth},{StatusWidth}");
 
     /// <summary>Where a cell's words start in its column.</summary>
     private const double CellInset = Gaps.Normal;
@@ -48,7 +49,7 @@ public sealed class ConflictsDialog : IdeWindow
         this.vcs = vcs;
         this.merge = merge;
         Title = "Conflicts";
-        Width = 760;
+        Width = DialogWidths.Wide;
         Height = 420;
         MinWidth = 520;
         MinHeight = 260;
@@ -97,7 +98,7 @@ public sealed class ConflictsDialog : IdeWindow
             vcs.Changed -= changed;
             vcs.BusyChanged -= busy;
         };
-        Opened += (_, _) => Dispatcher.UIThread.Post(FocusChosen, DispatcherPriority.Loaded);
+        Opened += (_, _) => Dispatcher.UIThread.Post(() => ListKeys.Hold(list), DispatcherPriority.Loaded);
         Fill();
     }
 
@@ -178,25 +179,14 @@ public sealed class ConflictsDialog : IdeWindow
         mergeButton.IsEnabled = any && Chosen is [{ CanMerge: true }];
     }
 
-    /// <summary>The keys to the chosen row, as a list in a dialog takes them.</summary>
-    private void FocusChosen()
-    {
-        if (list.SelectedIndex >= 0)
-        {
-            list.ScrollIntoView(list.SelectedIndex);
-            list.UpdateLayout();
-            list.ContainerFromIndex(list.SelectedIndex)?.Focus();
-        }
-    }
-
     /// <summary>A row for whichever file in conflict the list hands its container: its icon, its name in the conflicted
     /// colour, its folder, and what yours and theirs did to it.</summary>
     private static Control Row()
     {
-        RowIcon icon = new() { Width = 14, Height = 14, Margin = new Thickness(0, 0, Gaps.Small, 0), [DockPanel.DockProperty] = Dock.Left };
+        RowIcon icon = new() { Margin = new Thickness(0, 0, Gaps.Small, 0), [DockPanel.DockProperty] = Dock.Left };
         TextBlock name = new() { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, [DockPanel.DockProperty] = Dock.Left };
         name.Bind(TextBlock.ForegroundProperty, name.GetResourceObservable(TokenKeys.Vcs_File_Conflicted));
-        TextBlock folder = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Normal, 0, 0, 0), FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis };
+        TextBlock folder = new() { Classes = { StyleClasses.Caption }, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Normal, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis };
         folder.Classes.Add(StyleClasses.Muted);
         // The file narrows to its column, its folder ending in an ellipsis first, rather than running into what the sides did.
         DockPanel file = new() { Margin = new Thickness(CellInset, 0, 0, 0), Children = { icon, name, folder } };

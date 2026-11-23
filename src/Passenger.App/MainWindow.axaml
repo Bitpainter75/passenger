@@ -55,9 +55,7 @@
                      configuration's, their choices still in the Run and Build menus (ShrinkingRow.GoesWhole). -->
                 <app:ShrinkingRow Name="ToolbarEnd" DockPanel.Dock="Right" Spacing="{x:Static app:Gaps.Hair}" VerticalAlignment="Center"
                             WindowDecorationProperties.ElementRole="User">
-                    <Button Name="BuildButton" Classes="tool" ToolTip.Tip="Build solution">
-                        <PathIcon Data="{StaticResource Icon.Build}" />
-                    </Button>
+                    <Button Name="BuildButton" />
                     <!-- The build configuration every build takes, shown once the folder offers any
                          (MainWindow.BuildConfigurations.cs). -->
                     <Button Name="BuildConfigButton" Classes="widget" MinWidth="52" ToolTip.Tip="Build configuration" IsVisible="False" Click="OnBuildConfigClicked"
@@ -85,37 +83,19 @@
                                        MaxWidth="180" TextTrimming="CharacterEllipsis" />
                         </DockPanel>
                     </Button>
-                    <Button Name="RunButton" Classes="tool" ToolTip.Tip="Run">
-                        <PathIcon Classes="toolbarRun" Data="{StaticResource Icon.Run}" />
-                    </Button>
-                    <Button Name="DebugButton" Classes="tool" ToolTip.Tip="Debug">
-                        <PathIcon Data="{StaticResource Icon.Debug}" />
-                    </Button>
-                    <Button Name="ProfileButton" Classes="tool" ToolTip.Tip="Profile">
-                        <PathIcon Data="{StaticResource Icon.Profile}" />
-                    </Button>
-                    <Button Name="HotReloadButton" Classes="tool" ToolTip.Tip="Apply Hot Reload Changes" IsVisible="False">
-                        <PathIcon Classes="toolbarHotReload" Data="{StaticResource Icon.HotReload}" />
-                    </Button>
-                    <Button Name="StopButton" Classes="tool" ToolTip.Tip="Stop" IsEnabled="False">
-                        <PathIcon Classes="toolbarStop" Data="{StaticResource Icon.Stop}" />
-                    </Button>
+                    <Button Name="RunButton" />
+                    <Button Name="DebugButton" />
+                    <Button Name="ProfileButton" />
+                    <Button Name="HotReloadButton" IsVisible="False" />
+                    <Button Name="StopButton" IsEnabled="False" />
                     <Border Classes="toolbarRule" />
                     <!-- The Agent and SQL Server windows, a click away: each shows its window, as its stripe button does,
                          and goes first as the window narrows (ShrinkingRow.GoesWhole), the stripe button still showing it. -->
-                    <Button Name="AgentToolButton" Classes="tool" ToolTip.Tip="Agent: Claude Code and Codex" app:ShrinkingRow.GoesWhole="True">
-                        <PathIcon Data="{StaticResource Icon.Agent}" />
-                    </Button>
-                    <Button Name="SqlServerToolButton" Classes="tool" ToolTip.Tip="SQL Server" app:ShrinkingRow.GoesWhole="True">
-                        <PathIcon Data="{StaticResource Icon.SqlServer}" />
-                    </Button>
+                    <Button Name="AgentToolButton" app:ShrinkingRow.GoesWhole="True" />
+                    <Button Name="SqlServerToolButton" app:ShrinkingRow.GoesWhole="True" />
                     <Border Name="WindowButtonsRule" Classes="toolbarRule" app:ShrinkingRow.GoesWhole="True" />
-                    <Button Name="SearchButton" Classes="tool" ToolTip.Tip="Search everywhere">
-                        <PathIcon Data="{StaticResource Icon.Search}" />
-                    </Button>
-                    <Button Name="SettingsButton" Classes="tool" ToolTip.Tip="Settings">
-                        <PathIcon Data="{StaticResource Icon.Settings}" />
-                    </Button>
+                    <Button Name="SearchButton" />
+                    <Button Name="SettingsButton" />
                 </app:ShrinkingRow>
 
                 <app:ShrinkingRow Name="ToolbarStart" DockPanel.Dock="Left" HorizontalAlignment="Left" VerticalAlignment="Center" Spacing="{x:Static app:Gaps.Hair}"
@@ -125,14 +105,12 @@
                          behind the button after them. The titles are added after the button as Settings asks for
                          them. -->
                     <app:MainMenuPlace Name="MainMenuPlace">
-                        <Button Name="MenuButton" Classes="tool" ToolTip.Tip="Main menu" AutomationProperties.Name="Main menu" Click="OnMenuClicked">
-                            <PathIcon Data="{StaticResource Icon.Menu}" />
-                        </Button>
+                        <Button Name="MenuButton" Click="OnMenuClicked" />
                     </app:MainMenuPlace>
                     <Button Name="ProjectButton" Classes="widget" MinWidth="80" ToolTip.Tip="Open a solution, project or folder" Click="OnProjectClicked">
                         <DockPanel>
-                            <Border Name="ProjectBadge" Classes="projectBadge" DockPanel.Dock="Left" IsVisible="False" Width="20" Height="20">
-                                <TextBlock Name="ProjectBadgeText" Classes="projectBadgeText" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <Border Name="ProjectBadge" Classes="initials small" DockPanel.Dock="Left" IsVisible="False">
+                                <TextBlock Name="ProjectBadgeText" Classes="badgeText" />
                             </Border>
                             <PathIcon DockPanel.Dock="Right" Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
                             <TextBlock Name="ProjectName" Classes="projectName" Text="No solution" VerticalAlignment="Center"
@@ -173,9 +151,9 @@
         <Border Name="StatusBarFrame" Classes="statusBar" Grid.Row="2">
             <Panel>
             <!-- The line keeps a sentence's room before the widgets are laid (StatusLine.LeastWidth), so the branch's name
-                 gives way to it, then goes whole, its menu still the toolbar's Git widget's; then the indent's and the caret's
-                 words (a choice's count after it) give way, ending in an ellipsis, so no widget stands past the window's
-                 edge; the others keep their width. -->
+                 gives way to it, then goes whole, its menu still the toolbar's Git widget's; then a long context's, the
+                 indent's and the caret's words (a choice's count after it) give way, ending in an ellipsis, then the line
+                 itself, so no widget stands past the window's edge; the others keep their width. -->
             <app:ToolbarRow Classes="statusRow">
                 <app:ShrinkingRow Classes="statusWidgets" DockPanel.Dock="Right" Spacing="{x:Static app:Gaps.Group}" VerticalAlignment="Center">
                     <!-- Git, in a working tree: the branch checked out, a click opening the branches as the toolbar's Git
@@ -215,13 +193,32 @@
                             <TextBlock Name="UpdateText" Classes="status" Foreground="{DynamicResource Passenger.Link}" />
                         </StackPanel>
                     </Button>
-                    <Button Name="AnalysisButton" Classes="statusItem" Click="OnAnalysisClicked">
-                        <StackPanel Orientation="Horizontal" Spacing="{x:Static app:Gaps.Tight}">
-                            <PathIcon Name="AnalysisIcon" Width="14" Height="14" />
-                            <app:WorkingRing Name="AnalysisWorking" Width="14" Height="14" IsVisible="False" VerticalAlignment="Center" />
-                            <TextBlock Name="AnalysisText" Classes="status" />
-                        </StackPanel>
-                    </Button>
+                    <!-- Problems, one widget of two parts: the errors and warnings of the file shown (a tick with none), a
+                         click going to the next and showing Problems; and solution-wide analysis, the solution's glyph (muted
+                         while off, a turning ring while its first round is under way, then green, or red with the solution's
+                         errors), a click turning it on or off; shown while either part is. -->
+                    <StackPanel Name="ProblemsWidget" Orientation="Horizontal">
+                        <Button Name="FileProblemsButton" Classes="statusItem" IsVisible="False" Click="OnFileProblemsClicked">
+                            <StackPanel Orientation="Horizontal" Spacing="{x:Static app:Gaps.Normal}">
+                                <PathIcon Name="FileCleanIcon" Data="{DynamicResource Icon.Check}" Foreground="{DynamicResource Passenger.Test.Passed}" Width="14" Height="14" />
+                                <StackPanel Name="FileErrors" Orientation="Horizontal" Spacing="{x:Static app:Gaps.Tight}">
+                                    <PathIcon Data="{DynamicResource Icon.Error}" Foreground="{DynamicResource Passenger.Error}" Width="14" Height="14" />
+                                    <TextBlock Name="FileErrorsText" Classes="status" />
+                                </StackPanel>
+                                <StackPanel Name="FileWarnings" Orientation="Horizontal" Spacing="{x:Static app:Gaps.Tight}">
+                                    <PathIcon Data="{DynamicResource Icon.Problems}" Foreground="{DynamicResource Passenger.Warning}" Width="14" Height="14" />
+                                    <TextBlock Name="FileWarningsText" Classes="status" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+                        <Button Name="AnalysisButton" Classes="statusItem" Click="OnAnalysisClicked">
+                            <StackPanel Orientation="Horizontal" Spacing="{x:Static app:Gaps.Tight}">
+                                <PathIcon Name="AnalysisIcon" Data="{DynamicResource Icon.Solution}" Width="14" Height="14" />
+                                <app:WorkingRing Name="AnalysisWorking" Width="14" Height="14" IsVisible="False" VerticalAlignment="Center" />
+                                <TextBlock Name="AnalysisText" Classes="status" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
                     <Button Name="ErrorsButton" Classes="statusItem" IsVisible="False" Click="OnErrorsClicked"
                             ToolTip.Tip="IDE Internal Errors: Passenger caught these and kept running">
                         <StackPanel Orientation="Horizontal" Spacing="{x:Static app:Gaps.Tight}">
@@ -255,6 +252,12 @@
                     <Button Name="IndentButton" Classes="statusItem reaching" Focusable="False" IsVisible="False" Click="OnIndentClicked"
                             app:ShrinkingRow.KeepsWidth="False" app:ShrinkingRow.Least="64">
                         <TextBlock Name="IndentText" Classes="status" TextTrimming="CharacterEllipsis" />
+                    </Button>
+                    <!-- The context a file of several is analysed in (a multi-targeted project's framework), beside its
+                         language: a click offers the others. -->
+                    <Button Name="TargetFrameworkButton" Classes="statusItem reaching" Focusable="False" IsVisible="False" Click="OnTargetFrameworkClicked"
+                            app:ShrinkingRow.KeepsWidth="False" app:ShrinkingRow.Least="64">
+                        <TextBlock Name="TargetFrameworkText" Classes="status" TextTrimming="CharacterEllipsis" />
                     </Button>
                     <TextBlock Name="LanguageText" Classes="status" />
                 </app:ShrinkingRow>

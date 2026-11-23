@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -37,12 +38,12 @@ public sealed class SqlServerView : DockPanel
     private readonly TreeRows<SqlNode> rows = [];
     private readonly TreeList tree = new() { Name = "SqlTree", Classes = { StyleClasses.Tree } };
     private readonly EmptyState empty = new();
-    private readonly ComboBox targets = new() { Name = "SqlDatabase", MinWidth = 180, VerticalAlignment = VerticalAlignment.Center };
+    private readonly ToolDropDown targets = new() { Name = "SqlDatabase", VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBox script;
     private readonly TextBlock status = MutedText.Of(string.Empty);
-    private readonly StackPanel tabs = new() { Orientation = Orientation.Horizontal, Spacing = Gaps.Hair, Margin = new Thickness(Gaps.Normal, 0), VerticalAlignment = VerticalAlignment.Center };
+    private readonly ToolTabs.Strip<int> tabs = new() { Margin = new Thickness(Gaps.Normal, 0) };
     private readonly CellGrid grid = new();
-    private readonly SelectableTextBlock messages = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(Gaps.Normal, Gaps.Normal) };
+    private readonly SelectableWords messages = new() { Classes = { StyleClasses.Code }, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(Gaps.Normal, Gaps.Normal) };
     private readonly ScrollViewer messagesPage;
     private readonly List<SqlNode> servers = [];
     private List<SqlRowsTable> results = [];
@@ -59,6 +60,7 @@ public sealed class SqlServerView : DockPanel
         this.keep = keep;
         this.request = request;
         this.say = say;
+        tabs.Chosen += (_, index) => ShowTab(index);
         Children.Add(ToolBars.Side(
             ToolButtons.Of(AppActions.SqlConnect, IconKeys.Add, "Connect to SQL Server…", request),
             ToolButtons.Of(AppActions.SqlDisconnect, IconKeys.Detach, "Disconnect", request),
@@ -100,7 +102,7 @@ public sealed class SqlServerView : DockPanel
         ToolTip.SetTip(targets, "The database the script runs in");
         status.Name = "SqlStatus";
         status.Margin = new Thickness(Gaps.Normal, 0);
-        status.FontSize = 12;
+        status.Classes.Add(StyleClasses.Caption);
         SetDock(status, Dock.Right);
         ToolFlow bar = new() { Margin = new Thickness(Gaps.Small, Gaps.Hair) };
         bar.Children.AddRange(
@@ -112,12 +114,13 @@ public sealed class SqlServerView : DockPanel
             Name = "SqlScript",
             AcceptsReturn = true,
             AcceptsTab = true,
-            PlaceholderText = "Write T-SQL here: Ctrl+Enter runs it, or what of it is selected",
+            Classes = { StyleClasses.Code },
             MinHeight = 84,
             MaxHeight = 220,
-            FontSize = 13,
             [DockProperty] = Dock.Top,
-        }.InCodeFont();
+        };
+        AutomationProperties.SetName(script, "T-SQL script");
+        ActionTips.SetWords(script, AppActions.SqlExecute, keys => keys is null ? "Write T-SQL here" : $"Write T-SQL here: {keys} runs it, or what of it is selected");
         script.AddHandler(KeyDownEvent, (_, e) =>
         {
             if (e.Key is Key.Enter && e.KeyModifiers == KeyModifiers.Control)
@@ -126,7 +129,7 @@ public sealed class SqlServerView : DockPanel
                 request(AppActions.SqlExecute);
             }
         }, RoutingStrategies.Tunnel);
-        messagesPage = new ScrollViewer { Content = messages.InCodeFont(), IsVisible = false };
+        messagesPage = new ScrollViewer { Content = messages, IsVisible = false };
         grid.CellWritten += (_, write) => IdeErrors.Observe(WriteAsync(write));
         grid.RowsDeleted += (_, write) => IdeErrors.Observe(DeleteAsync(write));
         DockPanel right = new()
@@ -153,7 +156,7 @@ public sealed class SqlServerView : DockPanel
         Paint();
     }
 
-    private MenuItem Item(string action, string title) => ListMenus.Item(title, null, () => request(action));
+    private MenuItem Item(string action, string title) => ListMenus.Item(title, () => request(action));
 
     /// <summary>The row chosen in the tree.</summary>
     public SqlNode? Chosen => tree.SelectedItem as SqlNode;
@@ -571,13 +574,10 @@ public sealed class SqlServerView : DockPanel
     {
         results = [.. (run?.Results ?? []).Select(r => new SqlRowsTable(r, design))];
         messages.Text = run is null ? string.Empty : string.Join('\n', run.Messages.Select(m => m.Line is { } line ? $"Line {line}: {m.Text}" : m.Text));
-        tabs.Children.Clear();
+        tabs.Clear();
         for (int i = 0; i <= results.Count; i++)
         {
-            int at = i;
-            ToggleButton tab = ToolTabs.Tab(i == results.Count ? MessagesTab : results.Count == 1 ? "Result" : $"Result {i + 1}", false);
-            tab.Click += (_, _) => ShowTab(at);
-            tabs.Children.Add(tab);
+            tabs.Add(i, i == results.Count ? MessagesTab : results.Count == 1 ? "Result" : $"Result {i + 1}");
         }
         ShowTab(results.Count == 0 || run is { Failed: true, Results.Count: 0 } ? results.Count : 0);
         if (run is not null)
@@ -587,7 +587,7 @@ public sealed class SqlServerView : DockPanel
             string took = run.Took.TotalSeconds.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
             // Work that returns no rows (a backup, a package, a table made) says how it ended, not a count of none.
             status.Text = results.Count == 0 ? $"{(run.Failed ? "Failed" : "Done")}, {took} s"
-                : $"{(run.Failed ? "Failed: " : string.Empty)}{read:N0} {Plural.Noun(read, "row")}{cut}, {took} s";
+                : $"{(run.Failed ? "Failed: " : string.Empty)}{Numbers.Said(read)} {Plural.Noun(read, "row")}{cut}, {took} s";
         }
     }
 
@@ -598,10 +598,7 @@ public sealed class SqlServerView : DockPanel
         messagesPage.IsVisible = said;
         grid.IsVisible = !said;
         grid.Table = said ? null : results[index];
-        for (int i = 0; i < tabs.Children.Count; i++)
-        {
-            ((ToggleButton)tabs.Children[i]).IsChecked = i == index;
-        }
+        tabs.Choice = index;
     }
 
     /// <summary>Reads the opened table's rows again, after a change to them.</summary>
@@ -650,7 +647,7 @@ public sealed class SqlServerView : DockPanel
         }
         List<int> gone = [.. write.Rows.Where(r => !table.IsNewRow(r))];
         if (gone.Count == 0 || !await new ConfirmDialog($"Delete {Plural.Noun(gone.Count, "Row")}?",
-            $"{gone.Count:N0} {Plural.Noun(gone.Count, "row")} of {at.Opened.Shown} will be deleted on the server. This cannot be undone.", "Delete").ShowDialog<bool>(owner))
+            $"{Numbers.Said(gone.Count)} {Plural.Noun(gone.Count, "row")} of {at.Opened.Shown} will be deleted on the server. This cannot be undone.", "Delete").ShowDialog<bool>(owner))
         {
             return;
         }
@@ -754,27 +751,18 @@ public sealed class SqlServerView : DockPanel
     /// <summary>A row for whichever node the list hands its container: its chevron, its kind's icon, its title and detail.</summary>
     private Control Row()
     {
-        RowIcon chevron = RowIcon.Chevron();
-        Border toggle = new() { Width = 18, Height = ListRow.Height, Background = Brushes.Transparent, Child = chevron };
-        RowIcon icon = new() { Width = 14, Height = 14, Margin = new Thickness(0, 0, Gaps.Small, 0), VerticalAlignment = VerticalAlignment.Center };
+        RowExpander toggle = RowExpander.Of<SqlNode>(node => IdeErrors.Observe(ToggleAsync(node)));
+        RowIcon icon = new() { Margin = new Thickness(0, 0, Gaps.Small, 0), VerticalAlignment = VerticalAlignment.Center };
         TextBlock title = new() { VerticalAlignment = VerticalAlignment.Center };
         TextBlock detail = MutedText.Of(string.Empty);
         detail.Margin = new Thickness(Gaps.Normal, 0, Gaps.Small, 0);
-        detail.FontSize = 12;
+        detail.Classes.Add(StyleClasses.Caption);
         StackPanel line = new() { Orientation = Orientation.Horizontal, Height = ListRow.Height, Children = { toggle, icon, title, detail } };
-        toggle.PointerPressed += (_, e) =>
-        {
-            if (line.DataContext is SqlNode node)
-            {
-                IdeErrors.Observe(ToggleAsync(node));
-                e.Handled = true;
-            }
-        };
         return line.Showing<SqlNode>(node =>
         {
             line.Margin = new Thickness(node.Depth * Gaps.Indent, 0, 0, 0);
-            chevron.IsVisible = node.Expands;
-            chevron.Turned = node.IsExpanded;
+            toggle.Expands = node.Expands;
+            toggle.IsOpen = node.IsExpanded;
             icon.DataKey = node.Kind switch
             {
                 SqlNodeKind.Server => IconKeys.SqlServer,

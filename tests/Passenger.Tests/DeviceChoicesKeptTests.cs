@@ -1,4 +1,3 @@
-using Avalonia.Headless.XUnit;
 using Passenger.App;
 using Passenger.App.Run.Devices;
 using Passenger.Workspace;
@@ -6,11 +5,10 @@ using Passenger.Workspace;
 namespace Passenger.Tests;
 
 /// <summary>Where a project was chosen to run is the folder's: it outlasts the window's own rewrites of the folder's state
-/// and a window opening the folder again finds it.</summary>
-public sealed class DeviceChoicesKeptTests
+/// and a window opening the folder again finds it. A step of <see cref="MauiRunTargetTests"/>' flow.</summary>
+internal static class DeviceChoicesKeptTests
 {
-    [AvaloniaFact]
-    public void A_device_chosen_for_a_project_outlasts_the_folders_state_written_again_and_is_found_by_the_next_window()
+    internal static void A_device_chosen_for_a_project_outlasts_the_folders_state_written_again_and_is_found_by_the_next_window()
     {
         string folder = TestFolders.Create("device-kept-");
         string settings = TestFolders.Create("device-settings-");
@@ -46,10 +44,11 @@ public sealed class DeviceChoicesKeptTests
         }
     }
 
-    /// <summary>A window that keeps its state in a folder of its own, on the folder given.</summary>
+    /// <summary>A window that keeps its state in a folder of its own, on the folder given, without the C# language server,
+    /// which a device's choice asks nothing of.</summary>
     private static MainWindow Keeping(string settings, string folder)
     {
-        MainWindow window = new() { Width = 1000, Height = 800, StateFolder = settings };
+        MainWindow window = new() { Width = 1000, Height = 800, StateFolder = settings, StartsLanguageServer = false };
         window.Show();
         window.KeepLayout();
         window.OpenFolder(folder);

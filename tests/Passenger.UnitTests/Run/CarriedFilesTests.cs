@@ -13,7 +13,12 @@ public sealed class CarriedFilesTests : IDisposable
     public void Dispose() => Directory.Delete(root, recursive: true);
 
     [Fact]
-    public void A_bundle_carries_its_debug_relays_in_its_Resources()
+    public void The_debug_relays_are_found_where_the_app_carries_them() => Cases.AllApart<CarriedFilesTests>(
+        ("a bundle carries its debug relays in its Resources", test => test.A_bundle_carries_its_debug_relays_in_its_Resources()),
+        ("an app carrying its relays beside it takes them there", test => test.An_app_carrying_its_relays_beside_it_takes_them_there()),
+        ("an app carrying no relays names where they would be beside it", test => test.An_app_carrying_no_relays_names_where_they_would_be_beside_it()));
+
+    private void A_bundle_carries_its_debug_relays_in_its_Resources()
     {
         string code = Path.Join(root, "Passenger.app", "Contents", "MacOS");
         string relays = Path.Join(root, "Passenger.app", "Contents", "Resources", "debugger", "relay");
@@ -23,8 +28,7 @@ public sealed class CarriedFilesTests : IDisposable
         Assert.Equal(relays, CarriedFiles.FolderIn(code, "debugger", "relay"));
     }
 
-    [Fact]
-    public void An_app_carrying_its_relays_beside_it_takes_them_there()
+    private void An_app_carrying_its_relays_beside_it_takes_them_there()
     {
         string app = Path.Join(root, "app");
         string beside = Path.Join(app, "debugger", "relay");
@@ -34,8 +38,7 @@ public sealed class CarriedFilesTests : IDisposable
         Assert.Equal(beside, CarriedFiles.FolderIn(app, "debugger", "relay"));
     }
 
-    [Fact]
-    public void An_app_carrying_no_relays_names_where_they_would_be_beside_it()
+    private void An_app_carrying_no_relays_names_where_they_would_be_beside_it()
     {
         string app = Path.Join(root, "app");
         Directory.CreateDirectory(app);

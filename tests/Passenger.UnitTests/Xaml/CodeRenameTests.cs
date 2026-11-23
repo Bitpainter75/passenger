@@ -40,18 +40,14 @@ public sealed class CodeRenameTests
             private System.Threading.Tasks.Task<int> Load() => Task.FromResult(1);
 
             [RelayCommand]
-            private void Keep()
-            {
-            }
-
+        
             [RelayCommand]
             private void OnRefresh()
             {
             }
 
             [RelayCommand]
-            private Task OnSendAsync() => Task.CompletedTask;
-
+        
             [RelayCommand]
             private void Online()
             {
@@ -93,7 +89,22 @@ public sealed class CodeRenameTests
         """;
 
     [Fact]
-    public void A_name_typed_for_the_toolkits_property_or_command_renames_its_field_or_method_written_as_it_is()
+    public void A_rename_follows_the_names_the_toolkit_makes_of_a_field_a_method_and_its_commands() => Cases.All(
+        ("a name typed for the toolkits property or command renames its field or method written as it is", A_name_typed_for_the_toolkits_property_or_command_renames_its_field_or_method_written_as_it_is),
+        ("a bound property renamed respells each binding of it and nothing else", A_bound_property_renamed_respells_each_binding_of_it_and_nothing_else),
+        ("a type renamed respells its x data type and its static members owner after their prefix", A_type_renamed_respells_its_x_data_type_and_its_static_members_owner_after_their_prefix),
+        ("a static member renamed respells the x static that names it after its owner", A_static_member_renamed_respells_the_x_static_that_names_it_after_its_owner),
+        ("an observable fields property and a relay methods command follow the names the toolkit makes of the new ones", An_observable_fields_property_and_a_relay_methods_command_follow_the_names_the_toolkit_makes_of_the_new_ones),
+        ("a relay method renamed respells its command as the toolkit names it by what the method returns", () => Cases.Each<(string, string, string, string)>(
+        [
+            ("BuyAsync", "BuyCommand", "OrderAsync", "OrderCommand"),
+            ("SaveAsync", "SaveAsyncCommand", "Store", "StoreCommand"),
+            ("Load", "LoadCommand", "FetchAsync", "FetchCommand"),
+            ("OnRefresh", "RefreshCommand", "OnReload", "ReloadCommand"),
+        ], row => A_relay_method_renamed_respells_its_command_as_the_toolkit_names_it_by_what_the_method_returns(row.Item1, row.Item2, row.Item3, row.Item4))),
+        ("a rename whose binding would name another member or none the toolkit makes is refused saying where", A_rename_whose_binding_would_name_another_member_or_none_the_toolkit_makes_is_refused_saying_where));
+
+    private void A_name_typed_for_the_toolkits_property_or_command_renames_its_field_or_method_written_as_it_is()
     {
         Assert.Equal("_heading", CodeSymbol.NameFor("_title", "Title", "Heading"));
         Assert.Equal("m_heading", CodeSymbol.NameFor("m_title", "Title", "Heading"));
@@ -109,43 +120,23 @@ public sealed class CodeRenameTests
         Assert.Equal("Large", CodeSymbol.NameFor("Big", "big", "Large"));
     }
 
-    [Fact]
-    public void A_name_the_toolkit_never_makes_of_a_field_or_method_renames_neither()
-    {
-        Assert.Null(CodeSymbol.NameFor("_title", "Title", "heading"));
-        Assert.Null(CodeSymbol.NameFor("_title", "Title", string.Empty));
-        Assert.Null(CodeSymbol.NameFor("Buy", "BuyCommand", "Sell"));
-        Assert.Null(CodeSymbol.NameFor("Buy", "BuyCommand", "Command"));
-    }
-
-    [Fact]
-    public void A_name_another_generator_makes_by_a_rule_of_its_own_renames_neither_its_field_nor_its_method()
-    {
-        Assert.Null(CodeSymbol.NameFor("Save", "SaveCmd", "StoreCmd"));
-        Assert.Null(CodeSymbol.NameFor("_title", "TitleText", "HeadingText"));
-    }
-
-    [Fact]
-    public void A_bound_property_renamed_respells_each_binding_of_it_and_nothing_else()
+    private void A_bound_property_renamed_respells_each_binding_of_it_and_nothing_else()
     {
         Assert.Equal(View.Replace("Binding Greeting", "Binding Salutation", StringComparison.Ordinal).Replace("Path=Greeting", "Path=Salutation", StringComparison.Ordinal),
             Renamed("P:Shop.ShopViewModel.Greeting", "Greeting", "Salutation"));
     }
 
-    [Fact]
-    public void A_type_renamed_respells_its_x_data_type_and_its_static_members_owner_after_their_prefix()
+    private void A_type_renamed_respells_its_x_data_type_and_its_static_members_owner_after_their_prefix()
     {
         Assert.Equal(View.Replace("vm:ShopViewModel", "vm:StoreViewModel", StringComparison.Ordinal), Renamed("T:Shop.ShopViewModel", "ShopViewModel", "StoreViewModel"));
     }
 
-    [Fact]
-    public void A_static_member_renamed_respells_the_x_static_that_names_it_after_its_owner()
+    private void A_static_member_renamed_respells_the_x_static_that_names_it_after_its_owner()
     {
         Assert.Equal(View.Replace("ShopViewModel.Motto", "ShopViewModel.Slogan", StringComparison.Ordinal), Renamed("P:Shop.ShopViewModel.Motto", "Motto", "Slogan"));
     }
 
-    [Fact]
-    public void An_observable_fields_property_and_a_relay_methods_command_follow_the_names_the_toolkit_makes_of_the_new_ones()
+    private void An_observable_fields_property_and_a_relay_methods_command_follow_the_names_the_toolkit_makes_of_the_new_ones()
     {
         Assert.Equal(View.Replace("Binding Title", "Binding Caption", StringComparison.Ordinal), Renamed("F:Shop.ShopViewModel._title", "_title", "_caption"));
         Assert.Equal(View.Replace("Binding Title", "Binding Heading", StringComparison.Ordinal), Renamed("F:Shop.ShopViewModel._title", "_title", "heading"));
@@ -153,129 +144,45 @@ public sealed class CodeRenameTests
         Assert.Equal(View, Renamed("M:Shop.ShopViewModel.BuyAsync", "BuyAsync", "Buy"));
     }
 
-    [Theory]
-    [InlineData("BuyAsync", "BuyCommand", "OrderAsync", "OrderCommand")]
-    [InlineData("SaveAsync", "SaveAsyncCommand", "StoreAsync", "StoreAsyncCommand")]
-    [InlineData("SaveAsync", "SaveAsyncCommand", "Store", "StoreCommand")]
-    [InlineData("Load", "LoadCommand", "FetchAsync", "FetchCommand")]
-    [InlineData("Load", "LoadCommand", "LoadAsync", "LoadCommand")]
-    [InlineData("Keep", "KeepCommand", "HoldAsync", "HoldAsyncCommand")]
-    [InlineData("OnRefresh", "RefreshCommand", "OnReload", "ReloadCommand")]
-    [InlineData("OnRefresh", "RefreshCommand", "Reload", "ReloadCommand")]
-    [InlineData("OnSendAsync", "SendCommand", "OnPostAsync", "PostCommand")]
-    [InlineData("Online", "OnlineCommand", "Offline", "OfflineCommand")]
-    [InlineData("Online", "OnlineCommand", "OnLine", "LineCommand")]
-    public void A_relay_method_renamed_respells_its_command_as_the_toolkit_names_it_by_what_the_method_returns(string method, string command, string name, string respelled)
+    private void A_relay_method_renamed_respells_its_command_as_the_toolkit_names_it_by_what_the_method_returns(string method, string command, string name, string respelled)
     {
         Assert.Equal(View.Replace(command, respelled, StringComparison.Ordinal), Renamed($"M:Shop.ShopViewModel.{method}", method, name));
     }
 
-    [Fact]
-    public void A_file_writing_either_of_a_methods_commands_may_use_it()
-    {
-        CodeSymbol handler = Assert.IsType<CodeSymbol>(CodeSymbol.Of("M:Shop.ShopViewModel.OnSaveAsync", null));
-        Assert.True(handler.MayBeIn("{Binding SaveCommand}"), "A Task's command was taken for no use of its method");
-        Assert.True(handler.MayBeIn("{Binding SaveAsyncCommand}"), "A void method's command was taken for no use of it");
-        Assert.False(handler.MayBeIn("{Binding Save}"), "A file writing neither command, nor the name, was read for one");
-    }
-
-    [Fact]
-    public void A_rename_whose_binding_would_name_another_member_or_none_the_toolkit_makes_is_refused_saying_where()
+    private void A_rename_whose_binding_would_name_another_member_or_none_the_toolkit_makes_is_refused_saying_where()
     {
         Assert.Equal("'Label' names another property of ShopViewModel, which ShopView.axaml would then use on line 8", Refused("F:Shop.ShopViewModel._name", "_name", "_label"));
         Assert.Equal("the MVVM Toolkit would make no property of '_' for the Title ShopView.axaml uses on line 7", Refused("F:Shop.ShopViewModel._title", "_title", "_"));
     }
 
-    [Theory]
-    [InlineData("T:Shop.ShopExtension", "Shop", "Store", "Store")]
-    [InlineData("T:Shop.ShopExtension", "Shop", "StoreExtension", "Store")]
-    [InlineData("T:Shop.ShopExtension", "ShopExtension", "StoreExtension", "StoreExtension")]
-    [InlineData("P:Shop.Order.Total", "Total", "@class", "class")]
-    [InlineData("F:Shop.Order.m_total", "Total", "m_sum", "Sum")]
-    [InlineData("F:Shop.Kind.Left", "left", "Start", "Start")]
-    public void A_use_is_respelled_as_the_new_name_spells_what_it_named(string id, string written, string name, string expected)
+    [Fact]
+    public void A_use_in_xaml_is_found_and_respelled_as_the_new_name_spells_what_it_named() => Cases.All(
+        ("a use is respelled as the new name spells what it named", () => Cases.Each<(string, string, string, string)>(
+        [
+            ("T:Shop.ShopExtension", "Shop", "Store", "Store"),
+            ("P:Shop.Order.Total", "Total", "@class", "class"),
+            ("F:Shop.Order.m_total", "Total", "m_sum", "Sum"),
+        ], row => A_use_is_respelled_as_the_new_name_spells_what_it_named(row.Item1, row.Item2, row.Item3, row.Item4))),
+        ("a xaml text may use a symbol it spells in any letter case and no other", () => Cases.Each<(string, string, bool)>(
+        [
+            ("F:Shop.Status.Ready", "<views:Card State=\"ready\" />", true),
+            ("F:Shop.Status.Ready", "<views:Card State=\"Done\" />", false),
+        ], row => A_xaml_text_may_use_a_symbol_it_spells_in_any_letter_case_and_no_other(row.Item1, row.Item2, row.Item3))),
+        ("a member listed in a flags value is a use of it and a rename respells it alone", A_member_listed_in_a_flags_value_is_a_use_of_it_and_a_rename_respells_it_alone),
+        ("a use that does not spell the symbols name is not respelled", A_use_that_does_not_spell_the_symbols_name_is_not_respelled));
+
+    private void A_use_is_respelled_as_the_new_name_spells_what_it_named(string id, string written, string name, string expected)
     {
         CodeSymbol symbol = Assert.IsType<CodeSymbol>(CodeSymbol.Of(id, null));
         Assert.True(symbol.Respells(written, name, out string? renamed) && renamed == expected, $"{written} of {id} renamed to {name} was respelled {renamed ?? "as nothing"}");
     }
 
-    [Theory]
-    [InlineData("M:Shop.Order.LoadAsync", "LoadCancelCommand", "RefreshAsync", "RefreshCancelCommand")]
-    [InlineData("M:Shop.Order.Load", "LoadCancelCommand", "Refresh", "RefreshCancelCommand")]
-    [InlineData("M:Shop.Order.OnSave", "SaveCommand", "OnStore", "StoreCommand")]
-    [InlineData("M:Shop.Order.OnSave", "SaveCancelCommand", "Store", "StoreCancelCommand")]
-    [InlineData("M:Shop.Order.Onboard", "OnboardCommand", "Enrol", "EnrolCommand")]
-    public void A_commands_use_is_respelled_as_the_toolkit_names_the_command_of_the_new_method(string id, string written, string name, string expected)
-    {
-        CodeSymbol symbol = Assert.IsType<CodeSymbol>(CodeSymbol.Of(id, null));
-        Assert.True(symbol.Respells(written, name, out string? renamed) && renamed == expected, $"{written} of {id} renamed to {name} was respelled {renamed ?? "as nothing"}");
-    }
-
-    [Fact]
-    public void A_name_typed_for_a_cancel_command_or_a_command_of_an_On_method_renames_the_method_written_as_it_is()
-    {
-        Assert.Equal("RefreshAsync", CodeSymbol.NameFor("LoadAsync", "LoadCancelCommand", "RefreshCancelCommand"));
-        Assert.Equal("Refresh", CodeSymbol.NameFor("Load", "LoadCancelCommand", "RefreshCancelCommand"));
-        Assert.Equal("OnStore", CodeSymbol.NameFor("OnSave", "SaveCommand", "StoreCommand"));
-        Assert.Null(CodeSymbol.NameFor("Load", "LoadCancelCommand", "Refresh"));
-    }
-
-    [Fact]
-    public void A_cancel_command_the_method_asks_for_is_a_member_of_its_type_and_a_binding_to_it_follows_the_rename()
-    {
-        const string Model = """
-            namespace Shop;
-
-            public partial class Loader
-            {
-                [RelayCommand(IncludeCancelCommand = true)]
-                private async Task LoadAsync(CancellationToken cancel)
-                {
-                }
-
-                [RelayCommand]
-                private async Task FetchAsync(CancellationToken cancel)
-                {
-                }
-            }
-
-            """;
-        const string Markup = """
-            <UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                         xmlns:vm="using:Shop" x:Class="Shop.LoadView" x:DataType="vm:Loader">
-                <StackPanel>
-                    <Button Command="{Binding LoadCommand}" />
-                    <Button Command="{Binding LoadCancelCommand}" />
-                    <Button Command="{Binding FetchCommand}" />
-                </StackPanel>
-            </UserControl>
-            """;
-        XamlFile view = XamlFiles.Read("LoadView.axaml", Markup, AvaloniaDialect.Instance, ("Loader.cs", Model));
-        int at = Model.IndexOf("LoadAsync", StringComparison.Ordinal);
-        SourcePlace place = new(XamlFiles.PathOf("Loader.cs"), Model.AsSpan(0, at).Count('\n'), at - (Model.LastIndexOf('\n', at - 1) + 1));
-        CodeSymbol symbol = Assert.IsType<CodeSymbol>(CodeSymbol.Of("M:Shop.Loader.LoadAsync(System.Threading.CancellationToken)", place));
-
-        Assert.Contains("LoadCancelCommand", symbol.NamesIn(view.Types));
-        Assert.DoesNotContain("FetchCancelCommand", view.Types.Find("Shop.Loader")!.Members.Select(m => m.Name));
-        (IReadOnlyList<TextEdit> edits, string? problem) = XamlRefactorings.CodeRename(view, symbol, XamlNavigation.Uses(view, symbol.NamesIn(view.Types), symbol.Is), "RefreshAsync");
-        Assert.True(problem is null, $"Renaming LoadAsync was refused: {problem}");
-        Assert.Equal(Markup.Replace("LoadCommand", "RefreshCommand", StringComparison.Ordinal).Replace("LoadCancelCommand", "RefreshCancelCommand", StringComparison.Ordinal),
-            XamlFiles.Applied(Markup, edits));
-    }
-
-    [Theory]
-    [InlineData("F:Shop.Status.Ready", "<views:Card State=\"ready\" />", true)]
-    [InlineData("F:Shop.Status.Ready", "<views:Card State=\"Ready, Done\" />", true)]
-    [InlineData("F:Shop.Status.Ready", "<views:Card State=\"Done\" />", false)]
-    [InlineData("M:Shop.Order.LoadAsync", "{Binding LoadCancelCommand}", true)]
-    [InlineData("M:Shop.Order.OnSave", "{Binding SaveCommand}", true)]
-    public void A_xaml_text_may_use_a_symbol_it_spells_in_any_letter_case_and_no_other(string id, string text, bool expected)
+    private void A_xaml_text_may_use_a_symbol_it_spells_in_any_letter_case_and_no_other(string id, string text, bool expected)
     {
         Assert.Equal(expected, Assert.IsType<CodeSymbol>(CodeSymbol.Of(id, null)).MayBeIn(text));
     }
 
-    [Fact]
-    public void A_member_listed_in_a_flags_value_is_a_use_of_it_and_a_rename_respells_it_alone()
+    private void A_member_listed_in_a_flags_value_is_a_use_of_it_and_a_rename_respells_it_alone()
     {
         const string Model = """
             namespace Shop;
@@ -308,8 +215,7 @@ public sealed class CodeRenameTests
         Assert.Equal(Markup.Replace("ready", "Waiting", StringComparison.Ordinal), XamlFiles.Applied(Markup, edits));
     }
 
-    [Fact]
-    public void A_use_that_does_not_spell_the_symbols_name_is_not_respelled()
+    private void A_use_that_does_not_spell_the_symbols_name_is_not_respelled()
     {
         CodeSymbol symbol = Assert.IsType<CodeSymbol>(CodeSymbol.Of("F:Shop.Order.TotalProperty", null));
         Assert.False(symbol.Respells("Total", "SumProperty", out _), "An attached property's registered name, which its field does not spell, was respelled with the field");

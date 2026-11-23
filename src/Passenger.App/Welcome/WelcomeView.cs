@@ -22,7 +22,7 @@ public sealed class WelcomeView : UserControl
 {
     private readonly TextBox search;
     private readonly ListBox list;
-    private readonly TextBlock empty;
+    private readonly EmptyState empty;
     private readonly TextBlock notice;
     private IReadOnlyList<RecentRow> all = [];
 
@@ -66,7 +66,9 @@ public sealed class WelcomeView : UserControl
         };
 
         TextBlock recent = new() { Classes = { StyleClasses.WelcomeSection }, Text = "Recent solutions", VerticalAlignment = VerticalAlignment.Center };
-        search = new TextBox { Classes = { StyleClasses.Search, StyleClasses.WelcomeSearch }, PlaceholderText = "Search recent solutions", [Grid.ColumnProperty] = 1 };
+        search = SearchBox.Of("Search recent solutions");
+        search.Classes.Add(StyleClasses.WelcomeSearch);
+        Grid.SetColumn(search, 1);
         search.TextChanged += (_, _) => Filter();
         Grid bar = new() { Classes = { StyleClasses.WelcomeRecentBar }, ColumnDefinitions = new ColumnDefinitions("Auto,*"), Children = { recent, search } };
 
@@ -91,13 +93,13 @@ public sealed class WelcomeView : UserControl
         ListKeys.Search(search, list, OpenChosen);
         ListMenus.Attach(list, () => list.SelectedItem is not RecentRow chosen ? [] :
         [
-            ListMenus.Item("Open", "Enter", () => Chosen?.Invoke(this, chosen)),
-            ListMenus.Item(FileManager.Showing, null, () => RevealRequested?.Invoke(this, chosen), !chosen.Missing),
-            ListMenus.Item("Copy Path", null, () => IdeErrors.Observe(ListMenus.CopyAsync(this, chosen.Path))),
+            ListMenus.Open("Open", () => Chosen?.Invoke(this, chosen)),
+            ListMenus.Item(FileManager.Showing, () => RevealRequested?.Invoke(this, chosen), chosen.Missing ? Refusals.RecentGone : null),
+            ListMenus.Item("Copy Path", () => IdeErrors.Observe(ListMenus.CopyAsync(this, chosen.Path))),
             new Separator(),
-            ListMenus.Item("Remove from Recent Solutions", OperatingSystem.IsMacOS() ? "Back" : "Delete", () => RemoveRequested?.Invoke(this, chosen)),
+            ListMenus.Remove("Remove from Recent Solutions", () => RemoveRequested?.Invoke(this, chosen)),
         ]);
-        empty = new TextBlock { Classes = { StyleClasses.EmptyText, StyleClasses.WelcomeEmpty } };
+        empty = new EmptyState();
 
         Page page = new() { Classes = { StyleClasses.WelcomePage } };
         foreach (Control top in (Control[])[hero, actions, bar, notice])
@@ -249,7 +251,7 @@ public sealed class WelcomeView : UserControl
         if (focused && list.SelectedIndex >= 0)
         {
             // The rows are made anew, so the focus goes back to the one chosen.
-            Dispatcher.UIThread.Post(() => list.ContainerFromIndex(list.SelectedIndex)?.Focus(), DispatcherPriority.Loaded);
+            Dispatcher.UIThread.Post(() => ListKeys.Hold(list), DispatcherPriority.Loaded);
         }
     }
 
@@ -270,19 +272,18 @@ public sealed class WelcomeView : UserControl
     /// longer on disk, its name and badge muted.</summary>
     private static Control Row()
     {
-        TextBlock letters = new() { Classes = { StyleClasses.WelcomeBadgeText }, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        Border badge = new() { Classes = { StyleClasses.WelcomeBadge }, Child = letters, VerticalAlignment = VerticalAlignment.Center };
+        Border badge = Tags.Initials(out TextBlock letters);
         TextBlock name = new() { Classes = { StyleClasses.WelcomeRowName }, TextTrimming = TextTrimming.CharacterEllipsis };
         TextBlock where = new() { Classes = { StyleClasses.Muted, StyleClasses.WelcomeRowPath }, TextTrimming = TextTrimming.PathSegmentEllipsis };
         DockPanel line = new() { Classes = { StyleClasses.WelcomeRow } };
         DockPanel.SetDock(badge, Dock.Left);
         line.Children.Add(badge);
-        TextBlock gone = new() { Text = "Missing", FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = ListRow.Detail };
+        TextBlock gone = ListRow.DetailText();
+        gone.Text = "Missing";
         gone.Bind(TextBlock.ForegroundProperty, gone.GetResourceObservable(TokenKeys.Warning));
-        DockPanel.SetDock(gone, Dock.Right);
         line.Children.Add(gone);
-        TextBlock kindText = new() { Classes = { StyleClasses.WelcomeKindText } };
-        Border kind = new() { Classes = { StyleClasses.WelcomeKind }, Child = kindText, VerticalAlignment = VerticalAlignment.Center };
+        Border kind = Tags.Of(null, TokenKeys.Text, TokenKeys.Hover);
+        kind.Margin = new Thickness(Gaps.Wide, 0, Gaps.Tight, 0);
         DockPanel.SetDock(kind, Dock.Right);
         line.Children.Add(kind);
         line.Children.Add(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = Gaps.Hair, Children = { name, where } });
@@ -294,7 +295,7 @@ public sealed class WelcomeView : UserControl
             name.Classes.Set(StyleClasses.Muted, row.Missing);
             where.Text = row.Shown;
             gone.IsVisible = row.Missing;
-            kindText.Text = Kind(row.Path);
+            Tags.WordsOf(kind).Text = Kind(row.Path);
         });
     }
 

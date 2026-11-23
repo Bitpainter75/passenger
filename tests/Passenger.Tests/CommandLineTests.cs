@@ -13,6 +13,7 @@ namespace Passenger.Tests;
 /// file and a subfolder. A malformed value, or a flag the mode asked for does not take, ends it at once with exit code 2
 /// and a line on standard error saying what is wrong, never a silent default or a stack trace. A solution or project it
 /// names, as Windows does for one double-clicked, opens in the window as the workspace.</summary>
+[AboutMacOS]
 public sealed class CommandLineTests : IDisposable
 {
     private static readonly string Passenger = Product.Program;
@@ -32,47 +33,67 @@ public sealed class CommandLineTests : IDisposable
         TestFolders.Delete(settings);
     }
 
+    /// <summary>The gate's malformed flags and variables as one table each: each row a value of the wrong form or a
+    /// flag its mode does not take, ending Passenger with exit code 2 and the reason before anything starts, every row
+    /// run and each that fails named.</summary>
     [Gate]
-    [Theory]
-    [InlineData("--screenshot out.png --scale NaN", "--scale takes a number from 0.5 to 8, not 'NaN'")]
-    [InlineData("--screenshot out.png --size 1600xInfinity", "--size takes WIDTHxHEIGHT, each a number of 0 or more, not '1600xInfinity'")]
-    [InlineData("--screenshot out.png --wait 1e300", "--wait takes milliseconds from 1 to 600000, not '1e300'")]
-    [InlineData("--screenshot out.png --size 400x300", "--size is at least the window's smallest, 640x500, not '400x300'")]
-    [InlineData("--screenshot out.png --size 3000x3000 --scale 8", "--size 3000x3000 at --scale 8 is 24000x24000 pixels, more than 16384 a side")]
-    [InlineData("--screenshot out.png --crop 0,0,2000,100", "--crop 0,0,2000,100 reaches past the 1600x1000 window")]
-    [InlineData("--screenshot out.png --click 1600,10", "--click 1600,10 is outside the 1600x1000 window")]
-    [InlineData("--screenshot out.png --key 1000", "--key takes a keystroke such as cmd+shift+L, not '1000': unknown key '1000'")]
-    [InlineData("--screenshot out.png --click-name Run.Button", "--click-name takes a control's x:Name, not 'Run.Button'")]
-    [InlineData("--screenshot out.png --file Typo.cs", "--file 'Typo.cs' does not exist")]
-    [InlineData("--screenshot out.png --file sub", "--file 'sub' is a folder; a folder to open is the PATH")]
-    [InlineData("--screenshot missing/out.png", "--screenshot 'missing/out.png' would be written to a folder that does not exist")]
-    [InlineData("notes.txt --caret +2:1 --screenshot out.png", "--caret takes LINE or LINE:COLUMN from 1, not '+2:1'")]
-    [InlineData("--screenshot out.png --caret 3:1", "--caret needs a file to put the caret in, the PATH or a --file")]
-    [InlineData(". notes.txt --screenshot out.png", "'notes.txt' would be a second folder or file after '.'; Passenger opens one, and more files with --file")]
-    [InlineData("--screenshot out.png --theme dark --theme light", "--theme is given twice")]
-    [InlineData("--screenshot out.png --file-icons default", "unknown flag '--file-icons'")]
-    [InlineData("--no-mcp --screenshot out.png", "--no-mcp stops a window listening for agents, and --screenshot's lets in only its own --agent")]
-    [InlineData("--screenshot out.png --agent no-agent-by-this-name", "--agent's program 'no-agent-by-this-name' is neither a file nor on the PATH")]
-    [InlineData(". --agent ./notes.txt", "--agent is for a --screenshot, and none is asked for")]
-    [InlineData("--mcp --no-mcp", "--no-mcp stops a window listening for agents, and --mcp's never does")]
-    [InlineData("--mcp --size 1600x1000", "--size is for a --screenshot, and none is asked for")]
-    [InlineData(". --window-buttons", "--window-buttons is for a --screenshot, and none is asked for")]
-    [InlineData(". --first-start", "--first-start is for a --screenshot, and none is asked for")]
-    [InlineData("--screenshot out.png --first-start --first-start", "--first-start is given twice")]
-    [InlineData("--mcp --mcp-attach", "--mcp starts a Passenger of its own and --mcp-attach joins a running one; give one of them")]
-    [InlineData("--mcp-attach notes.txt", "--mcp-attach finds the window by its folder, and 'notes.txt' is a file")]
-    [InlineData("--mcp-attach missing", "'missing' is neither a folder nor a file")]
-    [InlineData("--mcp-attach . --file notes.txt", "--mcp-attach joins a running Passenger's window and takes only its process id and a folder, not --file")]
-    [InlineData("--mcp-attach --theme light", "--mcp-attach joins a running Passenger's window and takes only its process id and a folder, not --theme")]
-    [InlineData("--mcp-attach 99999999999 .", "--mcp-attach takes the process id of a running Passenger, not '99999999999'")]
-    [InlineData("--headless --mcp", "--headless is a person's window with nobody at it, a test run's")]
-    [InlineData(". --new-window", "--new-window opens a window with nothing open, and takes nothing else, not .")]
-    [InlineData("--new-window --theme dark", "--new-window opens a window with nothing open, and takes nothing else, not --theme")]
-    [InlineData("--screenshot out.png --look sakura", "--look takes passenger, cubicle, harbour")]
-    [InlineData("--screenshot out.png --look ::Sakura", "--look takes SOURCE::NAME, a source and a theme's name, not '::Sakura'")]
-    [InlineData("--screenshot out.png --look Zaneris/passenger-themes::", "--look takes SOURCE::NAME, a source and a theme's name, not 'Zaneris/passenger-themes::'")]
-    [InlineData("--screenshot out.png --scheme relative/../folder::Dusk", "--scheme 'relative/../folder::Dusk' names no source Passenger reads")]
-    public async Task A_malformed_value_or_a_flag_its_mode_does_not_take_ends_Passenger_with_exit_code_2_and_the_reason(string arguments, string reason)
+    [AvaloniaFact]
+    public async Task The_gates_malformed_flags_and_variables_hold_as_one_table()
+    {
+        await Flow.StepAsync("a malformed value or a flag its mode does not take ends Passenger with exit code 2 and the reason", () => Cases.EachAsync<(string, string)>([("--screenshot out.png --scale NaN", "--scale takes a number from 0.5 to 8, not 'NaN'"), ("--screenshot out.png --size 400x300", "--size is at least the window's smallest, 640x500, not '400x300'"), ("--screenshot out.png --size 3000x3000 --scale 8", "--size 3000x3000 at --scale 8 is 24000x24000 pixels, more than 16384 a side"), ("--screenshot out.png --crop 0,0,2000,100", "--crop 0,0,2000,100 reaches past the 1600x1000 window"), ("--screenshot out.png --key 1000", "--key takes a keystroke such as cmd+shift+L, not '1000': unknown key '1000'"), ("--screenshot out.png --file Typo.cs", "--file 'Typo.cs' does not exist"), ("--screenshot missing/out.png", "--screenshot 'missing/out.png' would be written to a folder that does not exist"), ("notes.txt --caret +2:1 --screenshot out.png", "--caret takes LINE or LINE:COLUMN from 1, not '+2:1'"), (". notes.txt --screenshot out.png", "'notes.txt' would be a second folder or file after '.'; Passenger opens one, and more files with --file"), ("--screenshot out.png --theme dark --theme light", "--theme is given twice"), ("--screenshot out.png --file-icons default", "unknown flag '--file-icons'"), ("--no-mcp --screenshot out.png", "--no-mcp stops a window listening for agents, and --screenshot's lets in only its own --agent"), ("--screenshot out.png --agent no-agent-by-this-name", "--agent's program 'no-agent-by-this-name' is neither a file nor on the PATH"), ("--mcp --size 1600x1000", "--size is for a --screenshot, and none is asked for"), ("--mcp --mcp-attach", "--mcp starts a Passenger of its own and --mcp-attach joins a running one; give one of them"), ("--mcp-attach . --file notes.txt", "--mcp-attach joins a running Passenger's window and takes only its process id and a folder, not --file"), ("--mcp-attach 99999999999 .", "--mcp-attach takes the process id of a running Passenger, not '99999999999'"), ("--headless --mcp", "--headless is a person's window with nobody at it, a test run's"), (". --new-window", "--new-window opens a window with nothing open, and takes nothing else, not ."), ("--screenshot out.png --look sakura", "--look takes passenger, cubicle, high contrast, harbour"), ("--screenshot out.png --scheme relative/../folder::Dusk", "--scheme 'relative/../folder::Dusk' names no source Passenger reads")], row => Flow.StepApartAsync($"a malformed value or a flag its mode does not take ends Passenger with exit code 2 and the reason ({row})", () => new CommandLineTests(), t => t.A_malformed_value_or_a_flag_its_mode_does_not_take_ends_Passenger_with_exit_code_2_and_the_reason(row.Item1, row.Item2))));
+        await Flow.StepAsync("a malformed variable ends Passenger with exit code 2 and the reason before anything starts", () => Cases.EachAsync<(string, string, string)>([(global::Passenger.Dap.AdapterEnvironment.EvaluationTimeoutVariable, "3s", Milliseconds), (global::Passenger.App.Mcp.AgentCall.EveryVariable, "-1000", Milliseconds), (global::Passenger.App.Mcp.McpHost.LanguageServerVariable, "no", "off or on"), (global::Passenger.Core.Waits.ScaleVariable, "0", "a number above 0")], row => Flow.StepApartAsync($"a malformed variable ends Passenger with exit code 2 and the reason before anything starts ({row})", () => new CommandLineTests(), t => t.A_malformed_variable_ends_Passenger_with_exit_code_2_and_the_reason_before_anything_starts(row.Item1, row.Item2, row.Item3))));
+    }
+
+    /// <summary>The gate's screenshot steps and a double-clicked solution as one flow: a crop and a click at the
+    /// window's corner, a click by name, the window buttons, an agent through --mcp-attach, and a solution or project
+    /// opened as the workspace.</summary>
+    [Gate]
+    [AvaloniaFact]
+    public async Task The_gates_screenshot_steps_and_a_double_click_hold_as_one_flow()
+    {
+        await Flow.StepApartAsync("a screenshot named with the file before its folder and a click at the corner is taken at its crop", () => new CommandLineTests(), t => t.A_screenshot_named_with_the_file_before_its_folder_and_a_click_at_the_corner_is_taken_at_its_crop());
+        await Flow.StepApartAsync("a screenshot step clicks a control by its name and a name no shown control has ends it with exit code 2", () => new CommandLineTests(), t => t.A_screenshot_step_clicks_a_control_by_its_name_and_a_name_no_shown_control_has_ends_it_with_exit_code_2());
+        await Flow.StepApartAsync("a screenshot with window buttons shows the traffic lights a person sees on macOS and changes nothing elsewhere", () => new CommandLineTests(), t => t.A_screenshot_with_window_buttons_shows_the_traffic_lights_a_person_sees_on_macOS_and_changes_nothing_elsewhere());
+        await Flow.StepApartAsync("a screenshot s agent uses the window s tools unasked through mcp attach and one that fails takes no picture", () => new CommandLineTests(), t => t.A_screenshot_s_agent_uses_the_window_s_tools_unasked_through_mcp_attach_and_one_that_fails_takes_no_picture());
+        Flow.StepApart<CommandLineTests>("a solution or project given as a double click gives it opens as the workspace and neither as text", t => t.A_solution_or_project_given_as_a_double_click_gives_it_opens_as_the_workspace_and_neither_as_text());
+    }
+
+    /// <summary>A caret counted from zero without saying so, Run or Debug with no folder or in a mode with no window,
+    /// and a variable of the wrong form or naming no HTTPS address end Passenger with exit code 2 and the reason, as
+    /// one flow of tables, every row run and each that fails named.</summary>
+    [AvaloniaFact]
+    public async Task A_caret_a_run_or_a_variable_given_wrongly_ends_Passenger_with_exit_code_2_saying_why()
+    {
+        await Flow.StepAsync("a caret counted from zero takes zero based and one without it is refused with exit code 2", () => Cases.EachAsync<(string, string)>([("--screenshot out.png --zero-based", "--zero-based says --caret counts its line and column from 0, and no --caret is given"), ("notes.txt --caret 0:0 --screenshot out.png", "--caret takes LINE or LINE:COLUMN from 1, not '0:0'")], row => Flow.StepApartAsync($"a caret counted from zero takes zero based and one without it is refused with exit code 2 ({row})", () => new CommandLineTests(), t => t.A_caret_counted_from_zero_takes_zero_based_and_one_without_it_is_refused_with_exit_code_2(row.Item1, row.Item2))));
+        await Flow.StepAsync("Run or debug with no folder before it or in a mode with no window of its own ends Passenger with exit code 2 and the reason", () => Cases.EachAsync<(string, string)>([("--run", "--run starts a run configuration of the folder Passenger opens, and none is given: passenger FOLDER --run [NAME], the folder first"), (". --run --debug", "--run and --debug each start a run configuration; give one of them"), ("--mcp . --run", "--mcp does not take --run; its agent starts a configuration with its run"), ("--mcp-attach . --debug", "--mcp-attach joins a running Passenger's window and takes only its process id and a folder, not --debug")], row => Flow.StepApartAsync($"Run or debug with no folder before it or in a mode with no window of its own ends Passenger with exit code 2 and the reason ({row})", () => new CommandLineTests(), t => t.Run_or_debug_with_no_folder_before_it_or_in_a_mode_with_no_window_of_its_own_ends_Passenger_with_exit_code_2_and_the_reason(row.Item1, row.Item2))));
+        await Flow.StepAsync("a malformed variable of the language server's load or of a typing pause ends Passenger with exit code 2 and the reason", () => Cases.EachAsync<(string, string, string)>([(global::Passenger.App.CSharp.CSharpService.SlowLoadVariable, "5m", Milliseconds), (global::Passenger.App.Editors.TypingPauses.Variable, "0", Milliseconds)], row => Flow.StepApartAsync($"a malformed variable of the language server's load or of a typing pause ends Passenger with exit code 2 and the reason ({row})", () => new CommandLineTests(), t => t.A_malformed_variable_ends_Passenger_with_exit_code_2_and_the_reason_before_anything_starts(row.Item1, row.Item2, row.Item3))));
+        await Flow.StepAsync("a variable naming no https address for a host ends Passenger with exit code 2 and the reason before anything starts", () => Cases.EachAsync<(string, string)>([(global::Passenger.Core.DotnetReleases.Variable, "releases"), (global::Passenger.App.Updates.ReleaseFeed.Variable, "http://192.0.2.10/repos/Zaneris/passenger/releases")], row => Flow.StepApartAsync($"a variable naming no https address for a host ends Passenger with exit code 2 and the reason before anything starts ({row})", () => new CommandLineTests(), t => t.A_variable_naming_no_https_address_for_a_host_ends_Passenger_with_exit_code_2_and_the_reason_before_anything_starts(row.Item1, row.Item2))));
+    }
+
+    /// <summary>A screenshot wears the look named, types a key as the character it makes, opens on the settings kept
+    /// where its state is named, ends where a crop reaches past a dialog, and writes no file its steps type into but
+    /// one a step saves, as one flow, each step the check one test made in an instance of its own.</summary>
+    [AvaloniaFact]
+    public async Task A_screenshot_wears_its_look_types_its_keys_on_the_settings_kept_and_writes_only_what_it_saves()
+    {
+        await Flow.StepApartAsync("look names a theme Passenger carries by its word and a screenshot wears it", () => new CommandLineTests(), t => t.Look_names_a_theme_Passenger_carries_by_its_word_and_a_screenshot_wears_it());
+        await Flow.StepApartAsync("a crop reaching past the dialog the steps left in front ends the screenshot with exit code 2 saying so", () => new CommandLineTests(), t => t.A_crop_reaching_past_the_dialog_the_steps_left_in_front_ends_the_screenshot_with_exit_code_2_saying_so());
+        await Flow.StepApartAsync("a screenshot s key takes a key as the character it types so meta comma opens settings", () => new CommandLineTests(), t => t.A_screenshot_s_key_takes_a_key_as_the_character_it_types_so_meta_comma_opens_settings());
+        await Flow.StepApartAsync("a screenshot opens on the settings kept where its state is named and its keys type shifted characters", () => new CommandLineTests(), t => t.A_screenshot_opens_on_the_settings_kept_where_its_state_is_named_and_its_keys_type_shifted_characters());
+        await Flow.StepApartAsync("a screenshot writes no file its steps type into but one a step saves and says so", () => new CommandLineTests(), t => t.A_screenshot_writes_no_file_its_steps_type_into_but_one_a_step_saves_and_says_so());
+    }
+
+    /// <summary>A start failing before its log is set up leaves why in the log folder and the next start says it once,
+    /// and a relative state folder is named from where Passenger started or ends the start saying why, as one flow,
+    /// each step the check one test made in an instance of its own.</summary>
+    [AvaloniaFact]
+    public async Task A_start_that_fails_says_why_once_and_a_relative_state_folder_is_where_it_started()
+    {
+        await Flow.StepApartAsync("a start failing before its log is set up leaves why in the log folder and the next start says it once", () => new CommandLineTests(), t => t.A_start_failing_before_its_log_is_set_up_leaves_why_in_the_log_folder_and_the_next_start_says_it_once());
+        await Flow.StepApartAsync("a relative state folder is named from where Passenger started and one that cannot be made ends the start saying so", () => new CommandLineTests(), t => t.A_relative_state_folder_is_named_from_where_Passenger_started_and_one_that_cannot_be_made_ends_the_start_saying_so());
+    }
+
+    private async Task A_malformed_value_or_a_flag_its_mode_does_not_take_ends_Passenger_with_exit_code_2_and_the_reason(string arguments, string reason)
     {
         (int code, string error) = await Run(arguments);
 
@@ -80,11 +101,7 @@ public sealed class CommandLineTests : IDisposable
             $"'passenger {arguments}' was to be refused with exit code 2 saying \"{reason}\"; it exited {code} and wrote:\n{error}");
     }
 
-    [Theory]
-    [InlineData("--screenshot out.png --zero-based", "--zero-based says --caret counts its line and column from 0, and no --caret is given")]
-    [InlineData("notes.txt --caret 1:x --zero-based --screenshot out.png", "--caret takes LINE or LINE:COLUMN from 0 with --zero-based, not '1:x'")]
-    [InlineData("notes.txt --caret 0:0 --screenshot out.png", "--caret takes LINE or LINE:COLUMN from 1, not '0:0'")]
-    public async Task A_caret_counted_from_zero_takes_zero_based_and_one_without_it_is_refused_with_exit_code_2(string arguments, string reason)
+    private async Task A_caret_counted_from_zero_takes_zero_based_and_one_without_it_is_refused_with_exit_code_2(string arguments, string reason)
     {
         (int code, string error) = await Run(arguments);
 
@@ -94,15 +111,7 @@ public sealed class CommandLineTests : IDisposable
 
     /// <summary>A run configuration started from the command line needs the folder it is of, given first, and a mode with a
     /// window to run it in: refused at once otherwise, before any folder opens.</summary>
-    [Theory]
-    [InlineData("--run", "--run starts a run configuration of the folder Passenger opens, and none is given: passenger FOLDER --run [NAME], the folder first")]
-    [InlineData("--debug . --theme dark", "--debug starts a run configuration of the folder Passenger opens, and none is given: passenger FOLDER --debug [NAME], the folder first")]
-    [InlineData("--screenshot out.png --run Hello", "--run starts a run configuration of the folder Passenger opens, and none is given")]
-    [InlineData(". --run --debug", "--run and --debug each start a run configuration; give one of them")]
-    [InlineData(". --run Hello --run", "--run is given twice")]
-    [InlineData("--mcp . --run", "--mcp does not take --run; its agent starts a configuration with its run")]
-    [InlineData("--mcp-attach . --debug", "--mcp-attach joins a running Passenger's window and takes only its process id and a folder, not --debug")]
-    public async Task Run_or_debug_with_no_folder_before_it_or_in_a_mode_with_no_window_of_its_own_ends_Passenger_with_exit_code_2_and_the_reason(string arguments, string reason)
+    private async Task Run_or_debug_with_no_folder_before_it_or_in_a_mode_with_no_window_of_its_own_ends_Passenger_with_exit_code_2_and_the_reason(string arguments, string reason)
     {
         (int code, string error) = await Run(arguments);
 
@@ -112,24 +121,9 @@ public sealed class CommandLineTests : IDisposable
 
     private const string Milliseconds = "a whole number of milliseconds above 0";
 
-    [Theory]
-    [InlineData(global::Passenger.App.CSharp.CSharpService.SlowLoadVariable, "5m", Milliseconds)]
-    [InlineData(global::Passenger.Languages.TextMate.TextMateHighlighter.LineTimeVariable, "1s", Milliseconds)]
-    [InlineData(global::Passenger.App.Mcp.PassengerTools.ServerLimitVariable, "2m", Milliseconds)]
-    public Task A_malformed_variable_the_gate_has_no_record_of_yet_ends_Passenger_with_exit_code_2_and_the_reason(string variable, string value, string takes) =>
-        A_malformed_variable_ends_Passenger_with_exit_code_2_and_the_reason_before_anything_starts(variable, value, takes);
-
     /// <summary>A variable the IDE or its debug adapter reads is checked as Passenger starts, before any window or
     /// server, so a malformed one ends it at once rather than failing every Debug later.</summary>
-    [Gate]
-    [Theory]
-    [InlineData(global::Passenger.Dap.AdapterEnvironment.EvaluationTimeoutVariable, "3s", Milliseconds)]
-    [InlineData(global::Passenger.Dap.AdapterEnvironment.EvaluationTimeoutVariable, "0", Milliseconds)]
-    [InlineData(global::Passenger.App.Mcp.AgentCall.EveryVariable, "-1000", Milliseconds)]
-    [InlineData(global::Passenger.Text.TextSearch.ApartVariable, "5s", Milliseconds)]
-    [InlineData(global::Passenger.App.Mcp.McpHost.LanguageServerVariable, "no", "off or on")]
-    [InlineData(global::Passenger.Core.Waits.ScaleVariable, "0", "a number above 0")]
-    public async Task A_malformed_variable_ends_Passenger_with_exit_code_2_and_the_reason_before_anything_starts(string variable, string value, string takes)
+    private async Task A_malformed_variable_ends_Passenger_with_exit_code_2_and_the_reason_before_anything_starts(string variable, string value, string takes)
     {
         (int code, string error) = await Run(["--mcp", "."], settings, new Dictionary<string, string> { [variable] = value });
 
@@ -140,15 +134,7 @@ public sealed class CommandLineTests : IDisposable
 
     /// <summary>A variable naming a stand-in for a host Passenger asks is checked as Passenger starts: an address that is
     /// no URL, or plain http to another machine, ends it at once rather than failing when the host is first asked.</summary>
-    [Theory]
-    [InlineData(global::Passenger.App.Mobile.AndroidLicences.Variable, "repository2-3.xml")]
-    [InlineData(global::Passenger.Core.DotnetReleases.Variable, "releases")]
-    [InlineData(global::Passenger.App.Xaml.SourceLink.Variable, "symbols")]
-    [InlineData(global::Passenger.App.Updates.ReleaseFeed.Variable, "http://192.0.2.10/repos/Zaneris/passenger/releases")]
-    [InlineData(global::Passenger.App.Web.JsonSchemas.Variable, "http://192.0.2.10/")]
-    [InlineData(global::Passenger.App.Web.DockerHubTags.Variable, "http://192.0.2.10/")]
-    [InlineData(global::Passenger.App.OpenVsx.Variable, "http://192.0.2.10/")]
-    public async Task A_variable_naming_no_https_address_for_a_host_ends_Passenger_with_exit_code_2_and_the_reason_before_anything_starts(string variable, string value)
+    private async Task A_variable_naming_no_https_address_for_a_host_ends_Passenger_with_exit_code_2_and_the_reason_before_anything_starts(string variable, string value)
     {
         (int code, string error) = await Run(["--mcp", "."], settings, new Dictionary<string, string> { [variable] = value });
 
@@ -157,9 +143,7 @@ public sealed class CommandLineTests : IDisposable
             $"Passenger with {variable}={value} was to be refused with exit code 2 saying \"{reason}…, not '{value}'\"; it exited {code} and wrote:\n{error}");
     }
 
-    [Gate]
-    [Fact]
-    public async Task A_screenshot_named_with_the_file_before_its_folder_and_a_click_at_the_corner_is_taken_at_its_crop()
+    private async Task A_screenshot_named_with_the_file_before_its_folder_and_a_click_at_the_corner_is_taken_at_its_crop()
     {
         (int code, string error) = await Run("--file notes.txt . --caret 2:3 --click 0,0 --size 800x500 --scale 1 --crop 0,0,400,250 --screenshot out.png --theme light");
 
@@ -171,8 +155,7 @@ public sealed class CommandLineTests : IDisposable
 
     /// <summary>A theme Passenger carries is named on the command line by its own word, as Passenger's own is, and a
     /// screenshot wears it.</summary>
-    [Fact]
-    public async Task Look_names_a_theme_Passenger_carries_by_its_word_and_a_screenshot_wears_it()
+    private async Task Look_names_a_theme_Passenger_carries_by_its_word_and_a_screenshot_wears_it()
     {
         Assert.Equal(new NamedTheme(SourcedTheme.BuiltIn("Cubicle")), LaunchOptions.Parse(["--look", "cubicle", "--screenshot", "out.png"]).Look);
 
@@ -180,9 +163,7 @@ public sealed class CommandLineTests : IDisposable
         Assert.True(code == 0 && File.Exists(Path.Combine(folder, "cubicle.png")), $"The screenshot in Cubicle was not taken: exit code {code}\n{error}");
     }
 
-    [Gate]
-    [Fact]
-    public async Task A_screenshot_step_clicks_a_control_by_its_name_and_a_name_no_shown_control_has_ends_it_with_exit_code_2()
+    private async Task A_screenshot_step_clicks_a_control_by_its_name_and_a_name_no_shown_control_has_ends_it_with_exit_code_2()
     {
         (int code, string error) = await Run(". --click-name RunConfigButton --size 800x500 --scale 1 --screenshot out.png");
         Assert.True(code == 0 && File.Exists(Path.Combine(folder, "out.png")), $"The screenshot after a click on RunConfigButton was not taken: exit code {code}\n{error}");
@@ -195,8 +176,7 @@ public sealed class CommandLineTests : IDisposable
 
     /// <summary>A screenshot's picture is of the dialog its steps left in front, so a crop that fits the main window but
     /// reaches past that dialog ends it with exit code 2, saying so, and writes no picture.</summary>
-    [Fact]
-    public async Task A_crop_reaching_past_the_dialog_the_steps_left_in_front_ends_the_screenshot_with_exit_code_2_saying_so()
+    private async Task A_crop_reaching_past_the_dialog_the_steps_left_in_front_ends_the_screenshot_with_exit_code_2_saying_so()
     {
         string settingsKey = OperatingSystem.IsMacOS() ? "meta+comma" : "ctrl+alt+s";
         (int code, string error) = await Run($". --key {settingsKey} --size 1600x1000 --scale 1 --crop 0,950,800,40 --screenshot cut.png");
@@ -208,8 +188,7 @@ public sealed class CommandLineTests : IDisposable
     /// <summary>A screenshot's --key takes a key a US keyboard types as that character, as the keymap's own keys are read:
     /// meta+, is Settings in the Mac's keymap (ctrl+, in VS Code's elsewhere, Visual Studio's having no such key there), and
     /// the steps after it go to Settings, whose search for IntelliJ shows its Keymap choice to click.</summary>
-    [Fact]
-    public async Task A_screenshot_s_key_takes_a_key_as_the_character_it_types_so_meta_comma_opens_settings()
+    private async Task A_screenshot_s_key_takes_a_key_as_the_character_it_types_so_meta_comma_opens_settings()
     {
         string state = TestFolders.Create("comma-state-");
         try
@@ -239,9 +218,7 @@ public sealed class CommandLineTests : IDisposable
     /// --window-buttons draws them, where macOS puts them on the merged bar, at any scale. Windows and Linux draw the bar's
     /// own buttons, so there the flag changes nothing. The places and colours are AppKit's own drawing of an active Dark
     /// Aqua window made as Avalonia makes Passenger's, measured in points from its top-left and in sRGB.</summary>
-    [Gate]
-    [Fact]
-    public async Task A_screenshot_with_window_buttons_shows_the_traffic_lights_a_person_sees_on_macOS_and_changes_nothing_elsewhere()
+    private async Task A_screenshot_with_window_buttons_shows_the_traffic_lights_a_person_sees_on_macOS_and_changes_nothing_elsewhere()
     {
         (string Name, Point At, SKColor Centre)[] buttons =
         [
@@ -280,9 +257,7 @@ public sealed class CommandLineTests : IDisposable
     /// an agent's MCP client does. Typing into the editor is a tool a person's window asks about; nobody is at a capture,
     /// so it is used unasked, and the picture is taken once the agent has ended. An agent that fails ends the capture with
     /// exit code 2 and no picture.</summary>
-    [Gate]
-    [Fact]
-    public async Task A_screenshot_s_agent_uses_the_window_s_tools_unasked_through_mcp_attach_and_one_that_fails_takes_no_picture()
+    private async Task A_screenshot_s_agent_uses_the_window_s_tools_unasked_through_mcp_attach_and_one_that_fails_takes_no_picture()
     {
         string agent = TestFolders.Create("agent-");
         string state = TestFolders.Create("agent-state-");
@@ -362,8 +337,7 @@ public sealed class CommandLineTests : IDisposable
     /// <summary>A screenshot's --key presses a key as a keyboard does, the character it types with it: Shift+4 types "$" in
     /// the editor. Run where PASSENGER_SETTINGS names a folder whose settings.json turns Vim mode on, the window opens on
     /// those settings, so the same Shift+4 is Vim's "$", to the line's end, where x deletes the line's last letter.</summary>
-    [Fact]
-    public async Task A_screenshot_opens_on_the_settings_kept_where_its_state_is_named_and_its_keys_type_shifted_characters()
+    private async Task A_screenshot_opens_on_the_settings_kept_where_its_state_is_named_and_its_keys_type_shifted_characters()
     {
         string save = OperatingSystem.IsMacOS() ? "meta+S" : "control+S";
         string notes = Path.Combine(folder, "notes.txt");
@@ -391,8 +365,7 @@ public sealed class CommandLineTests : IDisposable
     /// <summary>A screenshot only looks: what its steps type stays in the editor, never written to the file, even when
     /// another program (here its --agent) writes the file meanwhile and the File Cache Conflict question takes the Escape
     /// and Enter typed after; File, Save typed as a step writes it, and the run says on standard error that it did.</summary>
-    [Fact]
-    public async Task A_screenshot_writes_no_file_its_steps_type_into_but_one_a_step_saves_and_says_so()
+    private async Task A_screenshot_writes_no_file_its_steps_type_into_but_one_a_step_saves_and_says_so()
     {
         string notes = Path.Combine(folder, "notes.txt");
         string agent = TestFolders.Create("disk-writer-");
@@ -469,9 +442,7 @@ public sealed class CommandLineTests : IDisposable
             $"The log quotes the secrets the profile printed, for anyone the log is sent to:\n{unread}");
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_solution_or_project_given_as_a_double_click_gives_it_opens_as_the_workspace_and_neither_as_text()
+    private void A_solution_or_project_given_as_a_double_click_gives_it_opens_as_the_workspace_and_neither_as_text()
     {
         // Two solutions, so the folder alone would open Alpha: only the one named makes Zebra the workspace.
         File.WriteAllText(Path.Combine(folder, "Alpha.slnx"), "<Solution />\n");
@@ -536,8 +507,7 @@ public sealed class CommandLineTests : IDisposable
     /// still ends as the runtime ends it, saying why on standard error, and keeps the exception in the log folder's
     /// crash.log; the next start lists it among the IDE's errors, its red mark shown for a click, writes it to the log and
     /// removes the file, and the start after says nothing more of it.</summary>
-    [Fact]
-    public async Task A_start_failing_before_its_log_is_set_up_leaves_why_in_the_log_folder_and_the_next_start_says_it_once()
+    private async Task A_start_failing_before_its_log_is_set_up_leaves_why_in_the_log_folder_and_the_next_start_says_it_once()
     {
         const string Failure = "a stand-in for a font that would not load";
         string crash = Path.Combine(settings, "logs", CrashFile.Name);
@@ -599,6 +569,23 @@ public sealed class CommandLineTests : IDisposable
 
         (int code, string error) = await Run(". --size 800x500 --scale 1 --screenshot out.png");
         Assert.True(code == 0 && File.Exists(Path.Combine(folder, "out.png")), $"The screenshot named from the folder it was started in was not written there: exit code {code}\n{error}");
+    }
+
+    /// <summary>A state folder PASSENGER_SETTINGS names by a relative path is the one it names from the folder Passenger was
+    /// started in, not from the home folder it works in once its command line is read; one that cannot be made ends the
+    /// start saying so, as a malformed value does, never with a crash.</summary>
+    private async Task A_relative_state_folder_is_named_from_where_Passenger_started_and_one_that_cannot_be_made_ends_the_start_saying_so()
+    {
+        string[] screenshot = [".", "--size", "800x500", "--scale", "1", "--screenshot", "out.png"];
+        (int code, string error) = await Run(screenshot, "kept-here");
+        Assert.True(code == 0 && Directory.Exists(Path.Combine(folder, "kept-here", "logs")),
+            $"PASSENGER_SETTINGS=kept-here, started in {folder}, did not keep the state there: exit code {code}\n{error}");
+
+        File.WriteAllText(Path.Combine(folder, "a-file"), "not a folder\n");
+        (code, error) = await Run(screenshot, Path.Combine("a-file", "state"));
+        Assert.True(code == 2 && error.Contains($"{Path.Combine(PathNames.Canonical(folder), "a-file", "state")}, which {StateStore.Variable} names, could not be made", StringComparison.Ordinal)
+            && !error.Contains("Unhandled exception", StringComparison.Ordinal),
+            $"A state folder that cannot be made, inside a file, did not end the start saying so: exit code {code}\n{error}");
     }
 
     /// <summary>The folder a process works in, as the system tells it: Linux's /proc link, macOS's lsof.</summary>

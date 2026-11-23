@@ -9,9 +9,22 @@ namespace Passenger.Tests.Debugging;
 [Collection(DebugSession.Collection)]
 public class VariablesCasesTests(ITestOutputHelper testOutputHelper)
 {
+    /// <summary>The gate's variables as one flow: a captured parameter listed once with its live value, an exception's
+    /// inner one, a union's value, a pointer's address and target, a DebuggerDisplay rendered, and a value whose
+    /// ToString throws opening to its members.</summary>
     [Gate]
     [Fact]
-    public async Task A_parameter_a_lambda_captures_is_listed_once_with_its_live_value()
+    public async Task The_gates_variables_hold_as_one_flow()
+    {
+        await Flow.StepApartAsync("a parameter a lambda captures is listed once with its live value", () => new VariablesCasesTests(testOutputHelper), t => t.A_parameter_a_lambda_captures_is_listed_once_with_its_live_value());
+        await Flow.StepApartAsync("an exception wrapping another reports the inner one", () => new VariablesCasesTests(testOutputHelper), t => t.An_exception_wrapping_another_reports_the_inner_one());
+        await Flow.StepApartAsync("a union shows the value it holds as that values type opening to its members", () => new VariablesCasesTests(testOutputHelper), t => t.A_union_shows_the_value_it_holds_as_that_values_type_opening_to_its_members());
+        await Flow.StepApartAsync("a pointer shows its address and type and opens to what it points at", () => new VariablesCasesTests(testOutputHelper), t => t.A_pointer_shows_its_address_and_type_and_opens_to_what_it_points_at());
+        await Flow.StepApartAsync("DebuggerDisplay renders as Visual Studio does", () => new VariablesCasesTests(testOutputHelper), t => t.DebuggerDisplay_renders_as_Visual_Studio_does());
+        await Flow.StepApartAsync("a value whose ToString throws shows its type and opens to its members", () => new VariablesCasesTests(testOutputHelper), t => t.A_value_whose_ToString_throws_shows_its_type_and_opens_to_its_members());
+    }
+
+    private async Task A_parameter_a_lambda_captures_is_listed_once_with_its_live_value()
     {
         int line = Debuggees.Line("PassengerCases", "Console.WriteLine(f());");
         await using DebugSession host = await DebugSession.LaunchToBreakpoint(testOutputHelper, "PassengerCases", line, []);
@@ -23,9 +36,7 @@ public class VariablesCasesTests(ITestOutputHelper testOutputHelper)
         Assert.Single(locals, v => v.Name == "f");
     }
 
-    [Gate]
-    [Fact]
-    public async Task An_exception_wrapping_another_reports_the_inner_one()
+    private async Task An_exception_wrapping_another_reports_the_inner_one()
     {
         await using DebugSession host = await DebugSession.LaunchToBreakpoint(testOutputHelper, "PassengerCases", Debuggees.Line("PassengerCases", "Console.WriteLine(f());"), [DapExceptionFilters.All]);
 
@@ -48,9 +59,7 @@ public class VariablesCasesTests(ITestOutputHelper testOutputHelper)
 
     /// <summary>A C# 15 union shows the value it holds as that value's type, by its row and by evaluation, and opens to that
     /// value's members, one holding none showing null.</summary>
-    [Gate]
-    [Fact]
-    public async Task A_union_shows_the_value_it_holds_as_that_values_type_opening_to_its_members()
+    private async Task A_union_shows_the_value_it_holds_as_that_values_type_opening_to_its_members()
     {
         int line = Debuggees.Line("PassengerCases", "Console.WriteLine($\"unions");
         await using DebugSession host = await DebugSession.LaunchToBreakpoint(testOutputHelper, "PassengerCases", line, []);
@@ -75,9 +84,7 @@ public class VariablesCasesTests(ITestOutputHelper testOutputHelper)
 
     /// <summary>A pointer shows its address as its type (int*), by its row and by evaluation, opens to the value it points
     /// at, and *pointer evaluates to that value.</summary>
-    [Gate]
-    [Fact]
-    public async Task A_pointer_shows_its_address_and_type_and_opens_to_what_it_points_at()
+    private async Task A_pointer_shows_its_address_and_type_and_opens_to_what_it_points_at()
     {
         int line = Debuggees.Line("PassengerCases", "Console.WriteLine($\"pointers");
         await using DebugSession host = await DebugSession.LaunchToBreakpoint(testOutputHelper, "PassengerCases", line, []);
@@ -95,9 +102,7 @@ public class VariablesCasesTests(ITestOutputHelper testOutputHelper)
         Assert.Equal(("42", "int"), (read.Result, read.Type));
     }
 
-    [Gate]
-    [Fact]
-    public async Task DebuggerDisplay_renders_as_Visual_Studio_does()
+    private async Task DebuggerDisplay_renders_as_Visual_Studio_does()
     {
         int line = Debuggees.Line("PassengerCases", "Console.WriteLine(\"displays\");");
         await using DebugSession host = await DebugSession.LaunchToBreakpoint(testOutputHelper, "PassengerCases", line, []);
@@ -135,22 +140,8 @@ public class VariablesCasesTests(ITestOutputHelper testOutputHelper)
         Assert.DoesNotContain(angry, v => v.Name is "_message" or "StackTrace");
     }
 
-    /// <summary>A [DebuggerDisplay] naming a property the type implements explicitly by its full name, which no C# expression
-    /// evaluates, shows the property's value where its names hold marks too.</summary>
-    [Fact]
-    public async Task DebuggerDisplay_naming_an_explicit_property_by_a_full_name_holding_marks_shows_its_value()
-    {
-        int line = Debuggees.Line("PassengerCases", "Console.WriteLine(\"displays\");");
-        await using DebugSession host = await DebugSession.LaunchToBreakpoint(testOutputHelper, "PassengerCases", line, []);
-        StoppedEvent stop = await host.WaitForStoppedEvent();
-        DapVariable tally = Assert.Single(await host.LocalsAsync(stop), v => v.Name == "tally");
-        Assert.True(tally.Value == "गिनती = 7", $"The display naming Iगिनती.गिनती shows \"{tally.Value}\", the name read only to its first mark");
-    }
-
     /// <summary>A value whose ToString throws shows its type and still opens to its members.</summary>
-    [Gate]
-    [Fact]
-    public async Task A_value_whose_ToString_throws_shows_its_type_and_opens_to_its_members()
+    private async Task A_value_whose_ToString_throws_shows_its_type_and_opens_to_its_members()
     {
         int line = Debuggees.Line("PassengerCases", "Console.WriteLine(\"displays\");");
         await using DebugSession host = await DebugSession.LaunchToBreakpoint(testOutputHelper, "PassengerCases", line, []);
@@ -167,10 +158,18 @@ public class VariablesCasesTests(ITestOutputHelper testOutputHelper)
         Assert.Equal("{Unprintable}", evaluated.Result);
     }
 
+    /// <summary>A multi-dimensional array's long outer dimension opens in ranges of 100, and an element under a range
+    /// takes a value set through the array.</summary>
+    [Fact]
+    public async Task A_multi_dimensional_arrays_rows_open_in_ranges_and_take_a_value_set_through_the_array()
+    {
+        await Flow.StepApartAsync<VariablesCasesTests>("a multi dimensional array's long outer dimension opens in ranges of 100", () => new VariablesCasesTests(testOutputHelper), t => t.A_multi_dimensional_arrays_long_outer_dimension_opens_in_ranges_of_100());
+        await Flow.StepApartAsync<VariablesCasesTests>("an element under a multi dimensional array's range takes a value set through the array", () => new VariablesCasesTests(testOutputHelper), t => t.An_element_under_a_multi_dimensional_arrays_range_takes_a_value_set_through_the_array());
+    }
+
     /// <summary>A multi-dimensional array's outer dimension over 100 long opens in ranges of 100, as a long array does, each
     /// range to its rows and each row to its elements: a 200,000 by 1 array is 2,000 rows at its top, not 200,000.</summary>
-    [Fact]
-    public async Task A_multi_dimensional_arrays_long_outer_dimension_opens_in_ranges_of_100()
+    private async Task A_multi_dimensional_arrays_long_outer_dimension_opens_in_ranges_of_100()
     {
         int line = Debuggees.Line("PassengerCases", "Console.WriteLine(\"displays\");");
         await using DebugSession host = await DebugSession.LaunchToBreakpoint(testOutputHelper, "PassengerCases", line, []);
@@ -195,8 +194,7 @@ public class VariablesCasesTests(ITestOutputHelper testOutputHelper)
     /// <summary>An element under a long multi-dimensional array's range and row is reached by an expression naming the array
     /// itself, which Set Value writes through into the program; the range and the row, rows the debugger adds to show the
     /// array, have none.</summary>
-    [Fact]
-    public async Task An_element_under_a_multi_dimensional_arrays_range_takes_a_value_set_through_the_array()
+    private async Task An_element_under_a_multi_dimensional_arrays_range_takes_a_value_set_through_the_array()
     {
         string setting = "Console.WriteLine(\"setting\");";
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);

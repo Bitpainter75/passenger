@@ -7,9 +7,22 @@ namespace Passenger.Tests.Debugging;
 [Collection(DebugSession.Collection)]
 public class FunctionBreakpointTests(ITestOutputHelper testOutputHelper)
 {
+    /// <summary>The gate's function breakpoints as one flow: by a bare name in every method of it, by a full name in
+    /// that one alone, in a generic class's method, in every overload or the one its parameters name, and a hit count
+    /// going on beside another one set.</summary>
     [Gate]
     [Fact]
-    public async Task A_function_breakpoint_by_a_bare_method_name_stops_in_every_method_of_that_name()
+    public async Task The_gates_function_breakpoints_hold_as_one_flow()
+    {
+        await Flow.StepApartAsync("a function breakpoint by a bare method name stops in every method of that name", () => new FunctionBreakpointTests(testOutputHelper), t => t.A_function_breakpoint_by_a_bare_method_name_stops_in_every_method_of_that_name());
+        await Flow.StepApartAsync("a function breakpoint by a full name stops in that method alone", () => new FunctionBreakpointTests(testOutputHelper), t => t.A_function_breakpoint_by_a_full_name_stops_in_that_method_alone());
+        await Flow.StepApartAsync("a function breakpoint on a generic classs method stops in it", () => new FunctionBreakpointTests(testOutputHelper), t => t.A_function_breakpoint_on_a_generic_classs_method_stops_in_it());
+        await Flow.StepApartAsync("a function breakpoints hit count goes on when another is set beside it and it stops on its third hit", () => new FunctionBreakpointTests(testOutputHelper), t => t.A_function_breakpoints_hit_count_goes_on_when_another_is_set_beside_it_and_it_stops_on_its_third_hit());
+        await Flow.StepApartAsync("a function breakpoint naming no parameters stops in every overload", () => new FunctionBreakpointTests(testOutputHelper), t => t.A_function_breakpoint_naming_no_parameters_stops_in_every_overload());
+        await Flow.StepApartAsync("a function breakpoint naming its parameters stops in that overload alone", () => new FunctionBreakpointTests(testOutputHelper), t => t.A_function_breakpoint_naming_its_parameters_stops_in_that_overload_alone());
+    }
+
+    private async Task A_function_breakpoint_by_a_bare_method_name_stops_in_every_method_of_that_name()
     {
         bool startSuspended = true;
         await using DebugSession debugProtocolHost = DebugSession.ForAttach(testOutputHelper, startSuspended, out Process p2);
@@ -47,9 +60,7 @@ public class FunctionBreakpointTests(ITestOutputHelper testOutputHelper)
         Assert.Equal(3, topFrame2.EndColumn);
     }
 
-    [Gate]
-    [Fact]
-    public async Task A_function_breakpoint_by_a_full_name_stops_in_that_method_alone()
+    private async Task A_function_breakpoint_by_a_full_name_stops_in_that_method_alone()
     {
         bool startSuspended = true;
         await using DebugSession debugProtocolHost = DebugSession.ForAttach(testOutputHelper, startSuspended, out Process p2);
@@ -74,9 +85,7 @@ public class FunctionBreakpointTests(ITestOutputHelper testOutputHelper)
         topFrame.ShouldBeAtSourceLocation("MyClass.cs", "public void MyMethod(long myParam, int myIntParam)", 2, 3);
     }
 
-    [Gate]
-    [Fact]
-    public async Task A_function_breakpoint_on_a_generic_classs_method_stops_in_it()
+    private async Task A_function_breakpoint_on_a_generic_classs_method_stops_in_it()
     {
         bool startSuspended = true;
         await using DebugSession debugProtocolHost = DebugSession.ForAttach(testOutputHelper, startSuspended, out Process p2);
@@ -101,9 +110,7 @@ public class FunctionBreakpointTests(ITestOutputHelper testOutputHelper)
         topFrame.ShouldBeAtSourceLocation("MyClassContainingAnotherClass.cs", "public static void Test()", 3, 4);
     }
 
-    [Gate]
-    [Fact]
-    public async Task A_function_breakpoints_hit_count_goes_on_when_another_is_set_beside_it_and_it_stops_on_its_third_hit()
+    private async Task A_function_breakpoints_hit_count_goes_on_when_another_is_set_beside_it_and_it_stops_on_its_third_hit()
     {
         // As the IDE sends XAML Binding Errors again with a property breakpoint added between its hits.
         await using DebugSession host = DebugSession.ForAttach(testOutputHelper, startSuspended: true, out Process program);
@@ -177,9 +184,7 @@ public class FunctionBreakpointTests(ITestOutputHelper testOutputHelper)
         return string.Empty;
     }
 
-    [Gate]
-    [Fact]
-    public async Task A_function_breakpoint_naming_no_parameters_stops_in_every_overload()
+    private async Task A_function_breakpoint_naming_no_parameters_stops_in_every_overload()
     {
         bool startSuspended = true;
         await using DebugSession debugProtocolHost = DebugSession.ForAttach(testOutputHelper, startSuspended, out Process p2);
@@ -237,9 +242,7 @@ public class FunctionBreakpointTests(ITestOutputHelper testOutputHelper)
         }
     }
 
-    [Gate]
-    [Fact]
-    public async Task A_function_breakpoint_naming_its_parameters_stops_in_that_overload_alone()
+    private async Task A_function_breakpoint_naming_its_parameters_stops_in_that_overload_alone()
     {
         bool startSuspended = true;
         await using DebugSession debugProtocolHost = DebugSession.ForAttach(testOutputHelper, startSuspended, out Process p2);

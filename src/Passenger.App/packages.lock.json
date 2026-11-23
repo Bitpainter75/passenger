@@ -725,7 +725,7 @@
       "passenger.agents": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.0, )"
+          "Passenger.Core": "[0.4.2, )"
         }
       },
       "passenger.core": {
@@ -737,33 +737,33 @@
       "passenger.dap": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.0, )"
+          "Passenger.Core": "[0.4.2, )"
         }
       },
       "passenger.editor": {
         "type": "Project",
         "dependencies": {
           "Avalonia": "[12.1.6, )",
-          "Passenger.Core": "[0.4.0, )",
-          "Passenger.Text": "[0.4.0, )"
+          "Passenger.Core": "[0.4.2, )",
+          "Passenger.Text": "[0.4.2, )"
         }
       },
       "passenger.languages": {
         "type": "Project",
         "dependencies": {
           "Microsoft.CodeAnalysis.CSharp": "[5.12.0, )",
-          "Passenger.Editor": "[0.4.0, )",
-          "Passenger.Lsp": "[0.4.0, )",
-          "Passenger.Text": "[0.4.0, )",
-          "Passenger.Workspace": "[0.4.0, )",
+          "Passenger.Editor": "[0.4.2, )",
+          "Passenger.Lsp": "[0.4.2, )",
+          "Passenger.Text": "[0.4.2, )",
+          "Passenger.Workspace": "[0.4.2, )",
           "Tint": "[0.3.0, )"
         }
       },
       "passenger.lsp": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.0, )",
-          "Passenger.Text": "[0.4.0, )",
+          "Passenger.Core": "[0.4.2, )",
+          "Passenger.Text": "[0.4.2, )",
           "StreamJsonRpc": "[2.26.150, )"
         }
       },
@@ -771,9 +771,9 @@
         "type": "Project",
         "dependencies": {
           "NuGet.Configuration": "[8.0.0, )",
-          "Passenger.Core": "[0.4.0, )",
-          "Passenger.Text": "[0.4.0, )",
-          "Passenger.Workspace": "[0.4.0, )"
+          "Passenger.Core": "[0.4.2, )",
+          "Passenger.Text": "[0.4.2, )",
+          "Passenger.Workspace": "[0.4.2, )"
         }
       },
       "passenger.profiler": {
@@ -782,7 +782,7 @@
           "Microsoft.Diagnostics.NETCore.Client": "[0.2.750501, )",
           "Microsoft.Diagnostics.Runtime": "[4.2.751201, )",
           "Microsoft.Diagnostics.Tracing.TraceEvent": "[4.0.0, )",
-          "Passenger.Core": "[0.4.0, )"
+          "Passenger.Core": "[0.4.2, )"
         }
       },
       "passenger.sql": {
@@ -790,28 +790,28 @@
         "dependencies": {
           "Microsoft.Data.SqlClient": "[7.1.2, )",
           "Microsoft.SqlServer.DacFx": "[170.5.96, )",
-          "Passenger.Core": "[0.4.0, )"
+          "Passenger.Core": "[0.4.2, )"
         }
       },
       "passenger.terminal": {
         "type": "Project",
         "dependencies": {
           "Avalonia": "[12.1.6, )",
-          "Passenger.Editor": "[0.4.0, )",
+          "Passenger.Editor": "[0.4.2, )",
           "Porta.Pty": "[2.2.4, )"
         }
       },
       "passenger.text": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.0, )"
+          "Passenger.Core": "[0.4.2, )"
         }
       },
       "passenger.vcs": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.0, )",
-          "Passenger.Text": "[0.4.0, )"
+          "Passenger.Core": "[0.4.2, )",
+          "Passenger.Text": "[0.4.2, )"
         }
       },
       "passenger.workspace": {
@@ -819,8 +819,8 @@
         "dependencies": {
           "Cucumber.CucumberExpressions": "[17.1.0, )",
           "Gherkin": "[35.0.0, )",
-          "Passenger.Core": "[0.4.0, )",
-          "Passenger.Text": "[0.4.0, )"
+          "Passenger.Core": "[0.4.2, )",
+          "Passenger.Text": "[0.4.2, )"
         }
       },
       "passenger.xaml": {
@@ -828,9 +828,9 @@
         "dependencies": {
           "Microsoft.CodeAnalysis.CSharp": "[5.12.0, )",
           "Microsoft.CodeAnalysis.VisualBasic": "[5.12.0, )",
-          "Passenger.Core": "[0.4.0, )",
-          "Passenger.Packages": "[0.4.0, )",
-          "Passenger.Text": "[0.4.0, )"
+          "Passenger.Core": "[0.4.2, )",
+          "Passenger.Packages": "[0.4.2, )",
+          "Passenger.Text": "[0.4.2, )"
         }
       },
       "Cucumber.CucumberExpressions": {

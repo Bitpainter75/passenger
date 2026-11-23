@@ -10,8 +10,9 @@ using Passenger.Debugger.Interop;
 namespace Passenger.Debugger.ExpressionEvaluator.Cil;
 
 /// <summary>An expression's value in the program, or a string the evaluation made that the program could not be given
-/// (<see cref="Text"/>: it runs no code where it is stopped), with no value in the program.</summary>
-internal readonly record struct CilInterpretationResult(ICorDebugValue? Value, ICorDebugHandleValue? OwnedResultHandle, string? Text = null);
+/// (<see cref="Text"/>: it runs no code where it is stopped), with no value in the program, or none at all where it is a
+/// call that returns nothing (<see cref="Void"/>).</summary>
+internal readonly record struct CilInterpretationResult(ICorDebugValue? Value, ICorDebugHandleValue? OwnedResultHandle, string? Text = null, bool Void = false);
 
 internal sealed class CilInterpreter(ManagedDebugger debugger, RuntimeAssemblyPrimitiveTypeClasses primitiveTypes)
 {
@@ -29,13 +30,17 @@ internal sealed class CilInterpreter(ManagedDebugger debugger, RuntimeAssemblyPr
         EvaluationMetadataResolver resolver = CreateResolver(compiled, context, frame);
         ICilLocation[] arguments = CreateArguments(frame, context, refind);
         ICilLocation[] locals = CreateLocals(compiled, resolver, frame, body.LocalSignature, context.RootValue is not null, refind);
-        await using DebuggeeDelegateAssemblyLoader delegateAssemblyLoader = new DebuggeeDelegateAssemblyLoader(debugger, compiled, resolver, context, handles, delegateMaterializer);
         ExpressionTime time = new ExpressionTime(Deadline.In(Extensions.EvaluationTimeout));
+        await using DebuggeeDelegateAssemblyLoader delegateAssemblyLoader = new DebuggeeDelegateAssemblyLoader(debugger, compiled, resolver, context, handles, delegateMaterializer, time);
         Interpretation run = new Interpretation(compiled, resolver, context, handles, delegateAssemblyLoader, time, Stopwatch.GetTimestamp(), debugger.EvalStatus.Leaving);
         debugger.EvalStatus.Expression = time;
         try
         {
             CilValue result = await InterpretAsync(run, decoded, arguments, locals);
+            if (resolver.ResolveMethodReturnType(compiled.EntryMethod).Primitive is PrimitiveTypeCode.Void)
+            {
+                return new CilInterpretationResult(null, null, Void: true);
+            }
             ICorDebugValue value;
             try
             {
@@ -651,7 +656,7 @@ internal sealed class CilInterpreter(ManagedDebugger debugger, RuntimeAssemblyPr
         {
             argumentValues[argument] = constructor.Signature.ParameterTypes[argument].EndsWith('&')
                 ? await MaterializeByRefArgumentAsync(constructorArguments[argument], resolver, run.Context, handles, temporaryByRefArguments)
-                : await MaterializeForCallAsync(constructorArguments[argument], run.Context, handles);
+                : await MaterializeForCallAsync(constructorArguments[argument], run.Compiled, resolver, run.Delegates, run.Context, handles);
         }
         if (EvaluationMetadataResolver.IsByRefLike(constructor.DeclaringType))
         {
@@ -927,7 +932,8 @@ internal sealed class CilInterpreter(ManagedDebugger debugger, RuntimeAssemblyPr
             case "GetReturnValue":
             {
                 int index = stack.Pop().AsInt32();
-                if (!debugger.TryGetReturnedValue(run.Context.ThreadId, index, out ICorDebugHandleValue? returned))
+                (bool found, ICorDebugHandleValue? returned) = await debugger.ReturnedValueAsync(run.Context.ThreadId, index);
+                if (!found)
                 {
                     throw new InvalidOperationException("No call has returned a value since the last step");
                 }
@@ -1511,6 +1517,17 @@ internal sealed class CilInterpreter(ManagedDebugger debugger, RuntimeAssemblyPr
         EvaluationHandleScope handles)
     {
         EvaluationDelegate delegateValue = value.Value as EvaluationDelegate ?? throw new InvalidOperationException("CIL value is not an evaluation delegate");
+        return await delegateAssemblyLoader.MadeAsync(() => MakeDelegateAsync(delegateValue, compiled, resolver, delegateAssemblyLoader, context, handles));
+    }
+
+    private async Task<ICorDebugValue> MakeDelegateAsync(
+        EvaluationDelegate delegateValue,
+        CompiledEvaluationMethod compiled,
+        EvaluationMetadataResolver resolver,
+        DebuggeeDelegateAssemblyLoader delegateAssemblyLoader,
+        CompiledExpressionEvaluationContext context,
+        EvaluationHandleScope handles)
+    {
         DelegateMaterializerAssembly materializer = delegateAssemblyLoader.Materializer;
         int delegateAssemblySessionId = 0;
         Guid methodModuleVersionId;
@@ -1554,11 +1571,18 @@ internal sealed class CilInterpreter(ManagedDebugger debugger, RuntimeAssemblyPr
         CompiledExpressionEvaluationContext context,
         EvaluationHandleScope handles)
     {
-        if (evaluationClosure.MaterializedValue is not null)
-        {
-            return evaluationClosure.MaterializedValue;
-        }
+        return evaluationClosure.MaterializedValue
+            ?? await delegateAssemblyLoader.MadeAsync(() => MakeEvaluationClosureAsync(evaluationClosure, compiled, resolver, delegateAssemblyLoader, context, handles));
+    }
 
+    private async Task<ICorDebugValue> MakeEvaluationClosureAsync(
+        EvaluationClosure evaluationClosure,
+        CompiledEvaluationMethod compiled,
+        EvaluationMetadataResolver resolver,
+        DebuggeeDelegateAssemblyLoader delegateAssemblyLoader,
+        CompiledExpressionEvaluationContext context,
+        EvaluationHandleScope handles)
+    {
         int delegateAssemblySessionId = await delegateAssemblyLoader.GetSessionIdAsync();
         ICorDebugFunction createObject = await delegateAssemblyLoader.GetMaterializerFunctionAsync("CreateObject");
         ICorDebugValue sessionIdArgument = await MaterializeAsync(CilValue.FromPrimitive(delegateAssemblySessionId), context, handles);
@@ -1753,7 +1777,7 @@ internal sealed class CilInterpreter(ManagedDebugger debugger, RuntimeAssemblyPr
             int size = element.Size;
             if (offset + size > data.Length)
             {
-                throw new InvalidOperationException($"The expression's constants fill {data.Length} bytes, fewer than the array's {array.Count} elements hold");
+                throw new InvalidOperationException($"The expression's constants fill {Numbers.Said(data.Length)} bytes, fewer than the array's {Numbers.Said(array.Count)} elements hold");
             }
             element.SetValue(data.AsSpan(offset, size));
             offset += size;

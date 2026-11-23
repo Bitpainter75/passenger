@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -73,6 +74,14 @@ public partial class ManagedDebugger
     /// <summary>Takes the names of the assemblies the client carries into the program for this session, before it launches
     /// or attaches: their code, however built, is never the user's, so Just My Code steps through it and over it.</summary>
     public void Carry(IReadOnlyList<string> assemblies) => _carried = new HashSet<string>(assemblies, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The folders whose source is the user's own (<see cref="Own"/>).</summary>
+    private IReadOnlyList<string> _ownFolders = [];
+
+    /// <summary>Takes the folders whose source the user writes for this session, before it launches or attaches: a module
+    /// whose symbols name a file under one of them is the user's code however it was built, a Release build's compiled
+    /// unoptimized as it loads where the runtime still lets it be (<see cref="OwnUnoptimized"/>).</summary>
+    public void Own(IReadOnlyList<string> folders) => _ownFolders = [.. folders.Where(f => f.Length > 0)];
 
     private bool _stopAtEntry;
     private EntryBreakpoint? _entryBreakpoint;
@@ -289,6 +298,7 @@ public partial class ManagedDebugger
             WhyNoAbortTakes = WhyNoAbortTakes,
             Running = EvaluationRunning,
             HoldOthers = HoldOthersDuringEvaluation,
+            ClearStarts = ClearStartsAsync,
             Log = logger,
             TellThreads = logger is null ? null : thread => logger(WhereThreadsStand(thread)),
         };
@@ -309,10 +319,11 @@ public partial class ManagedDebugger
         if (e is ExitProcessCorDebugManagedCallbackEventArgs)
         {
             _exited.Set();
+            _coreLibCame.TrySetResult();
         }
         else if (e is EvalCompleteCorDebugManagedCallbackEventArgs or EvalExceptionCorDebugManagedCallbackEventArgs)
         {
-            EvalStatus.EndCame(e);
+            EvalStatus.EndCame(e, EvaluationThread(e)?.TryGetID(out uint thread) is Cor.S_OK ? (int)thread : null);
         }
         _runtimeEventChannel.Writer.TryWrite(e);
     }
@@ -388,7 +399,8 @@ public partial class ManagedDebugger
         EvaluationThread(callbackEvent) is { } thread && EvalStatus.Abandoned.ContainsKey(thread.Id);
 
     /// <summary>The end of an evaluation given up because it could not be stopped, come at last: its value is let go, its
-    /// thread is free for evaluations again, and the program goes on, from the stop the evaluation began at.</summary>
+    /// thread is free for evaluations again, and the program goes on, from the stop the evaluation began at, with the step
+    /// that waited for it, whose stepper refused is its own event's failure (<see cref="StepsOn"/>).</summary>
     private void LetGoAbandonedEvaluation(CorDebugManagedCallbackEventArgs callbackEvent)
     {
         ICorDebugThread thread = ForgetAbandonedEvaluation(callbackEvent);
@@ -444,7 +456,7 @@ public partial class ManagedDebugger
         try
         {
             // A step stops where it lands, hidden code too, where a data breakpoint shows the frame that wrote.
-            ICorDebugFrame? stopsIn = thread is null ? null : e is StepCompleteCorDebugManagedCallbackEventArgs ? thread.ActiveFrame : TopFrame(thread);
+            ICorDebugFrame? stopsIn = thread is null ? null : e is StepCompleteCorDebugManagedCallbackEventArgs ? StoppedFrame(thread) : TopFrame(thread);
             wanted = stopsIn is ICorDebugILFrame frame && FindModule(frame.Function.Module) is { } module ? WantedFor(module) : null;
         }
         catch (Exception error) when (Failures.OfRuntime(error))
@@ -464,6 +476,8 @@ public partial class ManagedDebugger
 
     private async Task OnAnyEvent(object? sender, CorDebugManagedCallbackEventArgs e)
     {
+        int? stepping = null;
+        bool shown = _stopShown;
         try
         {
             if (e is AfterDecompiling after)
@@ -485,6 +499,7 @@ public partial class ManagedDebugger
                 _logger?.Invoke($"Held: the load of {failing} taken as the runtime's failure");
                 e = new DebuggerErrorCorDebugManagedCallbackEventArgs(held, HeldFailure, 0);
             }
+            stepping = StepsOn(e);
             _logger?.Invoke($"Event: {e.GetType().Name}{(DispatchThread(e) is int thread ? $" on thread {thread}" : "")}"
                 + (e is DebuggerErrorCorDebugManagedCallbackEventArgs error ? $": 0x{error.ErrorHR:X8}, code {error.ErrorCode}" : ""));
             if (Failure is not null && e is not (ExitProcessCorDebugManagedCallbackEventArgs or DebuggerErrorCorDebugManagedCallbackEventArgs))
@@ -492,12 +507,16 @@ public partial class ManagedDebugger
                 // Its process answers nothing since its debugging failed: no continue, which would throw, is asked of it.
                 return;
             }
+            if (FailsHandling is { } failed && e.GetType().Name == failed + EventSuffix)
+            {
+                throw new InvalidOperationException($"Held: the handling of {failed} fails as it begins");
+            }
             switch (e)
             {
                 case LogMessageCorDebugManagedCallbackEventArgs a: HandleLogMessage(sender, a); break;
                 case CreateProcessCorDebugManagedCallbackEventArgs a: HandleProcessCreated(sender, a); break;
                 case ExitProcessCorDebugManagedCallbackEventArgs a: await HandleProcessExited(a).ConfigureAwait(false); break;
-                case CreateThreadCorDebugManagedCallbackEventArgs a: HandleThreadCreated(sender, a); break;
+                case CreateThreadCorDebugManagedCallbackEventArgs a: await HandleThreadCreated(a).ConfigureAwait(false); break;
                 case ExitThreadCorDebugManagedCallbackEventArgs a: HandleThreadExited(sender, a); break;
                 case LoadModuleCorDebugManagedCallbackEventArgs a: HandleModuleLoaded(sender, a); break;
                 case LoadClassCorDebugManagedCallbackEventArgs a: HandleClassLoaded(a); break;
@@ -508,6 +527,7 @@ public partial class ManagedDebugger
                 case ExceptionCorDebugManagedCallbackEventArgs a: HandleException(sender, a); break;
                 case Exception2CorDebugManagedCallbackEventArgs a: await HandleException2(sender, a).ConfigureAwait(false); break;
                 case DeferredExceptionStop a: await StopAtExceptionIfHit(a).ConfigureAwait(false); break;
+                case HandlingFailed a: StopForFailure(a); break;
                 case DataBreakpointCorDebugManagedCallbackEventArgs a: await HandleDataBreakpoint(a).ConfigureAwait(false); break;
                 case FunctionRemapOpportunityCorDebugManagedCallbackEventArgs a: HandleFunctionRemapOpportunity(a); break;
                 case FunctionRemapCompleteCorDebugManagedCallbackEventArgs a: HandleFunctionRemapComplete(a); break;
@@ -525,11 +545,113 @@ public partial class ManagedDebugger
         catch (Exception ex)
         {
             _logger?.Invoke($"Error handling event {e.GetType().Name}: {ex}");
-            if (_process is not null && _process.TryIsRunning(out bool isRunning) is Cor.S_OK && isRunning is false)
+            // Not where the handler let the program go, or stopped it and showed that stop, before it failed.
+            if (_process is not null && _process.TryIsRunning(out bool isRunning) is Cor.S_OK && isRunning is false && (shown || !_stopShown))
             {
-                Continue(clearVariables: false);
+                TakeFailure(e, stepping, ex);
             }
         }
+    }
+
+    /// <summary>The thread of a step under way that an event belongs to: the step's end, a breakpoint its thread met as the
+    /// step ran (one after a call it watches), one an async step waits at, on whichever thread, a remap of the step's frame
+    /// into new code, or the return of an evaluation it waits for, either of which makes its stepper; null for any other.</summary>
+    private int? StepsOn(CorDebugManagedCallbackEventArgs e) => (e, Stepping) switch
+    {
+        (StepCompleteCorDebugManagedCallbackEventArgs ended, (int thread, _)) when ended.Thread.Id == thread => thread,
+        (BreakpointCorDebugManagedCallbackEventArgs met, (int thread, _)) when met.Thread.Id == thread => thread,
+        (BreakpointCorDebugManagedCallbackEventArgs met, _) when _asyncStepper?.Steps is true => met.Thread.Id,
+        (FunctionRemapOpportunityCorDebugManagedCallbackEventArgs offered, (int thread, _)) when offered.Thread.Id == thread => thread,
+        (FunctionRemapCompleteCorDebugManagedCallbackEventArgs remapped, _) when _restepAfterRemap == remapped.Thread.Id => remapped.Thread.Id,
+        (EvalCompleteCorDebugManagedCallbackEventArgs or EvalExceptionCorDebugManagedCallbackEventArgs, _)
+            when _stepAfterEvaluation is (int waiting, _) && EvaluationThread(e)?.Id == waiting && IsAbandonedEvaluationsEnd(e) => waiting,
+        _ => null,
+    };
+
+    /// <summary>An event whose handling failed, the program still held for it, as a stop of its own: the step's it belongs
+    /// to, or one an event of its kind may make, put off while an evaluation runs or a stop is shown.</summary>
+    private sealed class HandlingFailed(CorDebugManagedCallbackEventArgs failed, ICorDebugThread thread, string reason, string why) : CorDebugManagedCallbackEventArgs
+    {
+        public CorDebugManagedCallbackEventArgs Failed { get; } = failed;
+        public ICorDebugThread Thread { get; } = thread;
+        public string Reason { get; } = reason;
+        public string Why { get; } = why;
+    }
+
+    /// <summary>An event whose handling failed with the program still held for it. One that stops the program, or may (a
+    /// step's own, a breakpoint, a data breakpoint, a Debugger.Break(), an exception the person may stop at), stops it where
+    /// its thread stands, saying why, once any evaluation under way or stop shown is over; any other lets the program go
+    /// on, saying why, once for each kind of event.</summary>
+    private void TakeFailure(CorDebugManagedCallbackEventArgs e, int? stepping, Exception error)
+    {
+        string kind = e.GetType().Name.Replace(EventSuffix, "", StringComparison.Ordinal);
+        string why = $"the debugger could not handle {(stepping is null ? "a" : "the step's")} {kind} event: {error.Message}";
+        if (StoppingThread(e) is { } thread && (stepping is not null || StopReasonOf(e) is not null))
+        {
+            HandlingFailed failed = new(e, thread, stepping is null ? StopReasonOf(e)! : StopReasons.Step, why);
+            if (!PutOffDuringEvaluation(failed, thread))
+            {
+                StopForFailure(failed);
+            }
+            return;
+        }
+        Continue(clearVariables: false);
+        if (_failedKinds.Add(kind))
+        {
+            Say($"The program went on, as {why}");
+        }
+    }
+
+    /// <summary>The kinds of event whose failed handling the Debug Console has said, each once.</summary>
+    private readonly HashSet<string> _failedKinds = [];
+
+    /// <summary>The thread an event that may stop the program stopped, as its handler would have read it.</summary>
+    private static ICorDebugThread? StoppingThread(CorDebugManagedCallbackEventArgs e) => e switch
+    {
+        BreakpointCorDebugManagedCallbackEventArgs met => met.Thread,
+        StepCompleteCorDebugManagedCallbackEventArgs ended => ended.Thread,
+        DataBreakpointCorDebugManagedCallbackEventArgs written => written.Thread,
+        BreakCorDebugManagedCallbackEventArgs broke => broke.Thread,
+        Exception2CorDebugManagedCallbackEventArgs thrown => thrown.Thread,
+        DeferredExceptionStop thrown => thrown.Thread,
+        FunctionRemapOpportunityCorDebugManagedCallbackEventArgs offered => offered.Thread,
+        FunctionRemapCompleteCorDebugManagedCallbackEventArgs remapped => remapped.Thread,
+        EvalCompleteCorDebugManagedCallbackEventArgs returned => returned.Thread,
+        EvalExceptionCorDebugManagedCallbackEventArgs returned => returned.Thread,
+        _ => null,
+    };
+
+    /// <summary>How an event that may stop the program would have stopped it: a breakpoint, a data breakpoint, a
+    /// Debugger.Break() as a pause, an exception the person may stop at (one already found to stop, one left unhandled, or
+    /// any while exception breakpoints are set); null for an event that stops nothing of itself.</summary>
+    private string? StopReasonOf(CorDebugManagedCallbackEventArgs e) => e switch
+    {
+        BreakpointCorDebugManagedCallbackEventArgs => StopReasons.Breakpoint,
+        DataBreakpointCorDebugManagedCallbackEventArgs => StopReasons.DataBreakpoint,
+        BreakCorDebugManagedCallbackEventArgs => StopReasons.Pause,
+        DeferredExceptionStop or Exception2CorDebugManagedCallbackEventArgs { DwEventType: CorDebugExceptionCallbackType.DEBUG_EXCEPTION_UNHANDLED } => StopReasons.Exception,
+        Exception2CorDebugManagedCallbackEventArgs when _exceptionBreakpoints.Count > 0 || _exceptionRules is { Count: > 0 } => StopReasons.Exception,
+        _ => null,
+    };
+
+    /// <summary>Stops the program where an event whose handling failed left its thread, the step under way ended, saying
+    /// why in the Debug Console and the stop's own words.</summary>
+    private void StopForFailure(HandlingFailed failed)
+    {
+        ICorDebugThread thread = failed.Thread;
+        _logger?.Invoke($"Thread {thread.Id} stops where it stands for {failed.Reason}: {failed.Why}");
+        EndStepForStop();
+        SourceInfo? source = null;
+        try
+        {
+            source = GetSourceInfoAtFrame(StoppedFrame(thread), _justMyCode is false);
+        }
+        catch (Exception error) when (Failures.OfRuntime(error))
+        {
+            _logger?.Invoke($"Where thread {thread.Id} stands could not be read: {error.Message}");
+        }
+        Say($"{(failed.Reason == StopReasons.Step ? "The step" : "The program")} stopped where its thread stands, as {failed.Why}");
+        ReportStop(thread.Id, failed.Reason, source?.FilePath, source?.StartLine ?? 0, source?.StartColumn ?? 0, null, failed.Why);
     }
 
     private void HandleLogMessage(object? sender, LogMessageCorDebugManagedCallbackEventArgs logMessageEvent)
@@ -703,6 +825,7 @@ public partial class ManagedDebugger
         _stopShown = true;
         // A pause holds threads where they stand, and an exception inside its managed dispatch, neither at a patch.
         _stoppedInDispatch = reason is StopReasons.Pause or StopReasons.Exception ? null : threadId;
+        _stoppedAt = _stoppedInDispatch is int stopped && _process is { } held ? PlaceOf(held, stopped) : null;
         _stoppedByEvent = reason is StopReasons.Pause ? null : threadId;
         OnStopped?.Invoke(new StopInfo(threadId, reason, filePath, line, column, hitBreakpointIds, text));
     }
@@ -773,6 +896,36 @@ public partial class ManagedDebugger
     /// missed a thread that went on to meet breakpoints while the evaluation ran.</summary>
     public static bool HoldsNoneAtEvaluations { get; set; }
 
+    /// <summary>A test's hold: the thread of this name is held where the runtime announces it, at its first instruction, as
+    /// a stop once caught a thread on its way out of its announcement, until an evaluation lets it past.</summary>
+    public static string? HoldsStartOf { get; set; }
+
+    /// <summary>A test's hold: each box of a value a call returned first waits in the program for its input, so the
+    /// evaluation making it is held unfinished, as one that never ends is, until the program is given some.</summary>
+    public static bool HoldsBoxes { get; set; }
+
+    /// <summary>A test's hold: before the async stepper asks the program where a step goes (a step out's builder, to tell
+    /// of its end; which run goes on after an await), the thread waits in the program for its input, so an evaluation is
+    /// held unfinished there, as one that never ends is, until the program is given some.</summary>
+    public static bool HoldsAsyncSteps { get; set; }
+
+    /// <summary>A test's hold: a let-go waits, the program running, until each evaluation given up still to end has ended,
+    /// before it holds the program, so that end lies queued unread as the let-go begins, as one once came.</summary>
+    public static bool HoldsLetGo { get; set; }
+
+    /// <summary>A test's hold: the handling of each event of this kind (its callback's name, as Breakpoint) fails as it
+    /// begins, as an error inside its handler would. A name that is no kind of event is refused.</summary>
+    public static string? FailsHandling
+    {
+        get;
+        set => field = value is null || typeof(CorDebugManagedCallbackEventArgs).Assembly.GetType($"{typeof(CorDebugManagedCallbackEventArgs).Namespace}.{value}{EventSuffix}") is not null
+            ? value
+            : throw new FormatException($"\"{value}\" names no kind of the runtime's events to fail the handling of");
+    }
+
+    /// <summary>What each of the runtime's events' types is named with, after its kind.</summary>
+    private const string EventSuffix = "CorDebugManagedCallbackEventArgs";
+
     /// <summary>The failure <see cref="FailAtModule"/> stands in for the runtime's with: E_FAIL.</summary>
     private const int HeldFailure = unchecked((int)0x80004005);
 
@@ -802,6 +955,7 @@ public partial class ManagedDebugger
     {
         _returnGuard?.Guard.TryDeactivate();
         _returnGuard = null;
+        EndUnwinding();
     }
 
     /// <summary>The step over an await goes on from where its run resumed, on this thread, which need not be the one that
@@ -809,8 +963,25 @@ public partial class ManagedDebugger
     internal void StepOnFromResume(ICorDebugThread thread, StepType type)
     {
         EndStepper();
-        SetupStepper(thread, type);
         FollowReturnWatch(thread);
+        if (!StepsAfterEvaluation(thread.Id, type))
+        {
+            SetupStepper(thread, type);
+        }
+    }
+
+    /// <summary>Where an evaluation left running holds a thread a step goes on from (the async stepper's, a box's), a
+    /// stepper made now would be the evaluation's, ended with it: the step is made once that evaluation returns. True
+    /// when it waits for it.</summary>
+    private bool StepsAfterEvaluation(int thread, StepType type)
+    {
+        if (!EvalStatus.Abandoned.ContainsKey(thread))
+        {
+            return false;
+        }
+        _logger?.Invoke($"The evaluation on thread {thread} is left running: the step goes on once it returns");
+        _stepAfterEvaluation = (thread, type);
+        return true;
     }
 
     /// <summary>The step through an await ends where its run goes on, on this thread, already on a line after the await's
@@ -881,7 +1052,160 @@ public partial class ManagedDebugger
             _returnGuard = (guard, stepper, RunsOn: true);
             _logger?.Invoke($"  None of the user's code is below {FrameTold(from)}: a step out of it stands guard, the step ending as it returns");
         }
+        else if (justMyCode && from is not null && CallerOf(thread, from) is { } caller && !IsUserCodeFrame(caller) && !IsAsyncFrame(from))
+        {
+            _unwinding = new Unwinding(thread.Id);
+            GuardUnwinding(_unwinding, from);
+            _logger?.Invoke($"  {FrameTold(from)} returns to {FrameTold(caller)}, not the user's code: a step out of each frame it returns through stands guard in turn");
+        }
         return stepper;
+    }
+
+    /// <summary>A Just My Code step from a frame that returns to code not the user's, theirs further below (a library's
+    /// loop calling the frame, a window's or a dispatcher's): a step out of the innermost frame the thread has not returned
+    /// from since the step began stands guard, moved down as each returns, and the methods returned from are kept. The
+    /// user's code the step reaches through a new call of one of them is a later turn of what called the frame, never the
+    /// step's (<see cref="LaterTurn"/>).</summary>
+    private Unwinding? _unwinding;
+
+    private sealed class Unwinding(int thread)
+    {
+        public int Thread { get; } = thread;
+
+        public ICorDebugStepper? Guard { get; set; }
+
+        /// <summary>The frame the guard steps out of, which the thread has not returned from, and its method.</summary>
+        public StackRange? Standing { get; set; }
+
+        public (ModuleInfo Module, int Token)? StandingMethod { get; set; }
+
+        /// <summary>The methods of the frames the thread has returned from since the step began.</summary>
+        public HashSet<(ModuleInfo Module, int Token)> Left { get; } = [];
+    }
+
+    private void GuardUnwinding(Unwinding unwinding, ICorDebugFrame frame)
+    {
+        ICorDebugStepper guard = Intercepting(frame.CreateStepper());
+        guard.SetUnmappedStopMask(CorDebugUnmappedStop.STOP_NONE);
+        guard.StepOut();
+        unwinding.Guard = guard;
+        unwinding.Standing = RangeOf(frame);
+        unwinding.StandingMethod = MethodOf(frame);
+    }
+
+    /// <summary>The guarded frame has returned: its method is kept as left, and the guard moves to the frame it returned to,
+    /// unless that is the user's code, where the step stops as its stepper takes it.</summary>
+    private void FollowUnwinding(ICorDebugThread thread, Unwinding unwinding)
+    {
+        if (unwinding.StandingMethod is { } left)
+        {
+            unwinding.Left.Add(left);
+        }
+        unwinding.Guard?.TryDeactivate();
+        unwinding.Guard = null;
+        unwinding.Standing = null;
+        unwinding.StandingMethod = null;
+        if (StoppedFrame(thread) is { } landed && !IsUserCodeFrame(landed))
+        {
+            GuardUnwinding(unwinding, landed);
+        }
+    }
+
+    private void EndUnwinding()
+    {
+        _unwinding?.Guard?.TryDeactivate();
+        _unwinding = null;
+    }
+
+    /// <summary>Where the step has reached the user's code through a new call of a method it had returned from, between
+    /// that code and the frame it has not returned from: that method, as the call stack names it. Null where the step
+    /// reached it from the frame it has not returned from, or from below it.</summary>
+    private string? LaterTurn(ICorDebugThread thread, Unwinding unwinding)
+    {
+        if (unwinding.Standing is not { } standing || unwinding.Left.Count == 0)
+        {
+            return null;
+        }
+        try
+        {
+            bool reached = false;
+            foreach (ICorDebugChain chain in thread.EnumerateChains())
+            {
+                foreach (ICorDebugFrame frame in chain.IsManaged ? chain.EnumerateFrames() : [])
+                {
+                    if (frame is ICorDebugInternalFrame)
+                    {
+                        continue;
+                    }
+                    if (RangeOf(frame) == standing)
+                    {
+                        return null;
+                    }
+                    if (reached && MethodOf(frame) is { } method && unwinding.Left.Contains(method))
+                    {
+                        return FrameTold(frame);
+                    }
+                    reached = true;
+                }
+            }
+        }
+        catch (Exception error) when (Failures.OfRuntime(error))
+        {
+            return null;
+        }
+        return null;
+    }
+
+    /// <summary>The frame a frame returns to, in its own chain; null where it was called from native code.</summary>
+    private static ICorDebugFrame? CallerOf(ICorDebugThread thread, ICorDebugFrame frame)
+    {
+        if (RangeOf(frame) is not { } of)
+        {
+            return null;
+        }
+        foreach (ICorDebugChain chain in thread.EnumerateChains())
+        {
+            bool found = false;
+            foreach (ICorDebugFrame below in chain.IsManaged ? chain.EnumerateFrames() : [])
+            {
+                if (found && below is not ICorDebugInternalFrame)
+                {
+                    return below;
+                }
+                found = found || RangeOf(below) == of;
+            }
+            if (found)
+            {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private (ModuleInfo Module, int Token)? MethodOf(ICorDebugFrame frame)
+    {
+        try
+        {
+            return frame.Function is { } function && FindModule(function.Module) is { } module ? (module, function.Token) : null;
+        }
+        catch (Exception error) when (Failures.OfRuntime(error))
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Whether a frame runs an async method's state machine, whose steps the async stepper follows.</summary>
+    private bool IsAsyncFrame(ICorDebugFrame frame)
+    {
+        try
+        {
+            return frame is ICorDebugILFrame il && FindModule(il.Function.Module) is { } module
+                && module.MetadataReader.GetAsyncMethodSteppingInfo(il.Function.Token, ModuleMetadataReader.VersionOf(il)) is not null;
+        }
+        catch (Exception error) when (Failures.OfRuntime(error))
+        {
+            return false;
+        }
     }
 
     /// <summary>Whether a frame, once it returns, goes back to the user's code on its thread: a frame of theirs below it
@@ -1374,6 +1698,11 @@ public partial class ManagedDebugger
     /// <summary>The frame a thread stands in as its stack shows it, where hidden code may run above it.</summary>
     internal ICorDebugFrame? TopFrame(ICorDebugThread thread) => EnumerateFramesForThread(thread).FirstOrDefault();
 
+    /// <summary>The frame an event stopped a thread in, hidden code too: its active frame, or, where an evaluation run since
+    /// was left running above it, the frame below that evaluation's.</summary>
+    private ICorDebugFrame? StoppedFrame(ICorDebugThread thread) =>
+        EvalStatus.Abandoned.ContainsKey(thread.Id) ? FramesOnStack(thread).FirstOrDefault() : thread.ActiveFrame;
+
     private bool IsHiddenFrame(ICorDebugFrame frame)
     {
         try
@@ -1481,15 +1810,25 @@ public partial class ManagedDebugger
         bool runsOff = letGo && !exited;
         // The threads the runtime holds inside its handling of a breakpoint or a step's end, run off it before the detach.
         List<int> inDispatch = runsOff ? [.. _deferredEvents.Concat(_behindStep).Select(DispatchThread).OfType<int>()] : [];
-        if (_stopShown && _stoppedInDispatch is int stopped)
+        // The stop's thread also once a continue left it in an evaluation given up there, to which it returns as that ends.
+        bool backToStop = _stoppedInDispatch is int returning && EvalStatus.Abandoned.ContainsKey(returning);
+        if ((_stopShown || backToStop) && _stoppedInDispatch is int stopped)
         {
             inDispatch.Insert(0, stopped);
+            if (backToStop && !_stopShown && runsOff)
+            {
+                _logger?.Invoke($"Letting go: thread {stopped} goes back to its stop as its evaluation given up there returns, and is run off it");
+            }
         }
-        // The client's time for the let-go, and where each held thread stands before anything below runs it.
+        // The client's time for the let-go, and where each held thread stands before anything below runs it, the stop's as it came.
         long? letGoBy = within is { } given ? Stopwatch.GetTimestamp() + (long)(given.TotalSeconds * Stopwatch.Frequency) : null;
         Dictionary<int, ThreadPlace?> heldAt = [];
         if (!exited && letGo && _process is { } measured)
         {
+            if (_stoppedInDispatch is int shown && inDispatch.Contains(shown) && _stoppedAt is { } stood)
+            {
+                heldAt[shown] = stood;
+            }
             foreach (int thread in inDispatch)
             {
                 heldAt.TryAdd(thread, PlaceOf(measured, thread));
@@ -1551,9 +1890,11 @@ public partial class ManagedDebugger
             // A step under way would stop the program as it runs off its stop, and fails the detach.
             _stepper?.TryDeactivate();
             _returnGuard?.Guard.TryDeactivate();
+            _unwinding?.Guard?.TryDeactivate();
         }
         _stepper = null!;
         _returnGuard = null;
+        _unwinding = null;
         _stepping = null;
         _stepAfterEvaluation = null;
         _unhandledByUser = null;
@@ -1684,8 +2025,25 @@ internal sealed class EvalStatus
     /// on its callback thread, so the time the program took is told from the time the debugger took to hear it.</summary>
     private readonly ConditionalWeakTable<CorDebugManagedCallbackEventArgs, StrongBox<long>> came = [];
 
-    /// <summary>An evaluation's end has come from the runtime, before it is queued.</summary>
-    internal void EndCame(CorDebugManagedCallbackEventArgs end) => came.AddOrUpdate(end, new StrongBox<long>(System.Diagnostics.Stopwatch.GetTimestamp()));
+    /// <summary>The threads whose latest evaluation's end has come from the runtime, taken on its callback thread: an end
+    /// queued behind the engine's lock is known by it before the event is read.</summary>
+    private readonly ConcurrentDictionary<int, bool> ended = [];
+
+    /// <summary>An evaluation's end has come from the runtime on a thread, before it is queued.</summary>
+    internal void EndCame(CorDebugManagedCallbackEventArgs end, int? thread)
+    {
+        came.AddOrUpdate(end, new StrongBox<long>(System.Diagnostics.Stopwatch.GetTimestamp()));
+        if (thread is int on)
+        {
+            ended[on] = true;
+        }
+    }
+
+    /// <summary>An evaluation begins on the thread: an end said of it from here is this one's.</summary>
+    internal void Begins(int thread) => ended.TryRemove(thread, out _);
+
+    /// <summary>Whether the end of the evaluation begun last on the thread has come, read or not.</summary>
+    internal bool HasEnded(int thread) => ended.ContainsKey(thread);
 
     /// <summary>When an evaluation's end came (<see cref="EndCame"/>), or null for one never stamped.</summary>
     internal long? CameAt(CorDebugManagedCallbackEventArgs end) => came.TryGetValue(end, out StrongBox<long>? at) ? at.Value : null;
@@ -1716,8 +2074,13 @@ internal sealed class EvalStatus
     internal required Func<ICorDebugThread, string?> Running { get; init; }
 
     /// <summary>Holds every thread but the one given while an evaluation runs on it alone, but the runtime's own that runs
-    /// none of the program's code (<see cref="ManagedDebugger.HoldOthersDuringEvaluation"/>).</summary>
+    /// none of the program's code and one at its first instruction, left to <see cref="ClearStarts"/>
+    /// (<see cref="ManagedDebugger.HoldOthersDuringEvaluation"/>).</summary>
     internal required Action<ICorDebugThread> HoldOthers { get; init; }
+
+    /// <summary>With the evaluation on the thread given let go, lets each thread its hold left at its first instruction run
+    /// past it, then holds it, so the hold keeps none where no collection can run (<see cref="ManagedDebugger.ClearStartsAsync"/>).</summary>
+    internal required Func<ICorDebugThread, Task> ClearStarts { get; init; }
 
     /// <summary>The engine's log, for what becomes of an evaluation past its time.</summary>
     internal Action<string>? Log { get; init; }

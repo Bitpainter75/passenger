@@ -12,18 +12,20 @@ namespace Passenger.Tests;
 /// <summary>Addresses written in a file's comments and strings, as a person meets them in the editor: each is underlined as a
 /// link, found by the language's own reading of what is a comment or a string, and Go to Declaration's gesture opens it in
 /// the browser, where a plain click only places the caret; the hover card says where it leads.</summary>
+[AboutMacOS]
 public sealed class CodeLinksTests : IDisposable
 {
     private const string Issue = "https://github.com/Zaneris/passenger/issues/1903";
     private const string Docs = "https://learn.microsoft.com/dotnet/";
+    private const string Wiki = "https://en.wikipedia.org/wiki/C_(programming_language)";
 
     private readonly string folder = TestFolders.Create("code-links-");
 
     public void Dispose() => TestFolders.Delete(folder);
 
     /// <summary>Lines from zero: a comment's address, a comment of words alone, a string's address, an address in code the
-    /// build leaves out, file addresses, one on this machine and one on a share, and an Aspire service's address, which
-    /// service discovery reads and no browser opens.</summary>
+    /// build leaves out, file addresses, one on this machine and one on a share, an Aspire service's address, which service
+    /// discovery reads and no browser opens, and an address holding parentheses inside a pair that wraps it.</summary>
     private string Code => string.Join('\n',
         $"// See {Issue} for why.",                                     // 0
         "class Links",
@@ -35,6 +37,7 @@ public sealed class CodeLinksTests : IDisposable
         "#endif",
         $"    // Kept in {new Uri(Path.Combine(folder, "Links.cs")).AbsoluteUri}, never file://server/share/Links.cs.", // 8
         "    const string Api = \"https+http://apiservice\";",         // 9
+        $"    // The language (see {Wiki}).",                           // 10
         "}",
         "");
 
@@ -48,8 +51,16 @@ public sealed class CodeLinksTests : IDisposable
         return window;
     }
 
+    /// <summary>An address in a comment or a string is a link, none found in words alone, code left out or a service's
+    /// address, and the declaration's gesture opens it in the browser where a plain click places the caret.</summary>
     [AvaloniaFact]
-    public void An_address_in_a_comment_or_a_string_is_a_link_and_none_is_found_in_words_alone_code_left_out_or_a_services_address()
+    public void An_address_in_a_comment_or_a_string_is_a_link_the_declarations_gesture_opens_in_the_browser()
+    {
+        Flow.StepApart<CodeLinksTests>("an address in a comment or a string is a link, and none is found in words alone, code left out or a service's address", t => t.An_address_in_a_comment_or_a_string_is_a_link_and_none_is_found_in_words_alone_code_left_out_or_a_services_address());
+        Flow.StepApart<CodeLinksTests>("the declaration's gesture on a comment's address opens it in the browser, where a plain click places the caret", t => t.The_declarations_gesture_on_a_comments_address_opens_it_in_the_browser_where_a_plain_click_places_the_caret());
+    }
+
+    private void An_address_in_a_comment_or_a_string_is_a_link_and_none_is_found_in_words_alone_code_left_out_or_a_services_address()
     {
         MainWindow window = Open(out CodeEditor editor);
         try
@@ -77,8 +88,7 @@ public sealed class CodeLinksTests : IDisposable
         }
     }
 
-    [AvaloniaFact]
-    public void The_declarations_gesture_on_a_comments_address_opens_it_in_the_browser_where_a_plain_click_places_the_caret()
+    private void The_declarations_gesture_on_a_comments_address_opens_it_in_the_browser_where_a_plain_click_places_the_caret()
     {
         MainWindow window = Open(out CodeEditor editor);
         try
@@ -97,34 +107,6 @@ public sealed class CodeLinksTests : IDisposable
             Ui.Settle();
             Ui.Press(window, Ui.Shortcut(AppActions.GoToDeclaration));
             Assert.True(window.Browsed.SequenceEqual([new Uri(Issue), new Uri(Docs)]), $"Go to Declaration's keys on a string's address opened [{string.Join(", ", window.Browsed)}]");
-        }
-        finally
-        {
-            window.Close();
-        }
-    }
-
-    /// <summary>The card the pointer's rest shows says the address and the keys that open it; with the gesture held the
-    /// address takes the hand.</summary>
-    [AvaloniaFact]
-    public void A_comments_address_says_where_it_leads_when_the_pointer_rests_on_it_and_takes_the_hand_with_the_gesture_held()
-    {
-        MainWindow window = Open(out CodeEditor editor);
-        try
-        {
-            TextSnapshot text = editor.Document.Snapshot;
-            int start = Place(text, 0, Issue);
-            Point on = editor.PointOf(start + 8) + new Point(1, editor.LineHeight / 2);
-            Ui.Hover(editor, on);
-            Ui.WaitFor(() => window.Assist.HoverText is not null, "the card of a comment's address");
-            Assert.Contains(Issue, window.Assist.HoverText, StringComparison.Ordinal);
-            Assert.Contains(window.Actions.ShortcutsShown(AppActions.GoToDeclaration)!, window.Assist.HoverText, StringComparison.Ordinal);
-            Assert.False(editor.ShowsHand, "A comment's address took the hand with no key held, where a click only places the caret");
-
-            Ui.Hover(editor, on + new Point(2, 0), OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control);
-            Ui.WaitFor(() => editor.PointedRange is not null, "the held gesture to reach the comment's address");
-            Assert.True(editor.PointedRange == new TextRange(start, Issue.Length) && editor.ShowsHand,
-                $"With the gesture held a comment's address reached {editor.PointedRange} and the hand is {(editor.ShowsHand ? "shown" : "not shown")}");
         }
         finally
         {

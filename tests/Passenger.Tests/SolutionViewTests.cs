@@ -1,5 +1,6 @@
 using System.Text;
 using Avalonia;
+using Avalonia.Automation.Peers;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
@@ -26,6 +27,7 @@ namespace Passenger.Tests;
 /// Reference... adds and takes out a project reference, however the others are laid out, which the Dependencies, the
 /// build and the language server follow, the rest of the project file as it was; Add, Class/Interface... writes each kind
 /// of type; Open In, Terminal starts a shell in the folder; and Tools' Compare shows two files' differences.</summary>
+[AboutMacOS]
 public sealed class SolutionViewTests : IDisposable
 {
     private static readonly string Library = TestProjects.Library();
@@ -57,9 +59,75 @@ public sealed class SolutionViewTests : IDisposable
         TestFolders.Delete(trash);
     }
 
+    /// <summary>The gate's eleven checks of the solution view, as one flow: a cut, copy, paste and drag moving what
+    /// they name with its tab and Undo at the cost of a file each, Add Reference writing a project MSBuild loads and
+    /// keeping unsaved edits, Add refusing with why, the menus, a solution filter, and only the rows touched made
+    /// again.</summary>
     [Gate]
     [AvaloniaFact]
-    public void A_file_cut_and_pasted_into_another_projects_folder_moves_there_with_its_open_tab_its_undo_and_its_edit()
+    public void The_gates_solution_view_holds_as_one_flow()
+    {
+        Flow.StepApart<SolutionViewTests>("a file cut and pasted into another projects folder moves there with its open tab its undo and its edit", t => t.A_file_cut_and_pasted_into_another_projects_folder_moves_there_with_its_open_tab_its_undo_and_its_edit());
+        Flow.StepApart<SolutionViewTests>("cutting every file of a folder of four hundred costs each file about what it does in a folder of forty", t => t.Cutting_every_file_of_a_folder_of_four_hundred_costs_each_file_about_what_it_does_in_a_folder_of_forty());
+        Flow.StepApart<SolutionViewTests>("a folder copied and pasted copies all it holds named as Riders Duplicate asks and a file dragged moves or with the copy key copies", t => t.A_folder_copied_and_pasted_copies_all_it_holds_named_as_Riders_Duplicate_asks_and_a_file_dragged_moves_or_with_the_copy_key_copies());
+        Flow.StepApart<SolutionViewTests>("Add reference beside one that shares its line with its groups tags writes a project MSBuild loads and remove puts it back", t => t.Add_reference_beside_one_that_shares_its_line_with_its_groups_tags_writes_a_project_MSBuild_loads_and_remove_puts_it_back());
+        Flow.StepApart<SolutionViewTests>("a project file and the solution open with unsaved edits keep them through add reference and new solution folder with no question", t => t.A_project_file_and_the_solution_open_with_unsaved_edits_keep_them_through_add_reference_and_new_solution_folder_with_no_question());
+        Flow.StepApart<SolutionViewTests>("Add refused by its folder says why with no ide error and add class interface writes each of Riders kinds of type in its folders namespace", t => t.Add_refused_by_its_folder_says_why_with_no_ide_error_and_add_class_interface_writes_each_of_Riders_kinds_of_type_in_its_folders_namespace());
+        Flow.StepApart<SolutionViewTests>("the menus show their actions keys compare shows two files differences and open in terminal starts a shell in the folder", t => t.The_menus_show_their_actions_keys_compare_shows_two_files_differences_and_open_in_terminal_starts_a_shell_in_the_folder());
+        Flow.StepApart<SolutionViewTests>("a file added keeps the open dependencies open and opens no other projects", t => t.A_file_added_keeps_the_open_dependencies_open_and_opens_no_other_projects());
+        Flow.StepApart<SolutionViewTests>("a solution filter opens its solution with its projects alone built and analysed and a change to it is followed", t => t.A_solution_filter_opens_its_solution_with_its_projects_alone_built_and_analysed_and_a_change_to_it_is_followed());
+        Flow.StepApart<SolutionViewTests>("Delete unload and reload make again only the rows they touch", t => t.Delete_unload_and_reload_make_again_only_the_rows_they_touch());
+        Flow.StepApart<SolutionViewTests>("New file new folder and paste make again only the rows of what they make or move", t => t.New_file_new_folder_and_paste_make_again_only_the_rows_of_what_they_make_or_move());
+    }
+
+    /// <summary>A paste over a file of its name, a copy over others, a copy failing partway, two files of one name, Add
+    /// Reference and a project renamed with its launch profiles are each one command of Undo that puts everything back,
+    /// or refused before anything goes, every other byte of a project kept, as one flow, each step the check one test
+    /// made in an instance of its own.</summary>
+    [AvaloniaFact]
+    public void Paste_copy_and_Add_Reference_are_each_one_command_of_Undo_or_refused_before_anything_goes()
+    {
+        Flow.StepApart<SolutionViewTests>("a file pasted over one of its name replaces it in the moves command so one undo puts both back", t => t.A_file_pasted_over_one_of_its_name_replaces_it_in_the_moves_command_so_one_undo_puts_both_back());
+        Flow.StepApart<SolutionViewTests>("a file and a folder copied over ones of their names are one command whose undo trashes the copies and brings back what they replaced", t => t.A_file_and_a_folder_copied_over_ones_of_their_names_are_one_command_whose_undo_trashes_the_copies_and_brings_back_what_they_replaced());
+        Flow.StepApart<SolutionViewTests>("a folder copy that fails partway takes back what it copied and puts back what it replaced", t => t.A_folder_copy_that_fails_partway_takes_back_what_it_copied_and_puts_back_what_it_replaced());
+        Flow.StepApart<SolutionViewTests>("two files of one name put into one folder are refused before either goes", t => t.Two_files_of_one_name_put_into_one_folder_are_refused_before_either_goes());
+        Flow.StepApart<SolutionViewTests>("Add reference adds one the build and language server follow and remove takes it out leaving the project file as it was", t => t.Add_reference_adds_one_the_build_and_language_server_follow_and_remove_takes_it_out_leaving_the_project_file_as_it_was());
+        Flow.StepApart<SolutionViewTests>("Add reference is one command undo takes back leaving the project file as it was", t => t.Add_reference_is_one_command_undo_takes_back_leaving_the_project_file_as_it_was());
+        Flow.StepApart<SolutionViewTests>("Add reference to a Windows 1252 project keeps its other bytes and Local History keeps the project as it was", t => t.Add_reference_to_a_Windows_1252_project_keeps_its_other_bytes_and_Local_History_keeps_the_project_as_it_was());
+        Flow.StepApart<SolutionViewTests>("a project renamed or moved takes the solutions launch profiles with it in the same command of Undo", t => t.A_project_renamed_or_moved_takes_the_solutions_launch_profiles_with_it_in_the_same_command_of_Undo());
+    }
+
+    /// <summary>A solution filter takes in a project added under it and follows its projects renamed, moved or removed,
+    /// a package's files are listed only where linked and refuse every change saying whose they are, Properties and
+    /// wwwroot list first, and every project is drawn and said by what it builds, as one flow, each step in an instance
+    /// of its own.</summary>
+    [AvaloniaFact]
+    public void The_solution_view_lists_what_filters_and_packages_name_and_refuses_what_is_not_the_persons()
+    {
+        Flow.StepApart<SolutionViewTests>("a program beside the solution is never offered as a reference and stays loaded however a solution filter opens", t => t.A_program_beside_the_solution_is_never_offered_as_a_reference_and_stays_loaded_however_a_solution_filter_opens());
+        Flow.StepApart<SolutionViewTests>("a project added under an open solution filter joins its list so the filter opened again loads it", t => t.A_project_added_under_an_open_solution_filter_joins_its_list_so_the_filter_opened_again_loads_it());
+        Flow.StepApart<SolutionViewTests>("projects renamed moved and removed under an open solution filter take its list with them so the filter opened again loads them", t => t.Projects_renamed_moved_and_removed_under_an_open_solution_filter_take_its_list_with_them_so_the_filter_opened_again_loads_them());
+        Flow.StepApart<SolutionViewTests>("a package folders file a project names is listed only where linked and refuses rename delete and cut saying whose it is", t => t.A_package_folders_file_a_project_names_is_listed_only_where_linked_and_refuses_rename_delete_and_cut_saying_whose_it_is());
+        Flow.StepApart<SolutionViewTests>("nothing is pasted or made new beside a linked file of a package saying whose folder it is", t => t.Nothing_is_pasted_or_made_new_beside_a_linked_file_of_a_package_saying_whose_folder_it_is());
+        Flow.StepApart<SolutionViewTests>("a projects own items below a package folder it names stay listed and only a packages own are left out", t => t.A_projects_own_items_below_a_package_folder_it_names_stay_listed_and_only_a_packages_own_are_left_out());
+        Flow.StepApart<SolutionViewTests>("properties and a web projects wwwroot list first with their icons and refuse rename delete and move saying why while a file inside renames", t => t.Properties_and_a_web_projects_wwwroot_list_first_with_their_icons_and_refuse_rename_delete_and_move_saying_why_while_a_file_inside_renames());
+        Flow.StepApart<SolutionViewTests>("every project is drawn by what it builds and a screen reader and a hover say it", t => t.Every_project_is_drawn_by_what_it_builds_and_a_screen_reader_and_a_hover_say_it());
+    }
+
+    /// <summary>Rows opened, closed, made or moved above the file chosen leave the view and the keys on it, a folder
+    /// just made keeps its row through a paste, a project moved by Undo and Redo loads where it went, and where letter
+    /// case tells names apart two folders stay two, as one flow, each step in an instance of its own.</summary>
+    [AvaloniaFact]
+    public void The_solution_views_rows_and_keys_stay_on_what_the_person_chose()
+    {
+        Flow.StepApart<SolutionViewTests>("a folder opened or closed above the file chosen leaves the view where it was while a row chosen by a key or opened comes into view", t => t.A_folder_opened_or_closed_above_the_file_chosen_leaves_the_view_where_it_was_while_a_row_chosen_by_a_key_or_opened_comes_into_view());
+        Flow.StepApart<SolutionViewTests>("the explorer keeps its keys on the file chosen however rows come above it and takes none it did not have", t => t.The_explorer_keeps_its_keys_on_the_file_chosen_however_rows_come_above_it_and_takes_none_it_did_not_have());
+        Flow.StepApart<SolutionViewTests>("the explorers keys go on from the files chosen however rows came above or among them", t => t.The_explorers_keys_go_on_from_the_files_chosen_however_rows_came_above_or_among_them());
+        Flow.StepApart<SolutionViewTests>("a folder cut and pasted into a folder just made keeps that folders row", t => t.A_folder_cut_and_pasted_into_a_folder_just_made_keeps_that_folders_row());
+        Flow.StepApart<SolutionViewTests>("a project moved into a folder and back by Undo Redo and a move again is loaded where it went each time", t => t.A_project_moved_into_a_folder_and_back_by_Undo_Redo_and_a_move_again_is_loaded_where_it_went_each_time());
+    }
+
+    private void A_file_cut_and_pasted_into_another_projects_folder_moves_there_with_its_open_tab_its_undo_and_its_edit()
     {
         string order = Path.Combine(folder, "Shop.App", "Models", "Order.cs");
         MainWindow window = Open();
@@ -102,8 +170,7 @@ public sealed class SolutionViewTests : IDisposable
     /// <summary>A file cut and pasted over one of its name, Replace agreed to, moves the one there to the Trash in the move's
     /// command: one Undo moves the file back and brings the one it replaced back out of the Trash, each holding its own
     /// text, and Redo replaces it again.</summary>
-    [AvaloniaFact]
-    public void A_file_pasted_over_one_of_its_name_replaces_it_in_the_moves_command_so_one_undo_puts_both_back()
+    private void A_file_pasted_over_one_of_its_name_replaces_it_in_the_moves_command_so_one_undo_puts_both_back()
     {
         const string Kept = "namespace Shop.Core.Catalog;\n\npublic class Order\n{\n}\n";
         string order = Path.Combine(folder, "Shop.App", "Models", "Order.cs");
@@ -149,8 +216,7 @@ public sealed class SolutionViewTests : IDisposable
     /// <summary>A file and a folder copied and pasted over a file and a folder of their names, Replace agreed to, are one
     /// command with what they replaced: one Undo moves the copies to the Trash and brings back the two they replaced, each as
     /// it was, Redo puts the copies back in their place, and an Undo once a copy has changed since is refused, saying so.</summary>
-    [AvaloniaFact]
-    public void A_file_and_a_folder_copied_over_ones_of_their_names_are_one_command_whose_undo_trashes_the_copies_and_brings_back_what_they_replaced()
+    private void A_file_and_a_folder_copied_over_ones_of_their_names_are_one_command_whose_undo_trashes_the_copies_and_brings_back_what_they_replaced()
     {
         const string Kept = "namespace Shop.Core.Catalog;\n\npublic class Order\n{\n}\n";
         const string Old = "namespace Shop.Core.Catalog.Lines;\n\npublic class Old\n{\n}\n";
@@ -228,8 +294,7 @@ public sealed class SolutionViewTests : IDisposable
     /// <summary>A folder whose copy fails partway (a file in it cannot be read) leaves nothing of the copy behind and no
     /// command to undo, saying why: pasted where nothing has its name, and pasted over a folder of its name, Replace agreed
     /// to, which comes back out of the Trash as it was.</summary>
-    [AvaloniaFact]
-    public void A_folder_copy_that_fails_partway_takes_back_what_it_copied_and_puts_back_what_it_replaced()
+    private void A_folder_copy_that_fails_partway_takes_back_what_it_copied_and_puts_back_what_it_replaced()
     {
         const string Old = "namespace Shop.Core.Catalog.Lines;\n\npublic class Old\n{\n}\n";
         string lines = Path.Combine(folder, "Shop.App", "Models", "Lines");
@@ -263,8 +328,7 @@ public sealed class SolutionViewTests : IDisposable
 
     /// <summary>Two files of one name from two folders moved or copied into a third are refused before either goes, saying
     /// which: the second would replace the first, which no Undo could bring back.</summary>
-    [AvaloniaFact]
-    public void Two_files_of_one_name_put_into_one_folder_are_refused_before_either_goes()
+    private void Two_files_of_one_name_put_into_one_folder_are_refused_before_either_goes()
     {
         const string Kept = "namespace Shop.Core.Catalog;\n\npublic class Order\n{\n}\n";
         string order = Path.Combine(folder, "Shop.App", "Models", "Order.cs");
@@ -309,9 +373,7 @@ public sealed class SolutionViewTests : IDisposable
 
     /// <summary>Every file of a folder of 400 chosen and cut allocates on the UI thread, for each file, under twice what every
     /// file of a folder of 40 does, each row dimmed and a file's dependent going with it.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Cutting_every_file_of_a_folder_of_four_hundred_costs_each_file_about_what_it_does_in_a_folder_of_forty()
+    private void Cutting_every_file_of_a_folder_of_four_hundred_costs_each_file_about_what_it_does_in_a_folder_of_forty()
     {
         WriteItems("Few", 40);
         WriteItems("Many", 400);
@@ -360,9 +422,7 @@ public sealed class SolutionViewTests : IDisposable
     }
 
     /// <summary>A folder copied and pasted, and files dragged, in one window: what each leaves is checked before the next.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_folder_copied_and_pasted_copies_all_it_holds_named_as_Riders_Duplicate_asks_and_a_file_dragged_moves_or_with_the_copy_key_copies()
+    private void A_folder_copied_and_pasted_copies_all_it_holds_named_as_Riders_Duplicate_asks_and_a_file_dragged_moves_or_with_the_copy_key_copies()
     {
         string models = Path.Combine(folder, "Shop.App", "Models");
         MainWindow window = Open();
@@ -447,8 +507,7 @@ public sealed class SolutionViewTests : IDisposable
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void Add_reference_adds_one_the_build_and_language_server_follow_and_remove_takes_it_out_leaving_the_project_file_as_it_was()
+    private void Add_reference_adds_one_the_build_and_language_server_follow_and_remove_takes_it_out_leaving_the_project_file_as_it_was()
     {
         string solution = Path.Combine(folder, "Shop.slnx");
         string app = Path.Combine(folder, "Shop.App", "Shop.App.csproj");
@@ -539,8 +598,7 @@ public sealed class SolutionViewTests : IDisposable
     }
 
     /// <summary>Add Reference to a project file not open is one command Undo takes back, leaving the file as it was.</summary>
-    [AvaloniaFact]
-    public void Add_reference_is_one_command_undo_takes_back_leaving_the_project_file_as_it_was()
+    private void Add_reference_is_one_command_undo_takes_back_leaving_the_project_file_as_it_was()
     {
         string app = Path.Combine(folder, "Shop.App", "Shop.App.csproj");
         string core = Path.Combine(folder, "Shop.Core", "Shop.Core.csproj");
@@ -556,9 +614,7 @@ public sealed class SolutionViewTests : IDisposable
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Add_reference_beside_one_that_shares_its_line_with_its_groups_tags_writes_a_project_MSBuild_loads_and_remove_puts_it_back()
+    private void Add_reference_beside_one_that_shares_its_line_with_its_groups_tags_writes_a_project_MSBuild_loads_and_remove_puts_it_back()
     {
         string app = Path.Combine(folder, "Shop.App", "Shop.App.csproj");
         string core = Path.Combine(folder, "Shop.Core", "Shop.Core.csproj");
@@ -597,9 +653,7 @@ public sealed class SolutionViewTests : IDisposable
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_project_file_and_the_solution_open_with_unsaved_edits_keep_them_through_add_reference_and_new_solution_folder_with_no_question()
+    private void A_project_file_and_the_solution_open_with_unsaved_edits_keep_them_through_add_reference_and_new_solution_folder_with_no_question()
     {
         string app = Path.Combine(folder, "Shop.App", "Shop.App.csproj");
         string core = Path.Combine(folder, "Shop.Core", "Shop.Core.csproj");
@@ -660,9 +714,7 @@ public sealed class SolutionViewTests : IDisposable
 
     /// <summary>A file, folder or class its folder refuses is refused in the popup saying why, with no IDE error; once the
     /// folder takes them, Add, Class/Interface... writes each kind of type in its folder's namespace.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Add_refused_by_its_folder_says_why_with_no_ide_error_and_add_class_interface_writes_each_of_Riders_kinds_of_type_in_its_folders_namespace()
+    private void Add_refused_by_its_folder_says_why_with_no_ide_error_and_add_class_interface_writes_each_of_Riders_kinds_of_type_in_its_folders_namespace()
     {
         string models = Path.Combine(folder, "Shop.App", "Models");
         MainWindow window = Open();
@@ -758,9 +810,7 @@ public sealed class SolutionViewTests : IDisposable
     /// <summary>Three of the Solution view's menus in one window: the solution's and a project's menus show the keys of the
     /// actions their items run, Compare With and Compare Files show two files' differences, and Open In, Terminal starts a
     /// shell in the folder in a tab of its own (sh's pwd is Unix's, so not on Windows).</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void The_menus_show_their_actions_keys_compare_shows_two_files_differences_and_open_in_terminal_starts_a_shell_in_the_folder()
+    private void The_menus_show_their_actions_keys_compare_shows_two_files_differences_and_open_in_terminal_starts_a_shell_in_the_folder()
     {
         Write("Shop.App/Notes/a.txt", "one\ntwo\nthree\n");
         Write("Shop.App/Notes/b.txt", "one\n2\nthree\nfour\n");
@@ -864,37 +914,82 @@ public sealed class SolutionViewTests : IDisposable
         window.Close();
     }
 
-    /// <summary>An Aspire AppHost's row stands apart from the projects beside it: once MSBuild evaluates it as one, the
-    /// Solution view draws it with the Aspire window's icon, in its project file's tint, and a library keeps its project
-    /// file's icon.</summary>
-    [AvaloniaFact]
-    public void An_Aspire_AppHost_is_drawn_with_the_Aspire_windows_icon_and_a_library_with_its_project_files()
+    /// <summary>Each project's row says what it builds, as MSBuild evaluates it: its kind's icon in its project file's tint (an
+    /// Aspire AppHost the Aspire window's, tests the Unit Tests window's, a web API the Endpoints window's, a console app the
+    /// Terminal's, a Godot game and a Docker Compose project their files', the rest their own), its kind's words after its
+    /// name to a screen reader and on hover; a reference to one under another's Dependencies is drawn as its row is.</summary>
+    private void Every_project_is_drawn_by_what_it_builds_and_a_screen_reader_and_a_hover_say_it()
     {
-        Write("Shop.AppHost/Shop.AppHost.csproj", TestProjects.Console("<IsAspireHost>true</IsAspireHost>"));
-        Write("Shop.AppHost/Program.cs", "System.Console.WriteLine(\"Host\");\n");
-        Write("Shop.Core/Shop.Core.csproj", TestProjects.Library());
-        Write("Shop.slnx", "<Solution>\n  <Project Path=\"Shop.AppHost/Shop.AppHost.csproj\" />\n  <Project Path=\"Shop.Core/Shop.Core.csproj\" />\n</Solution>\n");
+        (string Name, string File, string Text, string Icon, string Words)[] kinds =
+        [
+            ("Shop.AppHost", "Shop.AppHost/Shop.AppHost.csproj", TestProjects.Console("<IsAspireHost>true</IsAspireHost>"), IconKeys.Aspire, "Aspire AppHost"),
+            ("Shop.Tests", "Shop.Tests/Shop.Tests.csproj", TestProjects.Library("<IsTestProject>true</IsTestProject>"), IconKeys.Tests, "test project"),
+            ("Shop.Game", "Shop.Game/Shop.Game.csproj", TestProjects.Library("<UsingGodotNETSdk>true</UsingGodotNETSdk>",
+                "<GodotProjectDir>$(MSBuildProjectDirectory)/</GodotProjectDir>"), "FileIcon.Godot", "Godot game"),
+            ("Shop.Functions", "Shop.Functions/Shop.Functions.csproj", TestProjects.Console("<AzureFunctionsVersion>v4</AzureFunctionsVersion>"), IconKeys.FunctionsApp,
+                "Azure Functions app"),
+            ("Shop.Maui", "Shop.Maui/Shop.Maui.csproj", TestProjects.Console("<UseMaui>true</UseMaui>"), IconKeys.MauiApp, ".NET MAUI app"),
+            ("Shop.Phone", "Shop.Phone/Shop.Phone.csproj", TestProjects.Library("<AndroidApplication>true</AndroidApplication>"), IconKeys.MobileApp, "mobile app"),
+            ("Shop.Blazor", "Shop.Blazor/Shop.Blazor.csproj", TestProjects.Web(), IconKeys.BlazorApp, "Blazor app"),
+            ("Shop.Desktop", "Shop.Desktop/Shop.Desktop.csproj", TestProjects.Console("<EnableAvaloniaXamlCompilation>true</EnableAvaloniaXamlCompilation>"),
+                IconKeys.AvaloniaApp, "Avalonia app"),
+            ("Shop.Wpf", "Shop.Wpf/Shop.Wpf.csproj", WindowsApp("<UseWPF>true</UseWPF>"), IconKeys.WpfApp, "WPF app"),
+            ("Shop.Forms", "Shop.Forms/Shop.Forms.csproj", WindowsApp("<UseWindowsForms>true</UseWindowsForms>"), IconKeys.FormsApp, "Windows Forms app"),
+            ("Shop.Pages", "Shop.Pages/Shop.Pages.csproj", TestProjects.Web(), IconKeys.WebApp, "web app"),
+            ("Shop.Api", "Shop.Api/Shop.Api.csproj", TestProjects.Web().With("  <ItemGroup>\n    <ProjectReference Include=\"../Shop.Core/Shop.Core.csproj\" />\n  </ItemGroup>\n"),
+                IconKeys.Endpoints, "web API"),
+            ("Shop.Window", "Shop.Window/Shop.Window.csproj", TestProjects.Library("<OutputType>WinExe</OutputType>"), IconKeys.DesktopApp, "desktop app"),
+            ("Shop.Tool", "Shop.Tool/Shop.Tool.csproj", TestProjects.Console(), IconKeys.Terminal, "console app"),
+            ("Shop.Core", "Shop.Core/Shop.Core.csproj", TestProjects.Library(), IconKeys.ClassLibrary, "class library"),
+            ("Shop.Shared", "Shop.Shared/Shop.Shared.shproj", "<Project>\n  <Import Project=\"Shop.Shared.projitems\" Label=\"Shared\" />\n</Project>\n",
+                IconKeys.SharedProject, "shared project"),
+            ("docker-compose", "docker-compose.dcproj", "<Project Sdk=\"Microsoft.Docker.Sdk\">\n</Project>\n", "FileIcon.Docker", "Docker Compose project"),
+        ];
+        foreach ((_, string file, string text, _, _) in kinds)
+        {
+            Write(file, text);
+        }
+        Write("Shop.Blazor/Components/App.razor", "<h1>Shop</h1>\n");
+        Write("Shop.Pages/Pages/Index.cshtml", "@page\n<h1>Shop</h1>\n");
+        Write("Shop.Shared/Shop.Shared.projitems", "<Project>\n  <ItemGroup>\n    <Compile Include=\"$(MSBuildThisFileDirectory)Money.cs\" />\n  </ItemGroup>\n</Project>\n");
+        Write("Shop.Shared/Money.cs", "public record Money(decimal Amount);\n");
+        Write("Shop.slnx", $"<Solution>\n{string.Concat(kinds.Select(k => $"  <Project Path=\"{k.File}\" />\n"))}</Solution>\n");
         MainWindow window = Ui.OpenFolder(folder, languageServer: false);
-        Ui.WaitFor(() => window.Projects.Count(p => p.IsEvaluated) == 2, "MSBuild to evaluate Shop.AppHost and Shop.Core");
-        Assert.True(window.Projects.Single(p => p.Name == "Shop.AppHost").IsAspireHost, "Shop.AppHost, setting IsAspireHost, is not evaluated as an AppHost");
+        int evaluated = kinds.Length - 2;
+        Ui.WaitFor(() => window.Projects.Count(p => p.IsEvaluated) == evaluated, $"MSBuild to evaluate the {evaluated} projects of the SDK's");
+        TreeList tree = window.ExplorerView.GetVisualDescendants().OfType<TreeList>().First(list => ReferenceEquals(list.ItemsSource, window.ExplorerView.Tree.Rows));
 
-        object projectTint = Resource(TokenKeys.FileIcon_Blue);
-        Ui.WaitFor(() => ReferenceEquals(Resource(IconKeys.Aspire), Drawn(window, Row(window, NodeKind.Project, "Shop.AppHost")).Data),
-            "The Solution view to draw Shop.AppHost with the Aspire window's icon");
-        Assert.True(ReferenceEquals(projectTint, Drawn(window, Row(window, NodeKind.Project, "Shop.AppHost")).Foreground),
-            "The Solution view draws Shop.AppHost in another colour than a .csproj's");
-        (Avalonia.Media.Geometry? Data, Avalonia.Media.IBrush? Foreground) library = Drawn(window, Row(window, NodeKind.Project, "Shop.Core"));
-        Assert.True(ReferenceEquals(Resource("FileIcon.Stack"), library.Data), "The Solution view no longer draws Shop.Core, a library, with a project file's icon");
-        Assert.True(ReferenceEquals(projectTint, library.Foreground), "The Solution view draws Shop.Core in another colour than a .csproj's");
+        foreach ((string name, string file, _, string icon, string words) in kinds)
+        {
+            ExplorerNode row = Row(window, NodeKind.Project, name);
+            Ui.WaitFor(() => ReferenceEquals(Resource(icon), Drawn(window, row).Data), $"The Solution view to draw {name} with {icon}, a {words}'s icon");
+            string tint = Path.GetExtension(file) == ".shproj" ? TokenKeys.FileIcon_Green : TokenKeys.FileIcon_Blue;
+            Assert.True(ReferenceEquals(Resource(tint), Drawn(window, row).Foreground), $"The Solution view draws {name} in another colour than its project file's");
+            tree.ScrollIntoView(row);
+            tree.UpdateLayout();
+            string heard = ControlAutomationPeer.CreatePeerForElement(tree.ContainerFromItem(row)!).GetName();
+            Assert.True(heard.StartsWith($"{name}, {words}, level", StringComparison.Ordinal), $"A screen reader hears {name}'s row as \"{heard}\", not as a {words}");
+            Assert.True(row.Hover?.StartsWith(string.Concat(words[..1].ToUpperInvariant(), words[1..]), StringComparison.Ordinal) == true,
+                $"Hovering {name}'s row says \"{row.Hover}\", not that it is a {words}");
+        }
+
+        ExplorerNode dependencies = Dependencies(window, "Shop.Api");
+        Ui.ClickRow(window, dependencies);
+        Ui.Press(window, "RIGHT");
+        Ui.WaitFor(() => window.ExplorerView.Tree.Rows.Any(r => r.Kind == NodeKind.ProjectReference && r.Name == "Shop.Core"), "Shop.Api's Dependencies to show its reference to Shop.Core");
+        ExplorerNode reference = window.ExplorerView.Tree.Rows.First(r => r.Kind == NodeKind.ProjectReference && r.Name == "Shop.Core");
+        Assert.True(ReferenceEquals(Resource(IconKeys.ClassLibrary), Drawn(window, reference).Data), "Shop.Api's reference to Shop.Core is not drawn as Shop.Core's row is, a class library");
         window.Close();
+
+        static string WindowsApp(string uses) =>
+            $"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <OutputType>WinExe</OutputType>\n    <TargetFramework>{TestProjects.Framework}-windows</TargetFramework>\n    {uses}\n  </PropertyGroup>\n</Project>\n";
     }
 
     /// <summary>A web project's Properties and wwwroot, and a class library's Properties, are the folders the SDK reads: listed
     /// before the project's other folders, drawn with their own icons in the Solution view and the File System view, and
     /// refusing Rename, Delete and Cut and a drag saying why, by the row's menu, by keys and for an agent, while a file inside
     /// renames. A library's wwwroot and a Properties below a project's top are folders like any other.</summary>
-    [AvaloniaFact]
-    public void Properties_and_a_web_projects_wwwroot_list_first_with_their_icons_and_refuse_rename_delete_and_move_saying_why_while_a_file_inside_renames()
+    private void Properties_and_a_web_projects_wwwroot_list_first_with_their_icons_and_refuse_rename_delete_and_move_saying_why_while_a_file_inside_renames()
     {
         Write("Shop.Web/Shop.Web.csproj", TestProjects.Web());
         Write("Shop.Web/Program.cs", "WebApplication.Create().Run();\n");
@@ -1003,8 +1098,7 @@ public sealed class SolutionViewTests : IDisposable
     /// <summary>A file in a NuGet package folder that a project names (a package's targets adding its ProGuard rules, as
     /// AndroidX's do) is every project's copy of that package: the Solution view lists it only where the project links it
     /// in, and there Rename, Delete and Cut refuse it saying whose it is, by keys and for an agent, its file left on disk.</summary>
-    [AvaloniaFact]
-    public void A_package_folders_file_a_project_names_is_listed_only_where_linked_and_refuses_rename_delete_and_cut_saying_whose_it_is()
+    private void A_package_folders_file_a_project_names_is_listed_only_where_linked_and_refuses_rename_delete_and_cut_saying_whose_it_is()
     {
         string package = WriteKitShop();
         string rules = Path.Combine(package, "proguard", "proguard.txt");
@@ -1039,8 +1133,7 @@ public sealed class SolutionViewTests : IDisposable
     /// <summary>A linked file of a NuGet package stands in the package's folder on disk, every project's copy: nothing is
     /// pasted beside it or made new there, by keys or for an agent, each refused saying whose folder it is, and the
     /// package's folder holds only what it held.</summary>
-    [AvaloniaFact]
-    public void Nothing_is_pasted_or_made_new_beside_a_linked_file_of_a_package_saying_whose_folder_it_is()
+    private void Nothing_is_pasted_or_made_new_beside_a_linked_file_of_a_package_saying_whose_folder_it_is()
     {
         string content = Path.Combine(WriteKitShop(), "content");
         MainWindow window = Ui.OpenFolder(folder, languageServer: false);
@@ -1067,8 +1160,7 @@ public sealed class SolutionViewTests : IDisposable
 
     /// <summary>A project may name an ancestor of its own folder its package folder: what its own project file names there
     /// stays listed, and only a file a package NuGet laid out there names from its own folder is left out.</summary>
-    [AvaloniaFact]
-    public void A_projects_own_items_below_a_package_folder_it_names_stay_listed_and_only_a_packages_own_are_left_out()
+    private void A_projects_own_items_below_a_package_folder_it_names_stay_listed_and_only_a_packages_own_are_left_out()
     {
         string rules = Path.Combine(WriteKit(string.Empty), "proguard", "proguard.txt");
         Write("docs/guide.md", "# Guide\n");
@@ -1148,8 +1240,7 @@ public sealed class SolutionViewTests : IDisposable
             ?? throw new InvalidOperationException($"The menu has no {header}: [{string.Join(", ", menu.Items.OfType<MenuItem>().Select(i => i.Header))}]");
     }
 
-    [AvaloniaFact]
-    public void Add_reference_to_a_Windows_1252_project_keeps_its_other_bytes_and_Local_History_keeps_the_project_as_it_was()
+    private void Add_reference_to_a_Windows_1252_project_keeps_its_other_bytes_and_Local_History_keeps_the_project_as_it_was()
     {
         // An older project in the system's code page, as its declaration says, with a comment of Windows-1252's letters.
         string core = Path.Combine(folder, "Shop.Core", "Shop.Core.csproj");
@@ -1157,7 +1248,7 @@ public sealed class SolutionViewTests : IDisposable
         string comment = "  <!-- Café \u0096 \u0093Core\u0094 -->\n";
         byte[] original = System.Text.Encoding.Latin1.GetBytes("<?xml version=\"1.0\" encoding=\"windows-1252\"?>\n" + Library.Replace("  <PropertyGroup>", comment + "  <PropertyGroup>", StringComparison.Ordinal));
         File.WriteAllBytes(core, original);
-        MainWindow window = Open();
+        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
         Heard(window, core, () => Assert.Null(Ui.Await(window.SetReferencesAsync(core, [app]), "the references set")));
 
         string written = System.Text.Encoding.Latin1.GetString(File.ReadAllBytes(core));
@@ -1170,9 +1261,7 @@ public sealed class SolutionViewTests : IDisposable
 
     /// <summary>A file added (a refresh of the Explorer) leaves open the Dependencies that were open, Shop.Core's, and
     /// closed Shop.App's above it, which a key by the row's depth, kind and name alone took for it.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_file_added_keeps_the_open_dependencies_open_and_opens_no_other_projects()
+    private void A_file_added_keeps_the_open_dependencies_open_and_opens_no_other_projects()
     {
         MainWindow window = Ui.OpenFolder(folder, languageServer: false);
         Dependencies(window, "Shop.App");
@@ -1193,37 +1282,10 @@ public sealed class SolutionViewTests : IDisposable
         window.Close();
     }
 
-    /// <summary>A double click on a folder's chevron is two clicks on it, opening and closing the folder, and never opens the
-    /// file chosen before, which the list's double click would (#1782).</summary>
-    [AvaloniaFact]
-    public void A_double_click_on_a_folders_chevron_opens_and_closes_it_and_never_opens_the_file_chosen()
-    {
-        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
-        ExplorerView explorer = window.ExplorerView;
-        ExplorerNode order = Show(window, Path.Combine(folder, "Shop.App", "Models", "Order.cs"));
-        ExplorerNode catalog = Show(window, Path.Combine(folder, "Shop.Core", "Catalog"));
-        if (catalog.IsExpanded)
-        {
-            explorer.Tree.Toggle(catalog);
-            Ui.Settle();
-        }
-        Ui.ClickRow(window, order);
-        Assert.Empty(window.EditorArea.Documents);
-
-        Ui.DoubleClick(Ui.Row(explorer, catalog).GetVisualDescendants().OfType<RowGlyphs>().Single(), new Point(9, ListRow.Height / 2));
-        Assert.True(window.EditorArea.Documents.Count == 0,
-            $"A double click on Catalog's chevron opened [{string.Join(", ", window.EditorArea.Documents.Select(d => Path.GetFileName(d.Path)))}], the file chosen before");
-        Assert.False(catalog.IsExpanded, "A double click on Catalog's chevron, two clicks on it, left it open");
-        Assert.True(explorer.SelectedNodes is [{ } still] && still == order,
-            $"A double click on Catalog's chevron chose [{string.Join(", ", explorer.SelectedNodes.Select(n => n.Name))}], where Order.cs was chosen");
-        window.Close();
-    }
-
     /// <summary>A folder opened and closed by its chevron above the file chosen leaves the view where it was, the folder
     /// where the person clicked and the file pushed out of sight and back (#712); a row chosen by a key, or a file opened
     /// while the Explorer was closed, still comes into view.</summary>
-    [AvaloniaFact]
-    public void A_folder_opened_or_closed_above_the_file_chosen_leaves_the_view_where_it_was_while_a_row_chosen_by_a_key_or_opened_comes_into_view()
+    private void A_folder_opened_or_closed_above_the_file_chosen_leaves_the_view_where_it_was_while_a_row_chosen_by_a_key_or_opened_comes_into_view()
     {
         for (int i = 0; i < 40; i++)
         {
@@ -1289,8 +1351,7 @@ public sealed class SolutionViewTests : IDisposable
     /// it, pushing it out of sight and further, the rows made again, and a file written above it, the view left where it
     /// was, Down then choosing the next file; a file revealed while the Explorer has the keys takes them, and one revealed
     /// while the editor has them leaves them there.</summary>
-    [AvaloniaFact]
-    public void The_explorer_keeps_its_keys_on_the_file_chosen_however_rows_come_above_it_and_takes_none_it_did_not_have()
+    private void The_explorer_keeps_its_keys_on_the_file_chosen_however_rows_come_above_it_and_takes_none_it_did_not_have()
     {
         for (int i = 0; i < 40; i++)
         {
@@ -1373,8 +1434,7 @@ public sealed class SolutionViewTests : IDisposable
     /// opened above a file, pushing it out of sight, and a file written above it in its own folder, Left then choosing the
     /// file's folder with the keys on it and Left again closing that folder; and a file written inside a range chosen up
     /// with Shift, Shift+Down then taking the range from the file it was begun on.</summary>
-    [AvaloniaFact]
-    public void The_explorers_keys_go_on_from_the_files_chosen_however_rows_came_above_or_among_them()
+    private void The_explorers_keys_go_on_from_the_files_chosen_however_rows_came_above_or_among_them()
     {
         for (int i = 0; i < 40; i++)
         {
@@ -1433,9 +1493,7 @@ public sealed class SolutionViewTests : IDisposable
     /// the other shown unloaded, Build building the one and the language server loading the one; the filter changed on
     /// disk to name the other swaps them, and Reload Project loads the one it left out, none of which the folder keeps
     /// as the person's own unloading.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void A_solution_filter_opens_its_solution_with_its_projects_alone_built_and_analysed_and_a_change_to_it_is_followed()
+    private void A_solution_filter_opens_its_solution_with_its_projects_alone_built_and_analysed_and_a_change_to_it_is_followed()
     {
         string filter = Path.Combine(folder, "Shop.App.slnf");
         Write("Shop.App.slnf", "{\n  \"solution\": {\n    \"path\": \"Shop.slnx\",\n    \"projects\": [\n      \"Shop.App\\\\Shop.App.csproj\"\n    ]\n  }\n}\n");
@@ -1484,8 +1542,7 @@ public sealed class SolutionViewTests : IDisposable
     /// <summary>A file-based program beside the solution: Add Reference never offers it, since no project reference can name
     /// a C# file; and the solution's filter, opened over the solution or in a window of its own, unloads the solution's
     /// project it leaves out alone, the program loaded with its run configuration either way.</summary>
-    [AvaloniaFact]
-    public void A_program_beside_the_solution_is_never_offered_as_a_reference_and_stays_loaded_however_a_solution_filter_opens()
+    private void A_program_beside_the_solution_is_never_offered_as_a_reference_and_stays_loaded_however_a_solution_filter_opens()
     {
         Write("scripts/tool.cs", "#!/usr/bin/env dotnet\nSystem.Console.WriteLine(\"tool\");\n");
         string filter = PathNames.Canonical(Path.Combine(folder, "Shop.App.slnf"));
@@ -1533,8 +1590,7 @@ public sealed class SolutionViewTests : IDisposable
     /// <summary>A project added while a solution filter is open goes in the filter's list as well as the solution, so the
     /// filter opened again loads it rather than leaving it out; one Undo takes it out of both and Redo puts it back, the
     /// project the person loaded that the filter leaves out staying loaded throughout.</summary>
-    [AvaloniaFact]
-    public void A_project_added_under_an_open_solution_filter_joins_its_list_so_the_filter_opened_again_loads_it()
+    private void A_project_added_under_an_open_solution_filter_joins_its_list_so_the_filter_opened_again_loads_it()
     {
         const string Filter = "{\n  \"solution\": {\n    \"path\": \"Shop.slnx\",\n    \"projects\": [\n      \"Shop.App\\\\Shop.App.csproj\"\n    ]\n  }\n}\n";
         string filter = PathNames.Canonical(Path.Combine(folder, "Shop.App.slnf"));
@@ -1588,8 +1644,7 @@ public sealed class SolutionViewTests : IDisposable
     /// person's .slnLaunch.user, each path from the solution's folder in the separator it was written with and the rest of
     /// each file as it was, in the command of Undo that renames or moves it: Undo puts both files back, and Run's profile
     /// names the project where it is.</summary>
-    [AvaloniaFact]
-    public void A_project_renamed_or_moved_takes_the_solutions_launch_profiles_with_it_in_the_same_command_of_Undo()
+    private void A_project_renamed_or_moved_takes_the_solutions_launch_profiles_with_it_in_the_same_command_of_Undo()
     {
         const string Shared = "[\n  {\n    \"Name\": \"Both\",\n    \"Projects\": [\n      {\n        \"Path\": \"Shop.App\\\\Shop.App.csproj\",\n"
             + "        \"Action\": \"Start\"\n      },\n      {\n        \"Path\": \"Shop.Core\\\\Shop.Core.csproj\",\n        \"Action\": \"None\",\n"
@@ -1653,8 +1708,7 @@ public sealed class SolutionViewTests : IDisposable
     /// in the command of Undo that changes the solution (Undo of a move and of the removal putting it back, Redo of the
     /// removal taking it out again): opened again, the filter loads the project renamed under its new name and the one
     /// moved where it went, and names none the solution let go, the project it leaves out still unloaded.</summary>
-    [AvaloniaFact]
-    public void Projects_renamed_moved_and_removed_under_an_open_solution_filter_take_its_list_with_them_so_the_filter_opened_again_loads_them()
+    private void Projects_renamed_moved_and_removed_under_an_open_solution_filter_take_its_list_with_them_so_the_filter_opened_again_loads_them()
     {
         const string Filter = "{\n  \"solution\": {\n    \"path\": \"Shop.slnx\",\n    \"projects\": [\n      \"Shop.App\\\\Shop.App.csproj\",\n"
             + "      \"Shop.Core\\\\Shop.Core.csproj\",\n      \"Shop.Tools\\\\Shop.Tools.csproj\"\n    ]\n  }\n}\n";
@@ -1753,9 +1807,7 @@ public sealed class SolutionViewTests : IDisposable
     /// <summary>A file deleted takes its own row out, and Unload Project and Reload Project make the project's row again,
     /// dimmed and then open to open: every other row shown stays the row it was, rather than every row of the tree being
     /// made again for one.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Delete_unload_and_reload_make_again_only_the_rows_they_touch()
+    private void Delete_unload_and_reload_make_again_only_the_rows_they_touch()
     {
         string order = PathNames.Canonical(Path.Combine(folder, "Shop.App", "Models", "Order.cs"));
         string core = PathNames.Canonical(Path.Combine(folder, "Shop.Core", "Shop.Core.csproj"));
@@ -1794,9 +1846,7 @@ public sealed class SolutionViewTests : IDisposable
     /// <summary>New File (its folder made with it), New Folder, a file copied and pasted and a file cut and pasted each put in
     /// or take out the rows of what they made or moved alone: every other row shown stays the row it was, with Go to File's
     /// folder never walked again.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void New_file_new_folder_and_paste_make_again_only_the_rows_of_what_they_make_or_move()
+    private void New_file_new_folder_and_paste_make_again_only_the_rows_of_what_they_make_or_move()
     {
         string models = Path.Combine(folder, "Shop.App", "Models");
         string catalog = Path.Combine(folder, "Shop.Core", "Catalog");
@@ -1852,8 +1902,7 @@ public sealed class SolutionViewTests : IDisposable
     /// <summary>A folder cut and pasted into a folder New Folder just made, which the project shows only as a folder empty
     /// on disk until it is evaluated again, leaves that folder's row the row it was as the folder above both is read again
     /// before the evaluation: only the rows of the folder moved are made again.</summary>
-    [AvaloniaFact]
-    public void A_folder_cut_and_pasted_into_a_folder_just_made_keeps_that_folders_row()
+    private void A_folder_cut_and_pasted_into_a_folder_just_made_keeps_that_folders_row()
     {
         string models = Path.Combine(folder, "Shop.App", "Models");
         string lines = Path.Combine(models, "Lines");
@@ -1882,8 +1931,7 @@ public sealed class SolutionViewTests : IDisposable
     /// <summary>A project moved into a folder, its move taken back and made again, then taken back and the project moved
     /// into that folder once more, and last moved out and back by another program, is shown where it went as soon as each
     /// move is done, never dimmed as missing, and loaded there as MSBuild evaluates it.</summary>
-    [AvaloniaFact]
-    public void A_project_moved_into_a_folder_and_back_by_Undo_Redo_and_a_move_again_is_loaded_where_it_went_each_time()
+    private void A_project_moved_into_a_folder_and_back_by_Undo_Redo_and_a_move_again_is_loaded_where_it_went_each_time()
     {
         string src = PathNames.Canonical(Directory.CreateDirectory(Path.Combine(folder, "src")).FullName);
         string home = PathNames.Canonical(Path.Combine(folder, "Shop.App", "Shop.App.csproj"));

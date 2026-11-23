@@ -21,6 +21,7 @@ using Avalonia.VisualTree;
 using Passenger.App;
 using Passenger.App.Settings;
 using Passenger.Editor;
+using Syntax = Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Passenger.Tests;
 
@@ -107,6 +108,61 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
                         $"{Header(parent)}'s chevron's middle is at {at.Center.Y:0.#}, off its item's middle at {row.Center.Y:0.#}");
                 }
                 window.OpenContextMenu.Close();
+                Ui.Settle();
+            });
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    /// <summary>A menu's words that are no command (the heading over the branch menu's branches) stand at the caption's step
+    /// in the muted colour under each look, greyed for the keys and the pointer but never drawn as a greyed command; a value
+    /// among several (a tool window's view mode and place) is ticked and still offered, never greyed; and every greyed item
+    /// of these menus says why (ListMenus).</summary>
+    [AvaloniaFact]
+    public void A_menus_heading_is_muted_words_its_values_are_ticked_and_every_greyed_item_says_why()
+    {
+        MainWindow window = Open(1200, 800);
+        try
+        {
+            window.OpenFile(project.PathOf("Notes.txt"));
+            Ui.Settle();
+            UnderEachLook(window, () =>
+            {
+                Ui.Click(Named<Button>(window, "BranchButton"));
+                Ui.WaitFor(() => window.OpenContextMenu is not null, "the branch menu");
+                ContextMenu branches = window.OpenContextMenu!;
+                MenuItem[] items = [.. branches.Items.OfType<MenuItem>()];
+                Ui.GreyedSayWhy(items, "The branch menu");
+                MenuItem local = items.Single(i => Header(i) == "Local");
+                ContentPresenter words = local.GetVisualDescendants().OfType<ContentPresenter>().Single(p => p.Name == "PART_HeaderPresenter");
+                Color? drawn = (words.Foreground as ISolidColorBrush)?.Color;
+                Assert.True(!local.IsEffectivelyEnabled && local.InputGesture is null && words.FontSize == TypeRamp.Caption && drawn == Brush(window, TokenKeys.TextMuted),
+                    $"The branch menu's Local heading is {(local.IsEffectivelyEnabled ? "a command the keys stop on" : "passed over")}, at {words.FontSize} in {drawn}, "
+                    + $"where a heading is words the keys pass over, at the caption's {TypeRamp.Caption} in the muted {Brush(window, TokenKeys.TextMuted)}, never a greyed command");
+                branches.Close();
+                Ui.Settle();
+
+                Control pane = window.ExplorerView.GetVisualAncestors().OfType<Control>().First(a => a.GetType().Name == "ToolPane");
+                Ui.Click(pane.GetVisualDescendants().OfType<Button>().First(b => ToolTip.GetTip(b) as string == "Options"));
+                MenuFlyout options = window.DockHost.OpenOptions ?? throw new Xunit.Sdk.XunitException("The Explorer's Options opened no menu");
+                MenuItem[] made = [.. options.Items.OfType<MenuItem>()];
+                Ui.GreyedSayWhy(made, "The Explorer's Options");
+                string place = Passenger.App.Docking.ToolWindow.Name(window.DockHost.Windows.Single(w => w.Id == ToolWindowIds.Explorer).Anchor);
+                foreach ((string sub, string current) in (ReadOnlySpan<(string, string)>)[("View Mode", "Dock"), ("Move to", place)])
+                {
+                    MenuItem parent = made.Single(i => Header(i) == sub);
+                    Ui.Click(parent);
+                    MenuItem[] values = [.. parent.Items.OfType<MenuItem>()];
+                    Ui.GreyedSayWhy(values, sub);
+                    MenuItem[] ticked = [.. values.Where(v => v.IsChecked)];
+                    Assert.True(ticked is [{ IsEnabled: true }] && Header(ticked[0]) == current && values.All(v => v.IsEnabled && v.ToggleType == MenuItemToggleType.Radio),
+                        $"{sub} offers [{string.Join(", ", values.Select(v => $"{Header(v)}{(v.IsChecked ? " ticked" : "")}{(v.IsEnabled ? "" : " greyed")}"))}], "
+                        + $"where {current}, the one in force, is ticked and still offered as every menu's value is (MenuChoice)");
+                }
+                options.Hide();
                 Ui.Settle();
             });
         }
@@ -313,13 +369,105 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         Assert.True(seen >= 5, $"Only {seen} tool window tabs were found in Problems, Git, Debug, the Terminal and Aspire");
     }
 
+    /// <summary>A press on the open tab or the chosen segment leaves it chosen, as a press on another chooses that one
+    /// alone: the Debug window's Debugger and Console tabs, and Find in Files' scopes.</summary>
+    [AvaloniaFact]
+    public void A_press_on_the_open_tab_or_the_chosen_segment_leaves_it_chosen_and_one_on_another_chooses_it_alone()
+    {
+        MainWindow window = Open(1200, 800);
+        try
+        {
+            window.OpenFile(project.PathOf("Program.cs"));
+            Ui.Settle();
+            Assert.True(window.Perform(AppActions.ShowDebug), $"{AppActions.ShowDebug} did not run");
+            Ui.Settle();
+            Chooses([.. ToolWindowParts(window).OfType<ToggleButton>().Where(t => t.Classes.Contains(StyleClasses.PanelTab) && TabName(t) is "Debugger" or "Console")],
+                "the Debug window's tabs");
+            Passenger.App.Navigation.FindInFilesPopup popup = window.ShowFindInFiles(replace: false)!;
+            Ui.Settle();
+            Chooses([.. popup.GetVisualDescendants().OfType<ToggleButton>().Where(t => t.Classes.Contains(StyleClasses.Segment) && t.IsEffectivelyVisible)], "Find in Files' scopes");
+        }
+        finally
+        {
+            window.Close();
+        }
+
+        static void Chooses(ToggleButton[] row, string what)
+        {
+            Assert.True(row.Length >= 2 && row.Count(t => t.IsChecked == true) == 1, $"{what} are [{string.Join(", ", row.Select(TabName))}], {row.Count(t => t.IsChecked == true)} of them chosen");
+            ToggleButton chosen = row.Single(t => t.IsChecked == true);
+            Ui.Click(chosen);
+            Assert.True(chosen.IsChecked == true && row.Count(t => t.IsChecked == true) == 1,
+                $"A press on {what}' chosen '{TabName(chosen)}' let it go, leaving {row.Count(t => t.IsChecked == true)} chosen, where it stays chosen");
+            ToggleButton other = row.First(t => t != chosen);
+            Ui.Click(other);
+            Assert.True(other.IsChecked == true && row.Count(t => t.IsChecked == true) == 1,
+                $"A press on {what}' '{TabName(other)}' left {string.Join(", ", row.Where(t => t.IsChecked == true).Select(TabName))} chosen, where it alone is");
+        }
+    }
+
+    /// <summary>A tool window's tab is ToolTabs' own, and a window's tabs are a ToolTabs.Strip, which keeps one open and
+    /// says each press: the tabs' class given anywhere else fails here, naming its line, as does a tab ToolTabs.Tab makes
+    /// for anything but a list's row (a session's tab, which its list makes and its model keeps one open).</summary>
+    [Fact]
+    public void Every_tool_windows_tab_is_ToolTabs_own_and_a_windows_tabs_are_a_strip()
+    {
+        Regex byHand = new(@"\bStyleClasses\.PanelTab\b|Classes=""[^""]*\bpanelTab\b");
+        Regex lone = new(@"\bToolTabs\.Tab\(");
+        string[] found = [.. UiFiles().Where(f => !f.Path.EndsWith("/ToolTabs.cs", StringComparison.Ordinal))
+            .SelectMany(f => byHand.Matches(f.Text).Concat(lone.Matches(f.Text).Where(m => !MemberAfter(f.Text, m.Index).Contains(".Showing<", StringComparison.Ordinal)))
+                .Select(m => $"{f.Path}:{LineOf(f.Text, m.Index)}: {f.Text.Split('\n')[LineOf(f.Text, m.Index) - 1].Trim()}"))];
+        Assert.True(found.Length == 0, $"{found.Length} tool window tabs are made by hand, so each keeps one open its own way or lets the open one go: "
+            + $"make a window's tabs a ToolTabs.Strip:\n{string.Join("\n", found)}");
+        Assert.Matches(byHand, "            ToggleButton button = new() { Classes = { StyleClasses.PanelTab } };");
+        Assert.Matches(lone, "        consoleTab = ToolTabs.Tab(\"Console\", true);");
+    }
+
+    /// <summary>A few choices side by side, or one thing turned on or off by its words, are Segments, so each looks, keeps
+    /// one chosen and says each press one way: the segments' class given anywhere else fails here, naming its line.</summary>
+    [Fact]
+    public void Every_choice_side_by_side_is_a_Segments()
+    {
+        Regex byHand = new(@"\bStyleClasses\.Segment\b|Classes=""[^""]*\bsegment\b");
+        string[] found = [.. UiFiles().Where(f => !f.Path.EndsWith("/Segments.cs", StringComparison.Ordinal))
+            .SelectMany(f => byHand.Matches(f.Text).Select(m => $"{f.Path}:{LineOf(f.Text, m.Index)}"))];
+        Assert.True(found.Length == 0, $"{found.Length} segments are made by hand, so each looks and keeps its choice its own way: make each row a "
+            + $"Segments, a lone one Segments.Toggle:\n{string.Join("\n", found)}");
+        Assert.Matches(byHand, "            ToggleButton tab = new() { Classes = { StyleClasses.Segment, StyleClasses.Caption }, Content = name };");
+    }
+
+    /// <summary>A search's option (Match case, Words, Regex, Recursively) is OptionToggles', so the find bar and Find in
+    /// Files share its look, its tip and its key: the options' class given anywhere else fails here, naming its line.</summary>
+    [Fact]
+    public void Every_search_option_is_OptionToggles_own_with_its_key()
+    {
+        Regex byHand = new(@"\bStyleClasses\.Option\b|Classes=""[^""]*\boption\b");
+        string[] found = [.. UiFiles().Where(f => !f.Path.EndsWith("/OptionToggles.cs", StringComparison.Ordinal))
+            .SelectMany(f => byHand.Matches(f.Text).Select(m => $"{f.Path}:{LineOf(f.Text, m.Index)}"))];
+        Assert.True(found.Length == 0, $"{found.Length} search options are made by hand, so their looks, tips and keys drift from the find bar's and "
+            + $"Find in Files': make each through OptionToggles:\n{string.Join("\n", found)}");
+        Assert.Matches(byHand, "<ToggleButton Name=\"MatchCase\" Classes=\"option\" ToolTip.Tip=\"Match case\">");
+        Assert.DoesNotMatch(byHand, "        OptionRow row = new(StyleClasses.OptionRow);");
+    }
+
+    /// <summary>The rest of the member a place in a C# file stands in, to its closing brace at a member's indent.</summary>
+    private static string MemberAfter(string text, int at)
+    {
+        int end = text.IndexOf("\n    }\n", at, StringComparison.Ordinal);
+        return end < 0 ? text[at..] : text[at..end];
+    }
+
+    [AvaloniaFact]
+    public void Every_choice_shows_the_chosen_mark_beside_its_ground_and_none_is_drawn_by_a_ground_of_its_own() => Cases.All(
+        ("Every chosen row tab stripe button and toolbar toggle shows the chosen mark beside its ground and nothing else does", Every_chosen_row_tab_stripe_button_and_toolbar_toggle_shows_the_chosen_mark_beside_its_ground_and_nothing_else_does),
+        ("No list or tab draws its choice by a ground of its own", No_list_or_tab_draws_its_choice_by_a_ground_of_its_own));
+
     /// <summary>Every choice the window shows (a list's or a tree's chosen row, the open editor tab, a tool window's open
     /// tab, a stripe's open window's button, a toolbar's toggle that is on: Problems' severities, Mute Breakpoints) is shown by
     /// the one chosen mark beside its ground, in the chosen mark's colour on the side its kind takes, and nothing unchosen
     /// shows one, under each look dark and light; every row, tab, stripe button and toolbar toggle holds exactly one mark, so
     /// none draws its choice another way, by a ground alone a person with low vision may not tell from the page.</summary>
-    [AvaloniaFact]
-    public void Every_chosen_row_tab_stripe_button_and_toolbar_toggle_shows_the_chosen_mark_beside_its_ground_and_nothing_else_does()
+    private void Every_chosen_row_tab_stripe_button_and_toolbar_toggle_shows_the_chosen_mark_beside_its_ground_and_nothing_else_does()
     {
         MainWindow window = Open(1200, 800);
         try
@@ -432,8 +580,7 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
     /// <summary>The grounds a choice stands on (a chosen row's, the open tab's and the open window's stripe button's) are named
     /// by the theme's styles alone, which draw the chosen mark beside them: a row or tab chosen by hand takes the chosen
     /// class, never its ground bound by hand without its mark.</summary>
-    [Fact]
-    public void No_list_or_tab_draws_its_choice_by_a_ground_of_its_own()
+    private void No_list_or_tab_draws_its_choice_by_a_ground_of_its_own()
     {
         Regex ground = new(@"\bTokenKeys\.(?:RowSelected|Tab_Active|Stripe_Selected)\b|Passenger\.(?:RowSelected|Tab\.Active|Stripe\.Selected)\b");
         string[] found = [.. from file in UiFiles(theme: false)
@@ -525,7 +672,7 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         Popup("Stash Changes", () => window.Perform(AppActions.Stash));
         Popup("IDE Internal Errors", () => window.ShowErrors());
 
-        TextBlock[] titles = [.. seen.SelectMany(s => s.Frame.GetVisualDescendants().OfType<TextBlock>().Where(t => t.Classes.Contains(StyleClasses.PopupTitle)))];
+        TextBlock[] titles = [.. seen.SelectMany(s => s.Frame.GetVisualDescendants().OfType<TextBlock>().Where(t => t.Classes.Contains(StyleClasses.PaneTitle)))];
         Assert.True(titles.Length >= seen.Count - 2, $"Only {titles.Length} of {seen.Count} popups have a title of the popups' look");
         Assert.True(titles.All(t => t.FontSize == titles[0].FontSize && t.FontWeight == titles[0].FontWeight),
             "Popups' titles differ in size or weight: " + string.Join(", ", titles.Select(t => $"'{t.Text}' {t.FontSize} {t.FontWeight}")));
@@ -542,9 +689,10 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         }
     }
 
-    /// <summary>A popup's frame as every popup's is: a width of the popups' scale (<see cref="PopupFrame"/>), its rows
-    /// <see cref="ListRow.Height"/> tall, and no word cut nor anything drawn over another in it (LayoutFaults); a popup
-    /// that lives elsewhere (the debugger's hover card) is held to it here too.</summary>
+    /// <summary>A popup's frame as every popup's is: a width of the popups' scale (<see cref="PopupFrame"/>), the frame's
+    /// room (none where its rows reach its sides and its parts set their own), its rows <see cref="ListRow.Height"/> tall,
+    /// and no word cut nor anything drawn over another in it (LayoutFaults); a popup that lives elsewhere (the debugger's
+    /// hover card) is held to it here too.</summary>
     internal static void HoldsToPopupRules(string what, Border frame)
     {
         Assert.True(frame.Classes.Contains(StyleClasses.Popup), $"{what} is not framed as the popups are (Border.popup)");
@@ -552,6 +700,9 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         Assert.True(faults.Count == 0, string.Join("\n", faults));
         Assert.True(PopupFrame.Widths.Any(w => Math.Abs(frame.Bounds.Width - w) < 0.5),
             $"{what} is {frame.Bounds.Width:0.#} px wide, not one of the popups' widths ({string.Join(", ", PopupFrame.Widths)})");
+        Thickness[] rooms = [PopupFrame.Inset, PopupFrame.CardInset, ListRow.PopupList, default];
+        Assert.True(rooms.Contains(frame.Padding),
+            $"{what} keeps {frame.Padding} round what it holds, where a popup's frame keeps PopupFrame.Inset (a card's CardInset, a list's ListRow.PopupList)");
         foreach (ListBoxItem row in frame.GetVisualDescendants().OfType<ListBoxItem>().Where(r => r.IsEffectivelyVisible))
         {
             Assert.True(Math.Abs(row.Bounds.Height - ListRow.Height) < 0.5,
@@ -620,6 +771,198 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
 
     /// <summary>A popup's frame of a type of its own, as the colour picker and the code assist popups are.</summary>
     private sealed class OwnFrame : Border;
+
+    [AvaloniaFact]
+    public void Every_popup_made_apart_takes_its_room_and_width_from_PopupFrame_and_a_width_of_the_scale() => Cases.All(
+        ("Every popup made apart from the searches takes a width of the scale and the frames room", Every_popup_made_apart_from_the_searches_takes_a_width_of_the_scale_and_the_frames_room),
+        ("Every popups frame takes its room and width from PopupFrame", Every_popups_frame_takes_its_room_and_width_from_PopupFrame));
+
+    /// <summary>The popups made apart from the searches hold to the popups' rules as the searches do (HoldsToPopupRules):
+    /// Rename's box, a list of fixes, a change's lines, the colour picker, and Godot's resource picker, items form and keep
+    /// preview, Read as Text's view, each at a width of the scale with the frame's room, a list sized by what it holds at the
+    /// narrowest width that holds it.</summary>
+    private void Every_popup_made_apart_from_the_searches_takes_a_width_of_the_scale_and_the_frames_room()
+    {
+        MainWindow window = Open(1400, 900);
+        try
+        {
+            Ui.Settle();
+            UnderEachLook(window, () =>
+            {
+                Check("Rename's box", () => new Passenger.App.CSharp.RenameBox("Greeter"));
+                Check("A short list of fixes", () => new Passenger.App.CSharp.ChoicePopup("Fixes", [new("Add using System;", string.Empty, 1), new("Fully qualify", string.Empty, 2)]), PopupFrame.Narrow);
+                Check("A list of fixes with long words", () => new Passenger.App.CSharp.ChoicePopup("Fixes",
+                    [new($"Generate the method '{new string('x', 60)}' in the class it is called on", "the class", 1)]), PopupFrame.Wide);
+                Check("A change's lines", () => new Passenger.App.Vcs.ChangePopup("var greeting = \"Hello\";\n", false, () => { }, () => { }, () => { }, () => { }, _ => { }));
+                Check("The colour picker", () => new Passenger.App.Xaml.ColourPicker(new Passenger.Xaml.Features.Argb(255, 200, 40, 40)));
+                Check("Godot's resource picker", () => new Passenger.App.Godot.GodotResourcePicker(project.Folder, ["Texture2D"], null));
+                Check("Godot's items form", () => new Passenger.App.Godot.GodotItemsEditor("waves", Passenger.Workspace.GodotType.Array,
+                    new Passenger.App.Godot.GodotArray([1L, 2L]) { Element = Passenger.App.Godot.GodotElement.Of(Passenger.Workspace.GodotType.Int) },
+                    new Passenger.App.Godot.GodotHint(Passenger.App.Godot.GodotEditing.Items) { Element = Passenger.Workspace.GodotType.Int },
+                    new SilentTuner(), value => Task.FromResult(value), () => { }, (_, _) => new Border()));
+                Check("Godot's keep preview", () => new Passenger.App.Godot.GodotKeepPreview("Keep in the scene", [], ["position: the node is made by a script"]));
+                Check("Read as Text's view", () => new PlainTextView("Last message", "No errors or warnings in this file", () => { }), PopupFrame.Widest);
+            });
+        }
+        finally
+        {
+            window.Close();
+        }
+
+        void Check(string what, Func<Control> make, double? width = null)
+        {
+            Control popup = make();
+            window.Popups.Show(popup, window.Popups.PointIn(window, new Point(100, 100)));
+            Ui.Settle();
+            Border frame = PopupFrame.FrameOf(popup) ?? throw new Xunit.Sdk.XunitException($"{what} shows in no popup's frame");
+            HoldsToPopupRules(what, frame);
+            Assert.True(width is null || Math.Abs(frame.Bounds.Width - width.Value) < 0.5,
+                $"{what} is {frame.Bounds.Width:0.#} px wide, where the narrowest of the popups' widths holding it is {width}");
+            window.Popups.Close();
+            Ui.Settle();
+        }
+    }
+
+    /// <summary>A Godot form's tuner that hears nothing: the form is shown, not used.</summary>
+    private sealed class SilentTuner : Passenger.App.Godot.IGodotTuner
+    {
+        public void Settled(long element)
+        {
+        }
+
+        public void Keep(Passenger.App.Godot.GodotTuned tuned, Control from)
+        {
+        }
+
+        public void ShowPopup(Control popup, Control from)
+        {
+        }
+
+        public void ClosePopup()
+        {
+        }
+
+        public void Say(string words)
+        {
+        }
+    }
+
+    /// <summary>A popup's frame takes its room and width from PopupFrame (Inset, CardInset, a width of its scale, Fitting, a
+    /// FittingFrame) or a list popup's ListRow.PopupList, never a number of its own: a frame whose own Padding, Width,
+    /// MinWidth or MaxWidth names neither fails here, naming its line, as does an option of a popup's made of its own.</summary>
+    private void Every_popups_frame_takes_its_room_and_width_from_PopupFrame()
+    {
+        string[] found = [.. UiFiles().Where(f => !f.Path.EndsWith("/PopupFrame.cs", StringComparison.Ordinal) && !f.Path.EndsWith("/PopupHost.cs", StringComparison.Ordinal))
+            .SelectMany(f => OwnRoom(f.Path, f.Text))];
+        Assert.True(found.Length == 0, $"{found.Length} popups give their frame a room or width of its own, or make an option of their own, so they stand "
+            + $"apart from every other popup: take PopupFrame's (Inset, CardInset, a width, Fitting or a FittingFrame, Option) or ListRow.PopupList:\n{string.Join("\n", found)}");
+        Assert.Single(OwnRoom("a.cs", "Border popup = new()\n{\n    Width = 320,\n    Padding = PopupFrame.Inset,\n    Classes = { StyleClasses.Popup },\n    Child = new StackPanel { Width = 40 },\n};"));
+        Assert.Single(OwnRoom("a.cs", "    {\n        Classes.Add(StyleClasses.Popup);\n        Width = PopupFrame.Narrow;\n        Padding = new Thickness(Gaps.Normal);\n        x = new TextBox { MinWidth = 220 };\n    }"));
+        Assert.Empty(OwnRoom("a.cs", "Content = new Border { Classes = { StyleClasses.Popup }, Padding = PopupFrame.Inset, Child = content };"));
+        Assert.Single(OwnRoom("a.cs", "option = new CheckBox { Content = shown, Focusable = false };"));
+
+        static IEnumerable<string> OwnRoom(string path, string text)
+        {
+            Regex sized = new(@"^\s*(Padding|Width|MinWidth|MaxWidth)\s*=\s*(.+?)\s*[,;]?\s*$");
+            if (path.EndsWith(".axaml", StringComparison.Ordinal))
+            {
+                foreach (Match tag in Regex.Matches(text, @"<[\w:]+[^>]*\bClasses=""popup""[^>]*>"))
+                {
+                    foreach (Match own in Regex.Matches(tag.Value, @"\b(?:Padding|Width|MinWidth|MaxWidth)=""([^""]*)""").Where(a => !Named(a.Groups[1].Value)))
+                    {
+                        yield return $"{path}:{LineOf(text, tag.Index)}: {own.Value}";
+                    }
+                }
+                yield break;
+            }
+            foreach (Match popup in Regex.Matches(text, @"\bStyleClasses\.Popup\b"))
+            {
+                (int start, int end) = FrameBlock(text, popup.Index);
+                int depth = 0;
+                int line = start + 1;
+                int lineDepth = 0;
+                for (int i = start + 1; i <= end; i++)
+                {
+                    char c = i < end ? text[i] : '\n';
+                    if (c == '\n')
+                    {
+                        // Each member the line gives at the block's own depth, one-line initializers' too.
+                        foreach (string member in AtDepth(text[line..i], lineDepth))
+                        {
+                            if (sized.Match(member) is { Success: true } own && !Named(own.Groups[2].Value))
+                            {
+                                yield return $"{path}:{LineOf(text, line)}: {member.Trim()}";
+                            }
+                        }
+                        line = i + 1;
+                        lineDepth = depth;
+                    }
+                    depth += c is '{' or '(' or '[' ? 1 : c is '}' or ')' or ']' ? -1 : 0;
+                }
+            }
+            foreach (Match option in Regex.Matches(text, @"(?:\bnew\s+CheckBox\b|\bCheckBox\s+\w+\s*=\s*new\s*\(\s*\))[^;]*\bFocusable\s*=\s*false"))
+            {
+                yield return $"{path}:{LineOf(text, option.Index)}: an option's check box of its own";
+            }
+        }
+
+        // A line's pieces, split at its commas, that stand at the block's own depth (the line starting at depth).
+        static IEnumerable<string> AtDepth(string line, int depth)
+        {
+            int at = depth;
+            int from = 0;
+            for (int i = 0; i <= line.Length; i++)
+            {
+                char c = i < line.Length ? line[i] : ',';
+                if (c == ',' && at == 0)
+                {
+                    yield return line[from..i];
+                    from = i + 1;
+                }
+                at += c is '{' or '(' or '[' ? 1 : c is '}' or ')' or ']' ? -1 : 0;
+                if (at < 0)
+                {
+                    yield break;
+                }
+            }
+        }
+
+        static bool Named(string value) => value.Contains("PopupFrame.", StringComparison.Ordinal) || value.Contains("ListRow.PopupList", StringComparison.Ordinal);
+
+        // The braces whose members a frame's class is given among: an object's initializer, or the body that adds the class to itself.
+        static (int Start, int End) FrameBlock(string text, int at)
+        {
+            int start = Enclosing(text, at);
+            if (Regex.IsMatch(text[..start], @"\bClasses\s*=\s*$"))
+            {
+                start = Enclosing(text, start);
+            }
+            int depth = 0;
+            for (int i = start; i < text.Length; i++)
+            {
+                depth += text[i] == '{' ? 1 : text[i] == '}' ? -1 : 0;
+                if (depth == 0)
+                {
+                    return (start, i);
+                }
+            }
+            return (start, text.Length);
+        }
+
+        static int Enclosing(string text, int at)
+        {
+            int depth = 0;
+            for (int i = at - 1; i >= 0; i--)
+            {
+                depth += text[i] == '}' ? 1 : text[i] == '{' ? -1 : 0;
+                if (depth < 0)
+                {
+                    return i;
+                }
+            }
+            return 0;
+        }
+    }
 
     [Gate]
     [AvaloniaFact]
@@ -947,8 +1290,38 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         }
     }
 
-    /// <summary>Holds every Border Passenger made in a window (not a control template's) to the look's radii.</summary>
-    private static void Radii(Window window, string what)
+    /// <summary>Every control's own corners, and its template's parts', are one of the look's radii too: a style giving a
+    /// button or a toggle a radius of its own (a tab's × and pin once had 3) is drawn by its template, which the rule over
+    /// the window's Borders passes by. Held over a pinned editor tab, the Git log, the Unit Tests window's filters and NuGet's
+    /// search, under each look.</summary>
+    [AvaloniaFact]
+    public void Every_controls_corner_in_its_template_is_one_of_the_looks_radii()
+    {
+        MainWindow window = Open(1200, 800);
+        try
+        {
+            window.OpenFile(project.PathOf("Notes.txt"));
+            Assert.True(window.Perform(AppActions.PinTab), "Pin Tab did not run");
+            Ui.Settle();
+            UnderEachLook(window, () =>
+            {
+                foreach (string shown in (string[])[AppActions.ShowGit, AppActions.ShowTests, AppActions.ShowNuGet])
+                {
+                    Assert.True(window.Perform(shown), $"{shown} did not show");
+                    Ui.Settle();
+                    Radii(window, $"the window with {shown}", templates: true);
+                }
+            });
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    /// <summary>Holds every Border Passenger made in a window (not a control template's) to the look's radii; with
+    /// <paramref name="templates"/>, every control's own corners and its template's Borders and presenters instead.</summary>
+    private static void Radii(Window window, string what, bool templates = false)
     {
         HashSet<double> radii = [0];
         foreach (string key in (string[])["ControlRadius", "ToolRadius", "PopupRadius", "CardRadius", "BadgeRadius", "ChipRadius", "TabRadius"])
@@ -957,6 +1330,30 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
             {
                 radii.UnionWith([corners.TopLeft, corners.TopRight, corners.BottomRight, corners.BottomLeft]);
             }
+        }
+        if (templates)
+        {
+            // The scrollbar's thumb is the look's own shape, rounder than its width allows a control's radius.
+            if (window.TryFindResource(TokenKeys.ScrollThumbRadius, window.ActualThemeVariant, out object? thumb) && thumb is CornerRadius thumbs)
+            {
+                radii.Add(thumbs.TopLeft);
+            }
+            foreach (Visual drawn in window.GetVisualDescendants().Where(v => v.IsEffectivelyVisible))
+            {
+                (CornerRadius r, string kind) = drawn switch
+                {
+                    TemplatedControl control => (control.CornerRadius, control.GetType().Name),
+                    Border { TemplatedParent: Control parent } part => (part.CornerRadius, $"{parent.GetType().Name}'s {part.Name ?? "Border"}"),
+                    ContentPresenter { TemplatedParent: Control parent } part => (part.CornerRadius, $"{parent.GetType().Name}'s {part.Name ?? "presenter"}"),
+                    _ => (default, string.Empty),
+                };
+                if (drawn is Control shown && !((double[])[r.TopLeft, r.TopRight, r.BottomRight, r.BottomLeft]).All(radii.Contains))
+                {
+                    Assert.Fail($"In {what}, a {string.Join(".", [kind, .. shown.Classes.Where(c => !c.StartsWith(':'))])} named '{AutomationProperties.GetName(shown)}' "
+                        + $"has corners of {r}, none of the look's radii ({string.Join(", ", radii.Order())})");
+                }
+            }
+            return;
         }
         foreach (Border border in window.GetVisualDescendants().OfType<Border>().Where(b => b.IsEffectivelyVisible && b.TemplatedParent is null))
         {
@@ -1001,11 +1398,12 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
             Fits();
             Assert.NotEmpty(tools.Overflowing);
             Assert.True(Drawn(tools.More), "The Debug window's toolbar has buttons with no room and no More to reach them");
-            string[] cut = [.. tools.Overflowing.Select(b => (string)ToolTip.GetTip(b)!)];
+            // Each by its name, the keys its tip names in the menu's column of keys.
+            (string Name, bool Keyed)[] cut = [.. tools.Overflowing.Select(b => (AutomationProperties.GetName(b)!, ToolTip.GetTip(b) is string tip && tip.EndsWith(')')))];
             Ui.Click(tools.More);
             ContextMenu menu = window.GetVisualDescendants().OfType<ContextMenu>().FirstOrDefault(m => m.IsOpen)
                 ?? throw new Xunit.Sdk.XunitException("More opened no menu of the buttons it holds");
-            Assert.Equal(cut, menu.Items.OfType<MenuItem>().Select(i => (string)i.Header!));
+            Assert.Equal(cut, menu.Items.OfType<MenuItem>().Select(i => ((string)i.Header!, i.InputGesture is not null)));
             menu.Close();
         }
         finally
@@ -1015,8 +1413,8 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
     }
 
     /// <summary>Every tool window's toolbar buttons are made one way (ToolButtons): each icon of the one size every icon has,
-    /// and none taking the keys from the list or editor it acts on; only the frame's own Options and Hide in a header are
-    /// smaller.</summary>
+    /// and none taking the keys from the list or editor it acts on; only a glyph's (ToolButtons.Glyph: the frame's own Options
+    /// and Hide in a header, a row's ×) is smaller, and one inside a field (a list's Sort and Filter) a row icon's.</summary>
     [Gate]
     [AvaloniaFact]
     public void Every_tool_windows_toolbar_buttons_have_the_one_icon_size_and_never_take_the_keys()
@@ -1039,9 +1437,7 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
                         continue;
                     }
                     seen++;
-                    bool frames = (button.Name == AppActions.HideToolWindow || ToolTip.GetTip(button) is "Options")
-                        && button.FindAncestorOfType<Border>() is { Classes: var classes } && classes.Contains(StyleClasses.ToolHeader);
-                    double size = frames ? 10 : 16;
+                    double size = icon.Classes.Contains(StyleClasses.Small) ? RowIcon.GlyphSize : button.Classes.Contains(StyleClasses.InField) ? RowIcon.Size : 16;
                     string what = $"{tool.Title}'s {ToolTip.GetTip(button)}";
                     Assert.False(button.Focusable, $"{what} takes the keys when clicked, where a toolbar's button leaves them with what it acts on");
                     Assert.True(icon.Bounds.Width == size && icon.Bounds.Height == size,
@@ -1056,11 +1452,15 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         }
     }
 
+    [AvaloniaFact]
+    public void Every_button_and_field_in_the_window_its_tool_windows_and_Settings_is_named() => Cases.All(
+        ("No button in the window or a tool window goes unnamed", No_button_in_the_window_or_a_tool_window_goes_unnamed),
+        ("Every field in the window its tool windows and Settings is named and a controls height", Every_field_in_the_window_its_tool_windows_and_Settings_is_named_and_a_controls_height));
+
     /// <summary>Every button a person meets in the window and its tool windows has words a screen reader says: its own, or a
     /// name given where it was made (<see cref="ToolButtons.Tip"/>), never only an icon. Its peer's name is what each
     /// system's accessibility reads, so an icon's button left with a tip alone is heard as a nameless button.</summary>
-    [AvaloniaFact]
-    public void No_button_in_the_window_or_a_tool_window_goes_unnamed()
+    private void No_button_in_the_window_or_a_tool_window_goes_unnamed()
     {
         MainWindow window = Open(1400, 880);
         try
@@ -1093,10 +1493,68 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         }
     }
 
+    /// <summary>Every field a person meets in the window, its tool windows and every page of Settings has a name a screen
+    /// reader says (its own, its label's, a search's), never a placeholder alone, and stands as tall as the buttons and
+    /// drop-downs beside it: the one field look, but a field of several lines, a value typed in its row (ValueField) and
+    /// a table's cell.</summary>
+    private void Every_field_in_the_window_its_tool_windows_and_Settings_is_named_and_a_controls_height()
+    {
+        MainWindow window = Open(1400, 880);
+        SettingsDialog? settings = null;
+        try
+        {
+            double height = (double)window.FindResource(TokenKeys.ControlHeight)!;
+            window.OpenFile(project.PathOf("Program.cs"));
+            Ui.Settle();
+            window.Perform(AppActions.Find);
+            Ui.Settle();
+            List<string> faults = [];
+            HashSet<TextBox> seen = [];
+            void Check(string where, Visual within)
+            {
+                foreach (TextBox box in within.GetVisualDescendants().OfType<TextBox>().Where(b => b.IsEffectivelyVisible && b.Bounds.Width > 0 && b.TemplatedParent is null).Where(seen.Add))
+                {
+                    string shown = $"{where}'s {box.GetType().Name} {box.Name} \"{box.PlaceholderText}\" in {box.GetVisualParent()?.GetType().Name}";
+                    if (string.IsNullOrWhiteSpace(Avalonia.Automation.Peers.ControlAutomationPeer.CreatePeerForElement(box).GetName()))
+                    {
+                        faults.Add($"{shown}: nameless to a screen reader");
+                    }
+                    if (!box.AcceptsReturn && box is not ValueField && !box.Classes.Contains(StyleClasses.Cell) && Math.Abs(box.Bounds.Height - height) > 0.5)
+                    {
+                        faults.Add($"{shown}: {box.Bounds.Height:0.#} tall");
+                    }
+                }
+            }
+            foreach (Passenger.App.Docking.ToolWindow tool in window.DockHost.Windows.ToList())
+            {
+                window.DockHost.Show(tool.Id);
+                Ui.Settle();
+                Check(tool.Title, window);
+            }
+            settings = window.ShowSettings();
+            Ui.Settle();
+            foreach (string page in settings.Pages.ToList())
+            {
+                settings.Page = page;
+                Ui.Settle();
+                Check($"Settings › {page}", settings);
+            }
+            Assert.True(seen.Count >= 20, $"Only {seen.Count} fields were found in the window, its tool windows and Settings");
+            Assert.True(faults.Count == 0, $"{faults.Count} fields are nameless or stand at a height of their own: give each a name (its label through "
+                + $"FormRows or AutomationProperties.LabeledBy, a search through SearchBox) and leave its height the base TextBox's:\n{string.Join("\n", faults)}");
+        }
+        finally
+        {
+            settings?.Close();
+            Ui.Settle();
+            window.Close();
+        }
+    }
+
     /// <summary>Every button that runs one of the window's actions, the toolbar's and every tool window's, names in its tip
-    /// the keys the keymap in force gives that action (<see cref="ActionTips"/>), and every tool window's Hide names Hide Tool
-    /// Window's keys or none: under every keymap Settings offers, each chosen in turn, so no tip names a key that does not
-    /// run what it says.</summary>
+    /// (a link offering one, in its words) the keys the keymap in force gives that action (<see cref="ActionTips"/>), and
+    /// every tool window's Hide names Hide Tool Window's keys or none: under every keymap Settings offers, each chosen in
+    /// turn, so no tip names a key that does not run what it says.</summary>
     [AvaloniaFact]
     public void Every_action_buttons_tip_names_the_keys_the_keymap_in_force_gives_its_action()
     {
@@ -1128,8 +1586,10 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
                         }
                         else if ((ActionButtons.GetAction(button) ?? ActionTips.ActionOf(button)) is { } action && KeysOf(action) is { } keys)
                         {
-                            Assert.True(tip.Contains($"({keys})", StringComparison.Ordinal),
-                                $"Under {preset}'s keymap, {tool.Title}'s button for {action} says \"{tip}\", never the {keys} that runs it");
+                            // A link offering an action names its keys in its own words (an empty state's).
+                            string said = button.Classes.Contains(StyleClasses.Link) ? button.Content as string ?? tip : tip;
+                            Assert.True(said.Contains($"({keys})", StringComparison.Ordinal),
+                                $"Under {preset}'s keymap, {tool.Title}'s button for {action} says \"{said}\", never the {keys} that runs it");
                         }
                     }
                 }
@@ -1398,13 +1858,17 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         Assert.True(found.Count == 0, $"At the window's least width:\n{string.Join("\n", found.Distinct().Take(60))}");
     }
 
+    [AvaloniaFact]
+    public void The_layout_faults_check_finds_words_cut_and_controls_drawn_over_each_other_and_a_placeholder_cut_inside_its_scroller() => Cases.All(
+        ("The layout faults check finds words cut and controls drawn over each other", The_layout_faults_check_finds_words_cut_and_controls_drawn_over_each_other),
+        ("A fields long placeholder ends in an ellipsis and the check finds one cut inside its scroller", A_fields_long_placeholder_ends_in_an_ellipsis_and_the_check_finds_one_cut_inside_its_scroller));
+
     /// <summary>The layout faults' check finds what it is for, so its silence means something: words wider than their room
     /// with no ellipsis, laid past a row narrower than them, past their part's room or past the window's edge by a row
     /// wider than it; a fixed-width field past a scroller that scrolls no way sideways, a field squeezed to too little
     /// room to type in, and two buttons in one cell, are each found; words ending in an ellipsis, and a field's own
     /// options inside it, are not.</summary>
-    [AvaloniaFact]
-    public void The_layout_faults_check_finds_words_cut_and_controls_drawn_over_each_other()
+    private void The_layout_faults_check_finds_words_cut_and_controls_drawn_over_each_other()
     {
         TextBlock cut = new() { Text = "Words far wider than their room", Width = 60 };
         TextBlock trimmed = new() { Text = "Words far wider than their room", Width = 60, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -1560,8 +2024,7 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
     /// scroll to it: a placeholder laid out wider than its field, as every one was, words wider than a scroller that
     /// scrolls no way sideways, and words wider than a menu's scroller, which has no sideways bar. A field's own typed
     /// text, which its caret scrolls to, and words in a scroller with its bar, are not cuts.</summary>
-    [AvaloniaFact]
-    public void A_fields_long_placeholder_ends_in_an_ellipsis_and_the_check_finds_one_cut_inside_its_scroller()
+    private void A_fields_long_placeholder_ends_in_an_ellipsis_and_the_check_finds_one_cut_inside_its_scroller()
     {
         const string Long = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
         TextBox field = new() { Width = 160, PlaceholderText = Long, HorizontalAlignment = HorizontalAlignment.Left };
@@ -1656,10 +2119,14 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         Assert.True(found.Count == 0, string.Join("\n", found));
     }
 
+    [AvaloniaFact]
+    public void A_greyed_button_or_check_box_shows_its_tooltip_under_the_pointer() => Cases.All(
+        ("A greyed button shows its tooltip under the pointer", A_greyed_button_shows_its_tooltip_under_the_pointer),
+        ("A greyed check box shows its tooltip under the pointer", A_greyed_check_box_shows_its_tooltip_under_the_pointer));
+
     /// <summary>A greyed button shows its tooltip under the pointer, which says why it is greyed: Live Templates' Delete,
     /// greyed for a built-in template, says how one is turned off instead.</summary>
-    [AvaloniaFact]
-    public void A_greyed_button_shows_its_tooltip_under_the_pointer()
+    private void A_greyed_button_shows_its_tooltip_under_the_pointer()
     {
         MainWindow window = Open(1200, 800);
         SettingsDialog? dialog = null;
@@ -1683,10 +2150,10 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
     }
 
     /// <summary>A greyed check box shows its tooltip under the pointer: in NuGet's Sources, a feed of the machine's
-    /// nuget.config, which NuGet never writes, has its check box greyed, saying what it is all the same. On Linux alone,
-    /// where NuGet takes the machine's folder from the run (NUGET_COMMON_APPLICATION_DATA).</summary>
-    [AvaloniaFact]
-    public void A_greyed_check_box_shows_its_tooltip_under_the_pointer()
+    /// nuget.config, which NuGet never writes, has its check box greyed, its tip saying what it is and why it is greyed, a
+    /// screen reader naming it all the same. On Linux alone, where NuGet takes the machine's folder from the run
+    /// (NUGET_COMMON_APPLICATION_DATA).</summary>
+    private void A_greyed_check_box_shows_its_tooltip_under_the_pointer()
     {
         Assert.SkipUnless(OperatingSystem.IsLinux(), "NuGet reads the machine's nuget.config from the system's own folder here, which a test does not write");
         string machine = Directory.CreateDirectory(Path.Combine(Environment.GetEnvironmentVariable("NUGET_COMMON_APPLICATION_DATA")!, "NuGet", "Config")).FullName;
@@ -1717,7 +2184,8 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
             Ui.WaitFor(() => (toggle = window.NuGet.Sources.GetVisualDescendants().OfType<Grid>().FirstOrDefault(g => g.Tag as string == "team")?.Children.OfType<CheckBox>().FirstOrDefault()) is not null,
                 "the machine's feed team, listed with its check box");
             Assert.False(toggle!.IsEnabled, "The check box of a feed of the machine's nuget.config, which NuGet never writes, is not greyed");
-            Rest(window, toggle, "Enabled");
+            Rest(window, toggle, $"Enabled: {Passenger.App.ToolWindows.NuGetSourcesView.MachineWide}");
+            Assert.Equal("Enabled", AutomationProperties.GetName(toggle));
         }
         finally
         {
@@ -1757,12 +2225,14 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
             List<string> untold = Untold(view);
             Assert.True(untold.Count == 0, $"{untold.Count} controls of the diff say nothing of what they do: give each ToolButtons.Tip:\n{string.Join("\n", untold)}");
 
-            Button arrow = icons.Single(b => ToolTip.GetTip(b) as string == "Roll back change 1 to HEAD");
+            // The arrow's tip names Rollback Lines' keys, which do its work to the change at the caret.
+            string rollBack = ActionTips.Named("Roll back change 1 to HEAD", ActionTips.Keys(AppActions.RollbackLines));
+            Button arrow = icons.Single(b => ToolTip.GetTip(b) as string == rollBack);
             CheckBox box = icons.OfType<CheckBox>().Single(b => ToolTip.GetTip(b) as string == "Include change 1 in commit");
             Assert.Equal("Roll back change 1 to HEAD", Avalonia.Automation.Peers.ControlAutomationPeer.CreatePeerForElement(arrow).GetName());
             Assert.Equal("Include change 1 in commit", Avalonia.Automation.Peers.ControlAutomationPeer.CreatePeerForElement(box).GetName());
             TopLevel top = TopLevel.GetTopLevel(view)!;
-            Rest(top, arrow, "Roll back change 1 to HEAD");
+            Rest(top, arrow, rollBack);
             Rest(top, box, "Include change 1 in commit");
 
             Button bare = new() { Content = new PathIcon() };
@@ -2044,7 +2514,7 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         }
         // The title bar's words and icons in its own colours (white on Passenger's blue), whatever the window's are.
         Border bar = Named<Border>(window, "Toolbar");
-        Color[] own = [.. ((string[])["Text", "Icon", "Run", "Stop", "HotReload", "BadgeText"]).Select(k => Brush(window, $"Passenger.TitleBar.{k}"))];
+        Color[] own = [.. ((string[])["Text", "Icon", "Run", "Debug", "Stop", "HotReload", "BadgeText"]).Select(k => Brush(window, $"Passenger.TitleBar.{k}"))];
         foreach (TextBlock words in bar.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible && !string.IsNullOrEmpty(t.Text)))
         {
             Assert.True(words.Foreground is ISolidColorBrush ink && own.Contains(ink.Color),
@@ -2192,16 +2662,77 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
 
     /// <summary>Passenger's own theme, every theme it carries, every theme of its themes repository and the VS Code colour
     /// themes the tests carry as Passenger makes them, for a rule held of its tokens alone, which costs no window.</summary>
-    public static TheoryData<string> EveryLook => [CarriedThemes.Own, .. CarriedThemes.BuiltInNames, .. CarriedThemes.ThemeNames, .. CarriedThemes.VsCodeNames];
+    private static string[] EveryLook => [CarriedThemes.Own, .. CarriedThemes.BuiltInNames, .. CarriedThemes.ThemeNames, .. CarriedThemes.VsCodeNames];
 
+    /// <summary>Holds what each colour is drawn on to WCAG AA, and the words of the theme of high contrast to AAA's 7:1.</summary>
     [Gate]
-    [AvaloniaTheory]
-    [MemberData(nameof(EveryLook))]
-    public void Text_icons_and_focus_rings_meet_WCAG_AA_on_what_they_are_drawn_on_dark_and_light(string look)
+    [AvaloniaFact]
+    public void Text_icons_and_focus_rings_meet_WCAG_AA_on_what_they_are_drawn_on_dark_and_light() => Cases.Each(EveryLook, MeetsWcag);
+
+    /// <summary>The colour-blind safe palette laid over every look keeps what each state's colour is drawn on as readable as
+    /// the look's own colours must be.</summary>
+    [AvaloniaFact]
+    public void The_colour_blind_safe_palette_over_every_look_meets_WCAG_on_what_it_is_drawn_on_dark_and_light()
+    {
+        Themes.UseStates(Application.Current!, StatePalette.ColourBlindSafe);
+        try
+        {
+            Cases.Each(EveryLook, MeetsWcag);
+        }
+        finally
+        {
+            Themes.UseStates(Application.Current!, StatePalette.Theme);
+        }
+    }
+
+    /// <summary>With the colour-blind safe palette over every look, passed and failed, added against changed and against in
+    /// conflict, and a good and a bad signature stay plainly apart to eyes without red cones or green ones (protanopia,
+    /// deuteranopia), as Machado's model sees them, and apart to eyes without blue ones (tritanopia), where Passenger's own
+    /// colours for these come as close as 0.02.</summary>
+    [AvaloniaFact]
+    public void The_colour_blind_safe_palette_over_every_look_keeps_states_apart_to_eyes_without_red_or_green() => Cases.Each(EveryLook, look =>
+    {
+        (string, string)[] pairs =
+        [
+            (TokenKeys.Test_Passed, TokenKeys.Test_Failed), (TokenKeys.Vcs_Added, TokenKeys.Vcs_Modified), (TokenKeys.Vcs_Added, TokenKeys.Vcs_Conflict),
+            (TokenKeys.Vcs_File_Added, TokenKeys.Vcs_File_Modified),
+            (TokenKeys.Vcs_File_Added, TokenKeys.Vcs_File_Conflicted), (TokenKeys.Vcs_Signature_Good, TokenKeys.Vcs_Signature_Bad),
+        ];
+        Themes.UseStates(Application.Current!, StatePalette.ColourBlindSafe);
+        List<string> close = [];
+        try
+        {
+            using IDisposable worn = CarriedThemes.Wearing(look);
+            foreach (ThemeVariant variant in (ThemeVariant[])[ThemeVariant.Dark, ThemeVariant.Light])
+            {
+                foreach ((string name, double[,] matrix) in ColourVision.Kinds)
+                {
+                    // Red and green are what the palette stands in for; blue cones' loss is rarer and asked less of it.
+                    double least = name == "tritanopia" ? 0.05 : 0.08;
+                    foreach ((string one, string other) in pairs)
+                    {
+                        double apart = ColourVision.Apart(ColourVision.Seen(Colours(one, variant)[0], matrix), ColourVision.Seen(Colours(other, variant)[0], matrix));
+                        if (apart < least)
+                        {
+                            close.Add($"{variant}, {name}: {one} and {other} are {apart:0.000} apart, under {least}");
+                        }
+                    }
+                }
+            }
+        }
+        finally
+        {
+            Themes.UseStates(Application.Current!, StatePalette.Theme);
+        }
+        Assert.True(close.Count == 0, $"Over {look}, the colour-blind safe palette leaves states a colour-blind eye can hardly tell apart:\n" + string.Join("\n", close));
+    });
+
+    private static void MeetsWcag(string look)
     {
         using IDisposable worn = CarriedThemes.Wearing(look);
         // A VS Code theme's edges round its fields are its author's (input.border), so read:Edge holds Passenger's own alone.
         bool own = !look.StartsWith(CarriedThemes.VsCodePrefix, StringComparison.Ordinal);
+        double words = look == ThemeSource.HighContrast ? 7 : 4.5;
         List<string> below = [];
         foreach (ThemeVariant variant in (ThemeVariant[])[ThemeVariant.Dark, ThemeVariant.Light])
         {
@@ -2215,13 +2746,14 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
                 Color[] under = Colours(pair.Under, variant);
                 Color[] grounds = Colours(pair.Ground, variant);
                 double worst = (from f in Colours(pair.Fore, variant) from g in grounds from u in under select Ratio(f, Over(g, u))).Min();
-                if (worst < pair.Least)
+                double least = pair.Least == 4.5 ? words : pair.Least;
+                if (worst < least)
                 {
-                    below.Add($"{variant}: {pair.Fore} on {pair.Ground} is {worst:0.00}:1, under {pair.Least}:1");
+                    below.Add($"{variant}: {pair.Fore} on {pair.Ground} is {worst:0.00}:1, under {least}:1");
                 }
             }
         }
-        Assert.True(below.Count == 0, $"In {look}, {below.Count} pairs fall below WCAG AA, so what they draw is hard to read or to find (text 4.5:1, icons, focus rings, the caret and a field's edge 3:1):\n" + string.Join("\n", below));
+        Assert.True(below.Count == 0, $"In {look}, {below.Count} pairs fall below WCAG {(words > 4.5 ? "AAA" : "AA")}, so what they draw is hard to read or to find (text {words}:1, icons, focus rings, the caret and a field's edge 3:1):\n" + string.Join("\n", below));
     }
 
     /// <summary>Every colour Tokens.axaml gives says on Dark's what it is read on, is a ground another is read on, or says
@@ -2608,6 +3140,126 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
             + $"belongs to where there is one:\n{string.Join("\n", found)}");
     }
 
+    /// <summary>No word is given a size of its own outside the theme files: each takes a step of the one type ramp
+    /// (TypeRamp) through the class that says its role (caption, code, badgeText, a heading's), or the body's, so like words
+    /// stand alike in every window; Theme/'s styles write only the ramp's sizes, and the body's resource is its Body.</summary>
+    [Fact]
+    public void No_font_size_is_a_number_of_its_own_but_a_step_of_the_type_ramp()
+    {
+        Regex number = new(@"(?<![\w.])\d+(?:\.\d+)?(?![\w.])");
+        Regex assigned = new(@"(?<!\w)FontSize\s*=(?!=)");
+        Regex attribute = new(@"(?<![\w.])FontSize=""([^""{][^""]*)""");
+        Regex setter = new(@"Property=""(?:TextElement\.)?FontSize""\s+Value=""([^""{][^""]*)""");
+        Regex selector = new(@"<Style Selector=""([^""]*)""");
+        Regex body = new(@"<x:Double x:Key=""Passenger\.BodySize"">([^<]*)</x:Double>");
+        double[] steps = [.. typeof(TypeRamp).GetFields().Where(f => f.IsLiteral).Select(f => (double)f.GetRawConstantValue()!).Distinct().Order()];
+        bool HasNumber(string written) => number.IsMatch(written);
+        List<string> found = [];
+        bool bodyGiven = false;
+        foreach ((string path, string text) in UiFiles(theme: true))
+        {
+            string[] lines = text.Split('\n');
+            if (path.Contains("/Theme/", StringComparison.Ordinal))
+            {
+                if (!path.EndsWith(".axaml", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                string styled = string.Empty;
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    if (selector.Match(lines[i]) is { Success: true } style)
+                    {
+                        styled = style.Groups[1].Value;
+                    }
+                    if (body.Match(lines[i]) is { Success: true } bodySize)
+                    {
+                        bodyGiven = true;
+                        if (double.Parse(bodySize.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) != TypeRamp.Body)
+                        {
+                            found.Add($"{path}:{i + 1}: {bodySize.Value} (the body is TypeRamp.Body, {TypeRamp.Body})");
+                        }
+                    }
+                    // A rendered Markdown document's own type, as its page draws it.
+                    if (styled.Contains(".md", StringComparison.Ordinal) || styled.Contains("MarkdownBlocks", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+                    foreach (Match match in setter.Matches(lines[i]))
+                    {
+                        if (!double.TryParse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture, out double size) || !steps.Contains(size))
+                        {
+                            found.Add($"{path}:{i + 1}: {match.Value} (each size one of TypeRamp's steps: {string.Join(", ", steps)})");
+                        }
+                    }
+                }
+                continue;
+            }
+            List<(int At, string What)> own = [];
+            if (path.EndsWith(".axaml", StringComparison.Ordinal))
+            {
+                foreach (Match match in attribute.Matches(text).Concat(setter.Matches(text)))
+                {
+                    if (HasNumber(match.Groups[1].Value))
+                    {
+                        own.Add((match.Index, match.Value));
+                    }
+                }
+            }
+            else
+            {
+                string code = string.Join('\n', lines.Select(l => l.TrimStart().StartsWith("//", StringComparison.Ordinal) ? string.Empty : l));
+                foreach (Match match in assigned.Matches(code))
+                {
+                    string written = Expression(code, match.Index + match.Length);
+                    if (HasNumber(written))
+                    {
+                        own.Add((match.Index, match.Value + written));
+                    }
+                }
+            }
+            foreach ((int at, string what) in own.OrderBy(o => o.At))
+            {
+                found.Add($"{path}:{LineOf(text, at)}: {what.Trim()}");
+            }
+        }
+        Assert.True(bodyGiven, "Shell.axaml names no Passenger.BodySize, so the window's words take Fluent's size, which no step of the ramp says");
+        Assert.True(found.Count == 0, $"{found.Count} words are given a size of their own, so they stand otherwise than their like elsewhere: give each the "
+            + $"class of its role on the type ramp (StyleClasses.Caption, Code, BadgeText, PaneTitle, PageTitle, HeroTitle; MutedText.Caption), or TypeRamp's "
+            + $"step where a control draws its own text, and in Theme/ one of TypeRamp's sizes:\n{string.Join("\n", found)}");
+    }
+
+    /// <summary>No word is made bold or semibold outside the theme files but a run inside running text (a match, a
+    /// Markdown span): a heading takes its class (paneTitle, pageTitle, heroTitle, toolTitle, DialogFooter's title) and a
+    /// name standing out in its row <c>strong</c>, so every heading and every row's emphasis is one weight.</summary>
+    [Fact]
+    public void No_font_weight_is_given_outside_the_theme_but_to_a_run_inside_running_text()
+    {
+        Regex assigned = new(@"(?<!\w)FontWeight\s*=(?!=)");
+        Regex attribute = new(@"<(\w+)\b[^<>]*?\bFontWeight=""[^""]*""");
+        Regex run = new(@"\bRun\s*(?:\(|\{|\w+\s*=)|(?<!\w)run\.FontWeight");
+        List<string> found = [];
+        foreach ((string path, string text) in UiFiles())
+        {
+            if (path.EndsWith(".axaml", StringComparison.Ordinal))
+            {
+                found.AddRange(attribute.Matches(text).Where(m => m.Groups[1].Value != "Run").Select(m => $"{path}:{LineOf(text, m.Index)}: {m.Value}"));
+                continue;
+            }
+            string[] lines = text.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (!lines[i].TrimStart().StartsWith("//", StringComparison.Ordinal) && assigned.IsMatch(lines[i]) && !run.IsMatch(lines[i]))
+                {
+                    found.Add($"{path}:{i + 1}: {lines[i].Trim()}");
+                }
+            }
+        }
+        Assert.True(found.Count == 0, $"{found.Count} words are given a weight of their own, so one heading or row stands bolder or lighter than its like: "
+            + $"give a heading its class (StyleClasses.PaneTitle, PageTitle, HeroTitle; a dialog's through DialogFooter.Headed or Question) and a "
+            + $"name standing out in its row StyleClasses.Strong (Classes.Set where a row is shown again):\n{string.Join("\n", found)}");
+    }
+
     /// <summary>The text between the bracket at <paramref name="open"/> and the one closing it.</summary>
     private static string Bracketed(string text, int open)
     {
@@ -2942,13 +3594,17 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
             + $"give each a row made once through ReusedRows.Use, showing its DataContext (Showing):\n{string.Join("\n", found)}");
     }
 
+    [Fact]
+    public void Every_lists_keys_double_click_and_chosen_row_are_heard_through_ListKeys() => Cases.All(
+        ("Every lists keys and double click are heard through ListKeys", Every_lists_keys_and_double_click_are_heard_through_ListKeys),
+        ("A list takes the keys on its chosen row only through ListKeys Hold", A_list_takes_the_keys_on_its_chosen_row_only_through_ListKeys_Hold));
+
     /// <summary>A list hears what its chosen row does by the keys and a double click only through ListKeys.Act (TreeKeys
     /// for a tree, which takes it), ahead of its rows, which take Enter and Space for their choice before a handler of the
     /// list hears them, so Enter does what a double click does in every list: a list's key or double click heard any other
     /// way (its KeyDown or DoubleTapped, a handler added for them, an override, or a XAML attribute) fails here, naming its
     /// line.</summary>
-    [Fact]
-    public void Every_lists_keys_and_double_click_are_heard_through_ListKeys()
+    private void Every_lists_keys_and_double_click_are_heard_through_ListKeys()
     {
         Regex declared = new(@"\b(?:ListBox|TreeList)\??\s+(\w+)\b(?!\s*\()|\b(\w+)\s*=\s*new\s+(?:ListBox|TreeList)\b|<(?:ListBox|app:TreeList)\b[^>]*\bName=""(\w+)""");
         Regex subclass = new(@"\bclass\s+\w+\s*:\s*(?:ListBox|TreeList)\b");
@@ -2978,6 +3634,110 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
             $"The rule found {anywhere.Count} lists declared and few taking ListKeys, so it no longer reads how lists are written");
         Assert.True(found.Count == 0, $"{found.Count} lists hear their keys or double click by a handler of their own, which the rows' own Enter and Space go "
             + $"ahead of, or which does other than Enter does: give each its acts through ListKeys.Act (TreeKeys.Attach for a tree):\n{string.Join("\n", found)}");
+    }
+
+    /// <summary>A list takes the keys on its chosen row only through ListKeys.Hold (TreeKeys moving them as a tree's rows
+    /// move): a ListBox refuses Focus(), so a list given the keys that way gets none, and a row's container given them by
+    /// hand misses a row out of sight or none chosen. Focus() on a ListBox, a TreeList or a class of theirs, or on a row
+    /// taken from one by ContainerFromIndex or ContainerFromItem, fails here, naming its line.</summary>
+    private void A_list_takes_the_keys_on_its_chosen_row_only_through_ListKeys_Hold()
+    {
+        (string Path, string Text)[] files = [.. UiFiles()];
+        HashSet<string> kinds = ["ListBox", "TreeList"];
+        Regex subclass = new(@"\bclass\s+(\w+)\s*:\s*(\w+)\b");
+        for (int before = 0; before != kinds.Count;)
+        {
+            before = kinds.Count;
+            kinds.UnionWith(files.SelectMany(f => subclass.Matches(f.Text)).Where(m => kinds.Contains(m.Groups[2].Value)).Select(m => m.Groups[1].Value));
+        }
+        string kind = string.Join("|", kinds.Order(StringComparer.Ordinal));
+        Regex declared = new($@"\b(?:{kind})\??\s+(\w+)\b(?!\s*\()|\b(\w+)\s*=\s*new\s+(?:{kind})\b|<(?:\w+:)?(?:{kind})\b[^>]*\bName=""(\w+)""");
+        Regex isList = new($@"\bclass\s+\w+\s*:\s*(?:{kind})\b");
+        Regex focused = new(@"(?:\b([\w.]+?)\??\.(?:Container(?:FromIndex|FromItem)\((?:[^()]|\([^()]*\))*\)\??\.)?|(?<![\w.?]))Focus\(");
+        Dictionary<string, HashSet<string>> lists = files.ToDictionary(f => f.Path,
+            f => declared.Matches(f.Text).SelectMany(m => m.Groups.Values.Skip(1)).Where(g => g.Success).Select(g => g.Value).ToHashSet(StringComparer.Ordinal));
+        HashSet<string> anywhere = [.. lists.Values.SelectMany(n => n)];
+        List<string> found = [];
+        foreach ((string path, string text) in files.Where(f => !f.Path.EndsWith("/ListKeys.cs", StringComparison.Ordinal) && !f.Path.EndsWith("/TreeKeys.cs", StringComparison.Ordinal)))
+        {
+            // A view's code names the lists its XAML declares.
+            HashSet<string> here = path.EndsWith(".axaml.cs", StringComparison.Ordinal) && lists.TryGetValue(path[..^3], out HashSet<string>? xaml) ? [.. lists[path], .. xaml] : lists[path];
+            string[] lines = text.Split('\n');
+            foreach (Match match in focused.Matches(text))
+            {
+                string line = lines[LineOf(text, match.Index) - 1].TrimStart();
+                string? on = match.Groups[1].Success ? match.Groups[1].Value : null;
+                bool list = on is null or "this" ? isList.IsMatch(text) && !Regex.IsMatch(line, @"\b(?:void|bool)\s+Focus\(")
+                    : on.Contains('.') ? anywhere.Contains(on[(on.LastIndexOf('.') + 1)..]) : here.Contains(on);
+                if (list && !line.StartsWith("//", StringComparison.Ordinal))
+                {
+                    found.Add($"{path}:{LineOf(text, match.Index)}: {line.Trim()}");
+                }
+            }
+        }
+        Assert.True(anywhere.Count > 30 && files.Sum(f => Regex.Count(f.Text, @"\bListKeys\.Hold\(")) > 15,
+            $"The rule found {anywhere.Count} lists declared and few given the keys through ListKeys.Hold, so it no longer reads how lists are written");
+        Assert.True(found.Count == 0, $"{found.Count} lists are given the keys by Focus(), which a ListBox refuses and a row's container takes only where "
+            + $"it is laid out and chosen, leaving the keys nowhere: give each its chosen row the keys through ListKeys.Hold:\n{string.Join("\n", found)}");
+    }
+
+    /// <summary>A menu's item is made by the shared pieces (ListMenus, MenuChoice, and the window's action menus in
+    /// MainWindow.Menu), so every item shows only keys the keymap gives its action or its list's row does it by, and greys
+    /// saying why: a MenuItem made anywhere else, or keys set beside an item by hand, fails here, naming its line. The
+    /// terminal's menu stays its own: its keys are the terminal's, which no keymap gives, in a project without the App's.</summary>
+    [Fact]
+    public void Every_menu_item_is_made_by_the_shared_menu_pieces_and_shows_no_keys_written_by_hand()
+    {
+        string[] pieces = ["/ToolWindows/ListMenus.cs", "/MenuChoice.cs", "/MainWindow.Menu.cs"];
+        string[] apart = ["src/Passenger.Terminal/TerminalView.cs"];
+        Regex made = new(@"\bnew\s+MenuItem\b|\bMenuItem\s+\w+\s*=\s*new\s*\(|\bMenuItem\s+\w+\([^)]*\)\s*=>\s*new\s*\(");
+        // The keymap's keys for an action are shown by ActionRegistry.ShowKeys, a list act's by ListMenus.
+        Regex keys = new(@"\bInputGesture\s*=");
+        string[] found = [.. UiFiles().Where(f => f.Path.EndsWith(".cs", StringComparison.Ordinal) && !pieces.Any(p => f.Path.EndsWith(p, StringComparison.Ordinal)) && !apart.Contains(f.Path))
+            .SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line.TrimStart())))
+            .Where(l => !l.Text.StartsWith("//", StringComparison.Ordinal) && (made.IsMatch(l.Text) || (keys.IsMatch(l.Text) && !l.Path.EndsWith("/ActionRegistry.cs", StringComparison.Ordinal))))
+            .Select(l => $"{l.Path}:{l.Line}: {l.Text}")];
+        Assert.True(found.Length == 0, $"{found.Length} menu items are made, or given keys, by hand, so their keys are written beside them rather than taken from "
+            + $"the keymap or the list's acts, and one greyed may say nothing of why: make each through ListMenus (Item, Keyed, Open, Source, Edit, Remove, "
+            + $"Toggle, Sub, Heading, Notice) or MenuChoice:\n{string.Join("\n", found)}");
+        Assert.Matches(made, "            MenuItem item = new() { Header = name };");
+        Assert.Matches(made, "        static MenuItem Heading(string text) => new() { Header = text, IsEnabled = false };");
+        Assert.Matches(made, "menu.Items.Add(new MenuItem { Header = \"Local\", IsEnabled = false });");
+        Assert.DoesNotMatch(made, "        MenuItem item = ListMenus.Item(header, run);");
+    }
+
+    /// <summary>Every key the window names in words (a tip, a placeholder, a status, a label, a note) is the keymap's for an
+    /// action (ActionTips) or KeyWords' for a key no action owns, so a person on another keymap or system reads their own
+    /// keys: a key written as words by hand (a modifier's symbol, a modifier's name before a + or held for something, a
+    /// function key in brackets, a key pressed or held by its name) and a key turned into words anywhere but KeyWords fail
+    /// here, naming the line. The formatter itself (Keymap.cs) is apart.</summary>
+    [Fact]
+    public void Every_key_named_in_words_is_the_keymaps_or_KeyWords()
+    {
+        Regex byHand = new(@"[⌘⌥⇧⌃⏎⎋⇥⌫⌦↩]|\b(?:Ctrl|Control|Alt|Option|Shift|Cmd|Command|Win|Meta)\+|\((?:Shift\+)?F\d{1,2}\)"
+            + @"|\b(?:Ctrl|Alt|Shift|Cmd|Option)\s+for\s"
+            + @"|\b(?:[Pp]ress|[Hh]old|by|or|and|with)\s+(?:Escape|Esc|Enter|Return|Tab|Backspace|Space|Ctrl|Alt|Shift|Cmd)\b(?!\s*(?:key|bar)s?\b)"
+            + @"|\b(?:Escape|Esc|Enter|Return|Tab|Backspace)\s+to\s+(?!the\b)[a-z]");
+        Regex formatted = new(@"\.Display\(\)|\bKeystroke\.Shown\(");
+        string[] apart = ["/KeyWords.cs", "src/Passenger.Editor/Keymap.cs"];
+        string[] found = [.. UiFiles().Where(f => !apart.Any(a => f.Path.EndsWith(a, StringComparison.Ordinal)))
+            .SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line.Trim())))
+            .Where(l => !l.Text.StartsWith("//", StringComparison.Ordinal) && !l.Text.StartsWith("<!--", StringComparison.Ordinal)
+                && (byHand.IsMatch(l.Text) || formatted.IsMatch(l.Text)))
+            .Select(l => $"{l.Path}:{l.Line}: {l.Text}")];
+        Assert.True(found.Length == 0, $"{found.Length} keys are named in words by hand, so a person on another keymap or system reads keys that "
+            + $"are not theirs: name an action's keys through ActionTips and any other key through KeyWords:\n{string.Join("\n", found)}");
+        Assert.Matches(byHand, "    private static string Keys(string key) => OperatingSystem.IsMacOS() ? $\"⌘{key}\" : $\"Ctrl+{key}\";");
+        Assert.Matches(byHand, "        ToolTip.SetTip(maskOn, \"File mask (Alt+K)\");");
+        Assert.Matches(byHand, "        Button jump = ToolButtons.Of(IconKeys.Edit, \"Jump to Source (F4)\", AskForSource);");
+        Assert.Matches(byHand, "        ToolTip.SetTip(label, \"Drag left or right to change it: Shift for faster, Alt for finer\");");
+        Assert.Matches(byHand, "            parts.Say($\"Select Element: point at a control in {live.Name} and click it, or press Escape there\");");
+        Assert.Matches(byHand, "        Message?.Invoke(this, \"Smart Step Into: choose a call with the arrow keys or Tab, Enter to step into it, Escape to leave\");");
+        Assert.Matches(byHand, "            \"A plain click on a file's row opens it, the keys staying in the Explorer. Off, a double-click or Enter opens it. \"");
+        Assert.Matches(formatted, "            string keys = AppActions.Keymap().ShortcutsFor(AppActions.HighlightUsages).FirstOrDefault()?.Display() ?? \"the action\";");
+        Assert.DoesNotMatch(byHand, "        ToolTip.SetTip(maskOn, ActionTips.Named(\"File mask\", KeyWords.Of(MaskKey)));");
+        Assert.DoesNotMatch(byHand, "        new(D.EditorPage, \"Show whitespaces\", \"whitespace spaces tabs dots arrows invisible characters appearance\"));");
+        Assert.DoesNotMatch(byHand, "        new(D.EditorPage, \"Vim mode's Ctrl keys\", \"vim keys ctrl control conflict keymap\",");
     }
 
     /// <summary>A peer of Passenger's tells a screen reader of a change only through PeerChanges.Tell, which tells a pattern's
@@ -3083,6 +3843,187 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         }
     }
 
+    /// <summary>Every tag, symbol kind's badge, solution's initials and filter chip is made by Tags or FilterChip, so a tag's
+    /// words stand at one step and colour, a badge at one size, and a filter clears one way everywhere: their classes named
+    /// anywhere else fail here, naming the line. The title bar's project badge, made in its XAML, wears the initials' class.</summary>
+    [Fact]
+    public void Every_tag_badge_and_chip_is_made_by_Tags_or_FilterChip()
+    {
+        Regex byHand = new(@"\bStyleClasses\.(?:Tag|KindBadge|Initials|Chip)\b|Classes=""[^""]*\b(?:tag|kindBadge|initials|chip)\b");
+        string[] owners = ["/Tags.cs", "/FilterChip.cs"];
+        string[] found = [.. UiFiles().Where(f => !owners.Any(o => f.Path.EndsWith(o, StringComparison.Ordinal)))
+            .SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line)))
+            .Where(l => byHand.IsMatch(l.Text) && !(l.Path.EndsWith("/MainWindow.axaml", StringComparison.Ordinal) && l.Text.Contains("Name=\"ProjectBadge\"", StringComparison.Ordinal)))
+            .Select(l => $"{l.Path}:{l.Line}: {l.Text.Trim()}")];
+        Assert.True(found.Length == 0, $"{found.Length} tags, badges or chips are made by hand, so their words' size, colour and room drift from every "
+            + $"other's: make each with Tags (Of, Method, Kind, Initials) or a FilterChip:\n{string.Join("\n", found)}");
+        Assert.Matches(byHand, "        return new Border { Classes = { StyleClasses.Tag }, Child = text };");
+        Assert.Matches(byHand, "                <Border Classes=\"kindBadge\" Width=\"16\">");
+        Assert.DoesNotMatch(byHand, "        Border tag = Tags.Of(words);");
+    }
+
+    /// <summary>A link stands at the size of the words beside it, by the type ramp's class, and takes the keys as every other
+    /// does (its shortcut, where it has one, still its own): a link given a font size or kept off the keys fails here,
+    /// naming its line.</summary>
+    [Fact]
+    public void Every_link_takes_a_step_of_the_ramp_and_the_keys()
+    {
+        Regex link = new(@"\bStyleClasses\.Link\b|Classes=""[^""]*\blink\b");
+        Regex own = new(@"\bFontSize\b|\bFocusable\s*=\s*false\b|\bFocusable=""False""");
+        string[] found = [.. UiFiles().SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line)))
+            .Where(l => link.IsMatch(l.Text) && own.IsMatch(l.Text)).Select(l => $"{l.Path}:{l.Line}: {l.Text.Trim()}")];
+        Assert.True(found.Length == 0, $"{found.Length} links take a size of their own or are kept off the keys, so they stand or answer apart from "
+            + $"every other: give each the ramp's class of the words it sits in, and leave it the keys:\n{string.Join("\n", found)}");
+        Assert.Matches(link, "        Button open = new() { Classes = { StyleClasses.Link }, Focusable = false };");
+    }
+
+    /// <summary>What a list or a pane says while it has nothing to show is an EmptyState, so its words stand, wrap and link
+    /// to what would fill it one way everywhere: the empty words' class given anywhere else fails here, naming its line.</summary>
+    [Fact]
+    public void Every_empty_state_is_an_EmptyState()
+    {
+        Regex byHand = new(@"\bStyleClasses\.EmptyText\b|Classes=""[^""]*\bemptyText\b");
+        string[] found = [.. UiFiles().Where(f => !f.Path.EndsWith("/EmptyState.cs", StringComparison.Ordinal))
+            .SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line)))
+            .Where(l => byHand.IsMatch(l.Text)).Select(l => $"{l.Path}:{l.Line}")];
+        Assert.True(found.Length == 0, $"{found.Length} empty states are made by hand, so their words, room and offer drift from every other's: "
+            + $"make each an EmptyState:\n{string.Join("\n", found)}");
+        Assert.Matches(byHand, "        placeholder = new TextBlock { Classes = { StyleClasses.EmptyText } };");
+        Assert.Matches(byHand, "                <TextBlock Name=\"Hint\" Classes=\"emptyText\" Text=\"Nothing open\" />");
+    }
+
+    /// <summary>Words to read and copy are SelectableWords, laid out whole at the width they measured at every display
+    /// scale: a SelectableTextBlock made or derived from anywhere else fails here, naming its line (#2046).</summary>
+    [Fact]
+    public void Every_selectable_text_is_SelectableWords()
+    {
+        Regex byHand = new(@"\bnew SelectableTextBlock\b|:\s*SelectableTextBlock\b|\bSelectableTextBlock\s+\w+\s*=\s*new\(|<SelectableTextBlock\b");
+        string[] found = [.. UiFiles().Where(f => !f.Path.EndsWith("/SelectableWords.cs", StringComparison.Ordinal))
+            .SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line)))
+            .Where(l => byHand.IsMatch(l.Text)).Select(l => $"{l.Path}:{l.Line}: {l.Text.Trim()}")];
+        Assert.True(found.Length == 0, $"{found.Length} selectable texts are Avalonia's own, which at a display scale where their width falls on a pixel "
+            + $"wrap their last word out of sight: make each a SelectableWords:\n{string.Join("\n", found)}");
+        Assert.Matches(byHand, "        text = new SelectableTextBlock");
+        Assert.Matches(byHand, "public sealed class MarkdownText : SelectableTextBlock");
+        Assert.Matches(byHand, "        SelectableTextBlock words = new()");
+        Assert.DoesNotMatch(byHand, "    <Style Selector=\"SelectableTextBlock.mdText\">");
+    }
+
+    /// <summary>A tree row's chevron is a RowExpander, one column wide in every tree, turned while its row is open and kept
+    /// for a row with nothing under it: a chevron of a row's own (RowIcon.Chevron or a chevron's key given to a RowIcon,
+    /// swapped Right for Down) fails here, naming its line. A fold of a form's (FormFold) is no tree's row.</summary>
+    [Fact]
+    public void Every_tree_rows_chevron_is_a_RowExpander()
+    {
+        Regex byHand = new(@"\bRowIcon\.Chevron\(\)|\bDataKey\s*=[^;]*\bIconKeys\.Chevron(?:Down|Right)\b");
+        string[] owners = ["/RowIcon.cs", "/RowExpander.cs", "/RowGlyphs.cs", "/FormFold.cs"];
+        string[] found = [.. UiFiles().Where(f => f.Path.EndsWith(".cs", StringComparison.Ordinal) && !owners.Any(o => f.Path.EndsWith(o, StringComparison.Ordinal)))
+            .SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line)))
+            .Where(l => byHand.IsMatch(l.Text)).Select(l => $"{l.Path}:{l.Line}: {l.Text.Trim()}")];
+        Assert.True(found.Length == 0, $"{found.Length} tree rows draw a chevron of their own, so it stands, turns and takes a press otherwise than "
+            + $"every other tree's: give each row a RowExpander:\n{string.Join("\n", found)}");
+        Assert.Matches(byHand, "            chevron.DataKey = row.IsExpanded ? IconKeys.ChevronDown : IconKeys.ChevronRight;");
+        Assert.Matches(byHand, "        RowIcon chevron = RowIcon.Chevron();");
+    }
+
+    /// <summary>A RowIcon is one of two sizes, never one of its own: a row's or a tab's icon beside words (RowIcon.Size, its
+    /// own) or a glyph (RowIcon.Glyph: a chevron, a tab's close), so like icons stand alike in every list. A RowIcon given a
+    /// width or height outside RowIcon.cs fails here, naming its line.</summary>
+    [Fact]
+    public void A_rows_icon_is_a_RowIcons_size_never_one_of_its_own()
+    {
+        Regex made = new(@"(?:\bRowIcon\s+(\w+)\s*=\s*new\(\)|\b(\w+)\s*=\s*new RowIcon\b)\s*\{");
+        Regex named = new(@"\bRowIcon\s+(\w+)\s*[=;]");
+        Regex sized = new(@"(?<![\w.])(?:Width|Height)\s*=(?!=)");
+        List<string> found = [];
+        int icons = 0;
+        foreach ((string path, string text) in UiFiles().Where(f => f.Path.EndsWith(".cs", StringComparison.Ordinal) && !f.Path.EndsWith("/RowIcon.cs", StringComparison.Ordinal)))
+        {
+            foreach (Match match in made.Matches(text))
+            {
+                icons++;
+                int open = match.Index + match.Length - 1;
+                if (sized.IsMatch(Braced(text, open)))
+                {
+                    found.Add($"{path}:{LineOf(text, match.Index)}");
+                }
+            }
+            foreach (string name in named.Matches(text).Select(m => m.Groups[1].Value).Distinct())
+            {
+                foreach (Match set in Regex.Matches(text, $@"\b{name}\.(?:Width|Height)\s*=(?!=)"))
+                {
+                    // A test's state mark, each sized to its glyph's weight in the column of the marks.
+                    if (!(path.EndsWith("ToolWindows/TestsView.cs", StringComparison.Ordinal) && name == "state"))
+                    {
+                        found.Add($"{path}:{LineOf(text, set.Index)}");
+                    }
+                }
+            }
+        }
+        Assert.True(icons > 20, $"Only {icons} RowIcons were found made: the search no longer reads them");
+        Assert.True(found.Count == 0, $"{found.Count} RowIcons are given a size of their own, so like icons stand larger or smaller from list to list: "
+            + $"leave each its own size (RowIcon.Size), or make a glyph with RowIcon.Glyph:\n{string.Join("\n", found.Distinct())}");
+
+        static string Braced(string text, int open)
+        {
+            int depth = 0;
+            for (int i = open; i < text.Length; i++)
+            {
+                depth += text[i] switch { '{' => 1, '}' => -1, _ => 0 };
+                if (depth == 0)
+                {
+                    return text[open..i];
+                }
+            }
+            return text[open..];
+        }
+    }
+
+    /// <summary>A row, or a part of one, that is there but off (can't be chosen, a feed not used, a file cut, a style that
+    /// does not apply) is drawn faint one way, ListRow.Dim: an opacity of a number of its own outside the theme (but none or
+    /// whole, a part hidden or shown) fails here, naming its line.</summary>
+    [Fact]
+    public void A_faint_row_is_dimmed_by_ListRow_never_an_opacity_of_its_own()
+    {
+        Regex assigned = new(@"(?<!\w)Opacity\s*=(?![=>])");
+        Regex attribute = new(@"(?<![\w.])Opacity=""([^""{][^""]*)""");
+        Regex number = new(@"(?<![\w.])\d+(?:\.\d+)?(?![\w.])");
+        bool OwnNumber(string written) => number.Matches(written).Any(m => m.Value is not ("0" or "1"));
+        List<string> found = [];
+        foreach ((string path, string text) in UiFiles().Where(f => !f.Path.EndsWith("/ListRow.cs", StringComparison.Ordinal)))
+        {
+            if (path.EndsWith(".axaml", StringComparison.Ordinal))
+            {
+                found.AddRange(attribute.Matches(text).Where(m => OwnNumber(m.Groups[1].Value)).Select(m => $"{path}:{LineOf(text, m.Index)}: {m.Value}"));
+                continue;
+            }
+            string code = string.Join('\n', text.Split('\n').Select(l => l.TrimStart().StartsWith("//", StringComparison.Ordinal) ? string.Empty : l));
+            foreach (Match match in assigned.Matches(code))
+            {
+                string written = Expression(code, match.Index + match.Length);
+                if (OwnNumber(written))
+                {
+                    found.Add($"{path}:{LineOf(text, match.Index)}: {match.Value}{written.Trim()}");
+                }
+            }
+        }
+        Assert.True(found.Count == 0, $"{found.Count} controls are made faint by an opacity of their own, so an off row stands fainter or bolder "
+            + $"from list to list: dim each with ListRow.Dim (or name the faintness once where it is no row's):\n{string.Join("\n", found)}");
+    }
+
+    /// <summary>A row's detail at its end (a path, a kind, keys, when) is ListRow.DetailText, muted at the caption's size
+    /// and cut where the row has no room: the detail's margin given to words made by hand fails here, naming its line.</summary>
+    [Fact]
+    public void Every_rows_detail_at_its_end_is_ListRows_detail()
+    {
+        Regex byHand = new(@"\bListRow\.Detail\b(?!Text)");
+        string[] found = [.. UiFiles().Where(f => !f.Path.EndsWith("/ListRow.cs", StringComparison.Ordinal))
+            .SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line)))
+            .Where(l => byHand.IsMatch(l.Text)).Select(l => $"{l.Path}:{l.Line}")];
+        Assert.True(found.Length == 0, $"{found.Length} rows make their detail by hand, so its size, colour and cut drift from every other row's: "
+            + $"make each with ListRow.DetailText:\n{string.Join("\n", found)}");
+    }
+
     /// <summary>No font family is written by name outside the theme files (WindowFonts), but the code font Passenger carries
     /// (CodeEditor.CodeFont, CodeFonts' fallback, carried through FallbackFonts): the window's words take the typeface Settings
     /// puts in force and code the code font, so a family named anywhere else draws in a font no setting reaches.</summary>
@@ -3138,8 +4079,9 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
     }
 
     /// <summary>A form's drop-down is a FormDropDown, which narrows with its room up to the form's most, so none stands past
-    /// a form narrower than it: the form's class given to a drop-down by hand, which held it to a width of its own, fails
-    /// here, naming its line.</summary>
+    /// a form narrower than it and every form's end where the others' do: the form's class given to a drop-down by hand,
+    /// which held it to a width of its own, or a plain drop-down made in a dialog's file but a table's cell, fails here,
+    /// naming its line.</summary>
     [Fact]
     public void Every_forms_drop_down_is_a_FormDropDown_narrowing_with_its_room()
     {
@@ -3148,6 +4090,144 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
             .SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line)))
             .Where(l => byHand.IsMatch(l.Text)).Select(l => $"{l.Path}:{l.Line}")];
         Assert.True(found.Length == 0, $"{found.Length} drop-downs are given a form's class by hand, so they keep no form's width: make each a FormDropDown:\n{string.Join("\n", found)}");
+
+        // A request line's method stands as wide as its words before the address it begins, no form's field.
+        string[] apart = ["Endpoints/InteractiveTestDialog.cs:Method"];
+        Regex plain = new(@"\b(?:(\w+)\s*=\s*new\s+ComboBox\b|ComboBox\s+(\w+)\s*=\s*new\s*\(\s*\))\s*\{?");
+        List<string> plainOnes = [];
+        foreach ((string path, string text) in UiFiles().Where(f => f.Path.EndsWith("Dialog.cs", StringComparison.Ordinal) || f.Path.EndsWith("Dialogs.cs", StringComparison.Ordinal)))
+        {
+            foreach (Match match in plain.Matches(text))
+            {
+                string name = match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
+                string own = match.Value.EndsWith('{') ? Whole(text, match.Index + match.Length) : string.Empty;
+                if (!own.Contains("StyleClasses.Cell", StringComparison.Ordinal) && !apart.Any(a => path.EndsWith(a.Split(':')[0], StringComparison.Ordinal) && a.EndsWith(":" + name, StringComparison.Ordinal)))
+                {
+                    plainOnes.Add($"{path}:{LineOf(text, match.Index)}: {name}");
+                }
+            }
+        }
+        Assert.True(plainOnes.Count == 0, $"{plainOnes.Count} drop-downs of a dialog's form are plain ones, stretched to the dialog's edge or held to a width of their own, "
+            + $"where every form's drop-down ends where the others' do: make each a FormDropDown:\n{string.Join("\n", plainOnes)}");
+        Assert.Matches(plain, "        From = new ComboBox { Name = \"ScriptFrom\" };");
+        Assert.Matches(plain, "    private readonly ComboBox stepBox = new() { HorizontalAlignment = HorizontalAlignment.Stretch };");
+        Assert.DoesNotMatch(plain, "    private readonly ComboBox stepBox = new FormDropDown();");
+    }
+
+    /// <summary>Every search field is a SearchBox, its magnifier, name and words at the dense step one way in every tool
+    /// window, dialog and page, and every other field takes the one field look of the base TextBox: the search class given
+    /// anywhere but SearchBox and the find bar's XAML fails here, naming its line.</summary>
+    [Fact]
+    public void Every_search_field_is_a_SearchBox_and_every_other_field_the_one_field()
+    {
+        Regex byHand = new(@"\bStyleClasses\.Search\b|Classes=""[^""]*\bsearch\b");
+        string[] owners = ["/SearchBox.cs", "/Editors/FindBar.axaml"];
+        string[] found = [.. UiFiles().Where(f => !owners.Any(o => f.Path.EndsWith(o, StringComparison.Ordinal)))
+            .SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line)))
+            .Where(l => byHand.IsMatch(l.Text)).Select(l => $"{l.Path}:{l.Line}: {l.Text.Trim()}")];
+        Assert.True(found.Length == 0, $"{found.Length} fields are given the search class by hand, so a search stands without its magnifier or name, "
+            + $"or a form's field at a search's size: make a search a SearchBox (SearchBox.InPopup in a popup that is a search), and leave any other "
+            + $"field the base TextBox's:\n{string.Join("\n", found)}");
+        Assert.Matches(byHand, "        search = new TextBox { Classes = { StyleClasses.Search }, PlaceholderText = \"Search packages\" };");
+        Assert.Matches(byHand, "            <TextBox Name=\"Query\" Classes=\"search\" />");
+    }
+
+    /// <summary>Every tool window's drop-down is a ToolDropDown: a bar's, a popup's scope, a value chosen in a row, each at
+    /// the dense step, one height and one least width, named where words stand before it. One given the compact class by
+    /// hand, or a plain drop-down made in a tool window's or a pane's file (but a table's cell, a form's FormDropDown and
+    /// Settings' theme picker, which narrows as a Settings row does), fails here, naming its line.</summary>
+    [Fact]
+    public void Every_tool_windows_drop_down_is_a_ToolDropDown()
+    {
+        Regex made = new(@"\b(?:(\w+)\s*=\s*new\s+ComboBox\b|ComboBox\s+(\w+)\s*(?:\{\s*get;\s*\}\s*)?=\s*new\s*\(\s*\))\s*\{?");
+        string[] apart = ["/Settings/ThemePicker.cs"];
+        List<string> found = [];
+        foreach ((string path, string text) in UiFiles().Where(f => f.Path.EndsWith(".cs", StringComparison.Ordinal)))
+        {
+            bool form = path.EndsWith("Dialog.cs", StringComparison.Ordinal) || path.EndsWith("Dialogs.cs", StringComparison.Ordinal) || apart.Any(a => path.EndsWith(a, StringComparison.Ordinal));
+            foreach (Match match in made.Matches(text))
+            {
+                string name = match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
+                string own = match.Value.EndsWith('{') ? Whole(text, match.Index + match.Length) : string.Empty;
+                if (own.Contains("StyleClasses.Compact", StringComparison.Ordinal) || !form && !own.Contains("StyleClasses.Cell", StringComparison.Ordinal))
+                {
+                    found.Add($"{path}:{LineOf(text, match.Index)}: {name}");
+                }
+            }
+        }
+        Assert.True(found.Count == 0, $"{found.Count} tool windows' drop-downs are made by hand, so they stand at a size, height or width of their own "
+            + $"beside the search field and buttons of their bar: make each a ToolDropDown (ToolDropDown.Labelled for words before it):\n{string.Join("\n", found)}");
+        Assert.Matches(made, "        chooser = new ComboBox { Classes = { StyleClasses.Compact }, MinWidth = 130 };");
+        Assert.Matches(made, "    public ComboBox OrderBox { get; } = new() { Width = 120 };");
+        Assert.DoesNotMatch(made, "        ComboBox chooser = new ToolDropDown { Name = name };");
+    }
+
+    /// <summary>A value typed over in its row is a ValueField, one height and one look in the debugger's values, the Live
+    /// Visual Tree's and a Godot scene's properties: the in-row class given anywhere but ValueField fails here, naming its
+    /// line, as does code shown through the code font alone, which stands at the body's size, a third size of code beside
+    /// the editor's and a pane's: code takes the code step (StyleClasses.Code), and InCodeFont only a run in running text or
+    /// an element given its step (a badge's letters, TypeRamp.Code).</summary>
+    [Fact]
+    public void A_value_typed_in_its_row_is_a_ValueField_and_code_shown_takes_the_code_step()
+    {
+        Regex inRow = new(@"\bStyleClasses\.InRow\b");
+        string[] typed = [.. UiFiles().Where(f => !f.Path.EndsWith("/ValueField.cs", StringComparison.Ordinal))
+            .SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line)))
+            .Where(l => inRow.IsMatch(l.Text)).Select(l => $"{l.Path}:{l.Line}: {l.Text.Trim()}")];
+        Assert.True(typed.Length == 0, $"{typed.Length} values are typed over in a row of their own making: make each a ValueField:\n{string.Join("\n", typed)}");
+
+        Regex codeFont = new(@"\.InCodeFont\(\)|\bFontFamily\s*=\s*[\w.]*\bCodeFont\b");
+        Regex stepped = new(@"\bStyleClasses\.BadgeText\b|\bTypeRamp\.\w+|^\s*run\.InCodeFont\(\)");
+        string[] alone = [.. UiFiles().Where(f => f.Path.EndsWith(".cs", StringComparison.Ordinal))
+            .SelectMany(f => f.Text.Split('\n').Select((line, i) => (f.Path, Line: i + 1, Text: line)))
+            .Where(l => codeFont.IsMatch(l.Text) && !stepped.IsMatch(l.Text)).Select(l => $"{l.Path}:{l.Line}: {l.Text.Trim()}")];
+        Assert.True(alone.Length == 0, $"{alone.Length} places show code in the code font at the body's size, a third size of code: give each "
+            + $"StyleClasses.Code:\n{string.Join("\n", alone)}");
+        Assert.Matches(codeFont, "        TextBlock code = new TextBlock { TextTrimming = TextTrimming.CharacterEllipsis }.InCodeFont();");
+        Assert.Matches(codeFont, "        FontFamily = Passenger.Editor.CodeEditor.CodeFont,");
+        Assert.Matches(stepped, "        TextBlock text = new TextBlock { Classes = { StyleClasses.BadgeText }, Text = method }.InCodeFont();");
+    }
+
+    /// <summary>A dialog opens at one of the widths <see cref="DialogWidths"/> gives a kind of dialog, so a form is one width
+    /// wherever it opens: a dialog's width written as a number of its own, or one handed to a refactoring's frame, fails
+    /// here, naming its line.</summary>
+    [Fact]
+    public void Every_dialog_opens_at_one_of_the_widths_of_its_kind()
+    {
+        Regex dialog = new(@"\bclass\s+\w+Dialog\b[^{]*:\s*(?:IdeWindow|RefactoringDialog)\b");
+        Regex own = new(@"^\s+Width\s*=\s*\d+(?:\.\d+)?\s*;|(?:^\s+|""\s*,\s*)\d{3,4}\)\s*$", RegexOptions.Multiline);
+        string[] found = [.. UiFiles().Where(f => f.Path.EndsWith(".cs", StringComparison.Ordinal) && dialog.IsMatch(f.Text))
+            .SelectMany(f => own.Matches(f.Text).Select(m => $"{f.Path}:{LineOf(f.Text, m.Index)}: {m.Value.Trim()}"))];
+        Assert.True(found.Length == 0, $"{found.Length} dialogs open at a width of their own, so like dialogs open at unlike widths: give each the width of its kind "
+            + $"from DialogWidths (Question, Form, Wide, Workspace):\n{string.Join("\n", found)}");
+        Assert.Matches(own, "        Width = 600;");
+        Assert.Matches(own, "            720)");
+        Assert.Matches(own, "            \"Specify a new name\", 720)");
+        Assert.DoesNotMatch(own, "        Width = DialogWidths.Form;");
+    }
+
+    /// <summary>Work under way in a dialog is drawn as one line (Shell.axaml's ProgressBar), so a progress bar given a
+    /// height of its own fails here, naming its line.</summary>
+    [Fact]
+    public void Every_progress_bar_is_the_one_line_of_the_theme()
+    {
+        Regex bar = new(@"\bnew\s+ProgressBar\b\s*\{|\bProgressBar\s+\w+\s*=\s*new\s*\(\s*\)\s*\{");
+        string[] found = [.. UiFiles().Where(f => f.Path.EndsWith(".cs", StringComparison.Ordinal))
+            .SelectMany(f => bar.Matches(f.Text).Where(m => Regex.IsMatch(Initializer(f.Text, m.Index + m.Length), @"\b(?:Min)?Height\s*="))
+                .Select(m => $"{f.Path}:{LineOf(f.Text, m.Index)}"))];
+        Assert.True(found.Length == 0, $"{found.Length} progress bars are given a height of their own, so work under way is drawn unlike in each dialog: "
+            + $"leave the height to Shell.axaml's ProgressBar:\n{string.Join("\n", found)}");
+    }
+
+    /// <summary>A folder's or file's field and its Browse… button are a BrowseRow, which makes the button, so every one
+    /// stands, reads and spaces one way: a Browse… button made anywhere else fails here, naming its line.</summary>
+    [Fact]
+    public void Every_Browse_button_is_a_BrowseRows_own()
+    {
+        Regex byHand = new(@"\bContent\s*=\s*""Browse(?:…|\.\.\.)""");
+        string[] found = [.. UiFiles().Where(f => !f.Path.EndsWith("/BrowseRow.cs", StringComparison.Ordinal))
+            .SelectMany(f => byHand.Matches(f.Text).Select(m => $"{f.Path}:{LineOf(f.Text, m.Index)}"))];
+        Assert.True(found.Length == 0, $"{found.Length} Browse… buttons are made by hand beside their fields: make each row with BrowseRow.Of(field, pick):\n{string.Join("\n", found)}");
     }
 
     /// <summary>A button that copies words for the person to paste elsewhere, then says Copied, is a CopyButton (Copy
@@ -3225,6 +4305,365 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
             + $"ToolBars.Top or ToolBars.Side (ToolBars.OverEditor over an editor, Banner for a line of words on the banner's tint):\n{string.Join("\n", found)}");
     }
 
+    /// <summary>Every icon button is made by ToolButtons (the title bar's and the find bar's declared in XAML and given their
+    /// look there, a glyph's small one inside a chip, a field or a tab), so each is one size, one radius and named and greyed
+    /// one way: the tool button's, a counted filter's, the small button's and the in-field button's classes named elsewhere
+    /// (a tab's × its tabs' own), and a control greyed with its tip of why written beside it by hand, fail here, naming the
+    /// line.</summary>
+    [Fact]
+    public void Every_icon_button_is_made_and_greyed_with_why_by_ToolButtons()
+    {
+        (Regex Named, string[] Owners)[] owned =
+        [
+            (new(@"\bStyleClasses\.(?:Tool|Outcome)\b|Classes=""[^""]*\b(?:tool|outcome)\b"), ["/ToolButtons.cs"]),
+            (new(@"\bnew\s+Button\b[^;]*\bStyleClasses\.Small\b|\bButton\s+\w+\s*=\s*new\(\)\s*\{[^;]*\bStyleClasses\.Small\b|<Button\b[^>]*\bClasses=""[^""]*\bsmall\b"), ["/ToolButtons.cs"]),
+            (new(@"\bStyleClasses\.TabClose\b|Classes=""[^""]*\btabClose\b"), ["/ToolWindows/ToolTabs.cs", "/Editors/EditorGroup.cs"]),
+            (new(@"\bStyleClasses\.InField\b|Classes=""[^""]*\binField\b"), ["/ToolWindows/FilterMenu.cs"]),
+        ];
+        // A menu's item is greyed by its own piece, ListMenus.Grey.
+        string[] greyers = ["/ToolButtons.cs", "/ToolWindows/ListMenus.cs"];
+        Regex greyed = new(@"\b([\w.]+)\.IsEnabled\s*=\s*[^;]*\bis\s+null\b");
+        List<string> found = [];
+        foreach ((string path, string text) in UiFiles())
+        {
+            string[] lines = text.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                foreach ((Regex named, string[] owners) in owned)
+                {
+                    if (named.IsMatch(lines[i]) && !owners.Any(o => path.EndsWith(o, StringComparison.Ordinal)))
+                    {
+                        found.Add($"{path}:{i + 1}: {lines[i].Trim()}");
+                    }
+                }
+                if (greyed.Match(lines[i]) is { Success: true } grey && !greyers.Any(o => path.EndsWith(o, StringComparison.Ordinal))
+                    && lines.Skip(Math.Max(0, i - 3)).Take(7).Any(l => l.Contains($"ToolTip.SetTip({grey.Groups[1].Value},", StringComparison.Ordinal)))
+                {
+                    found.Add($"{path}:{i + 1}: greyed with its tip of why by hand: {lines[i].Trim()}");
+                }
+            }
+        }
+        Assert.True(found.Count == 0, $"{found.Count} icon buttons are made or greyed by hand, so their size, radius, keys and tips drift from every other's: "
+            + $"make each with ToolButtons (Of, Glyph, Small, Toggle, Counted, or Give for one declared elsewhere) and grey it with ToolButtons.Grey:\n{string.Join("\n", found)}");
+        Assert.Matches(owned[0].Named, "            Button = new Button { Classes = { StyleClasses.Tool }, Content = glyph };");
+        Assert.Matches(owned[0].Named, "                    <Button Name=\"PreviousButton\" Classes=\"tool\" ToolTip.Tip=\"Previous occurrence\">");
+        Assert.DoesNotMatch(owned[0].Named, "                    <Border Classes=\"toolbarRule\" />");
+        Assert.Matches(owned[1].Named, "        Button set = new() { Classes = { StyleClasses.Small }, Content = plus };");
+        Assert.DoesNotMatch(owned[1].Named, "        PathIcon glyph = new() { Classes = { StyleClasses.Small } };");
+        Assert.Matches(greyed, "        SaveAsProfileButton.IsEnabled = why is null;");
+    }
+
+    /// <summary>A style class is given only to a control a style of it takes: a selector of Shell.axaml or ControlThemes.axaml
+    /// naming it on the type the control is styled as (its own or its StyleKeyOverride's), a base of it by <c>:is()</c>, or
+    /// any control. A class borrowed from another kind of control, or given to a Passenger control styled as itself (a
+    /// Border's on a Border of its own), styles nothing: each fails here, naming its line. C# is read by its syntax, the type
+    /// taken from what makes the control, the declared type of what holds it, a cast or the class whose own it is.</summary>
+    [Fact]
+    public void Every_style_class_is_given_to_a_control_of_a_type_its_styles_name()
+    {
+        Dictionary<string, HashSet<string>> styledOn = ClassesStyledOn();
+        Dictionary<string, Type[]> types = StyledTypes();
+        List<(string Path, string Text, Microsoft.CodeAnalysis.SyntaxNode? Root)> files = [.. UiFiles().Select(f => (f.Path, f.Text, f.Path.EndsWith(".cs", StringComparison.Ordinal)
+            ? Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(f.Text, cancellationToken: TestContext.Current.CancellationToken).GetRoot(TestContext.Current.CancellationToken)
+            : null))];
+        // Each of Passenger's controls styled as another, by the type its StyleKeyOverride names; any other as itself.
+        Dictionary<string, string> styledAs = new(StringComparer.Ordinal);
+        foreach (Syntax.PropertyDeclarationSyntax key in files.SelectMany(f => f.Root?.DescendantNodes().OfType<Syntax.PropertyDeclarationSyntax>() ?? []))
+        {
+            if (key.Identifier.ValueText == "StyleKeyOverride" && key.ExpressionBody?.Expression is Syntax.TypeOfExpressionSyntax typeOf
+                && key.Parent is Syntax.ClassDeclarationSyntax owner && TypeName(typeOf.Type) is { } styled)
+            {
+                styledAs[owner.Identifier.ValueText] = styled;
+            }
+        }
+        // A control of Passenger's is styled as the nearest of its own kinds that says, else as itself.
+        string StyledAs(Type type)
+        {
+            for (Type? kind = type; kind is not null && kind.Assembly.GetName().Name?.StartsWith("Passenger", StringComparison.Ordinal) == true; kind = kind.BaseType)
+            {
+                if (styledAs.TryGetValue(kind.Name, out string? key))
+                {
+                    return key;
+                }
+            }
+            return type.Name.Split('`')[0];
+        }
+        bool Takes(string on, Type[] given) => on.StartsWith(":is ", StringComparison.Ordinal)
+            ? types.TryGetValue(on[4..], out Type[]? bases) && bases.Any(t => given.Any(t.IsAssignableFrom))
+            : given.Any(g => StyledAs(g) == on);
+        Dictionary<string, string> classOf = typeof(StyleClasses).GetFields().ToDictionary(f => f.Name, f => (string)f.GetRawConstantValue()!, StringComparer.Ordinal);
+        List<string> found = [];
+        int checkedCount = 0;
+        void Check(string path, int line, string? type, string style)
+        {
+            // A control held as any control may be of any kind.
+            if (type is null or nameof(Control) or nameof(Visual) or nameof(StyledElement) || !types.TryGetValue(type, out Type[]? given))
+            {
+                return;
+            }
+            checkedCount++;
+            HashSet<string> on = styledOn.GetValueOrDefault(style) ?? [];
+            if (!on.Contains("*") && !on.Any(s => Takes(s, given)))
+            {
+                found.Add($"{path}:{line}: {style} given to a {type}, where a style takes it on {(on.Count == 0 ? "nothing" : string.Join(", ", on.Order(StringComparer.Ordinal)))}");
+            }
+        }
+        foreach ((string path, string text, Microsoft.CodeAnalysis.SyntaxNode? root) in files)
+        {
+            if (root is null)
+            {
+                foreach (Match element in Regex.Matches(text, @"<(?:\w+:)?(\w+)\b[^>]*>"))
+                {
+                    foreach (Match given in Regex.Matches(element.Value, @"\sClasses=""([^""{]*)""|\sClasses\.([\w-]+)="))
+                    {
+                        foreach (string style in given.Groups[1].Success ? given.Groups[1].Value.Split(' ', StringSplitOptions.RemoveEmptyEntries) : [given.Groups[2].Value])
+                        {
+                            Check(path, LineOf(text, element.Index), element.Groups[1].Value, style);
+                        }
+                    }
+                }
+                continue;
+            }
+            Dictionary<string, HashSet<string>> declared = DeclaredTypes(root);
+            foreach (Microsoft.CodeAnalysis.SyntaxNode node in root.DescendantNodes())
+            {
+                (string? type, Syntax.ExpressionSyntax? named) = node switch
+                {
+                    Syntax.AssignmentExpressionSyntax
+                    {
+                        Left: Syntax.IdentifierNameSyntax { Identifier.ValueText: "Classes" },
+                        Right: Syntax.InitializerExpressionSyntax,
+                        Parent: Syntax.InitializerExpressionSyntax { Parent: Syntax.BaseObjectCreationExpressionSyntax made },
+                    } => (MadeType(made), null),
+                    Syntax.InvocationExpressionSyntax { Expression: Syntax.MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Add" or "Set" or "Insert" } call } invocation
+                        when ClassesOwner(call.Expression, out Syntax.ExpressionSyntax? owner)
+                        => (OwnerType(owner, node, declared), invocation.ArgumentList.Arguments.ElementAtOrDefault(call.Name.Identifier.ValueText == "Insert" ? 1 : 0)?.Expression),
+                    _ => (null, null),
+                };
+                IEnumerable<Syntax.ExpressionSyntax> styles = named is not null ? [named]
+                    : node is Syntax.AssignmentExpressionSyntax { Right: Syntax.InitializerExpressionSyntax list } ? list.Expressions : [];
+                foreach (Syntax.ExpressionSyntax style in styles)
+                {
+                    if (style is Syntax.MemberAccessExpressionSyntax { Expression: Syntax.IdentifierNameSyntax { Identifier.ValueText: "StyleClasses" }, Name.Identifier.ValueText: string constant }
+                        && classOf.TryGetValue(constant, out string? value))
+                    {
+                        Check(path, node.GetLocation().GetLineSpan().StartLinePosition.Line + 1, type, value);
+                    }
+                }
+            }
+        }
+        Assert.True(checkedCount > 500, $"Only {checkedCount} classes given to a control of a known type were found: the search no longer reads the code");
+        Assert.True(found.Count == 0, $"{found.Count} classes are given to a control no style of theirs takes, so it looks as if it had none: give each "
+            + $"a class its own kind of control is styled by, or none:\n{string.Join("\n", found)}");
+    }
+
+    /// <summary>The types each style class is styled on by Shell.axaml's and ControlThemes.axaml's selectors, by name (":is "
+    /// before a type whose kinds all take it, "*" for a class any control takes); a control theme's <c>^</c> is its target
+    /// type.</summary>
+    private static Dictionary<string, HashSet<string>> ClassesStyledOn()
+    {
+        Dictionary<string, HashSet<string>> on = new(StringComparer.Ordinal);
+        foreach (string theme in (string[])["Shell.axaml", "ControlThemes.axaml"])
+        {
+            string target = "*";
+            string text = File.ReadAllText(Path.Combine(Passenger.Tests.Debugging.Helpers.Debuggees.Root, "src", "Passenger.App", "Theme", theme));
+            foreach (Match tag in Regex.Matches(text, @"<ControlTheme\b[^>]*\bTargetType=""(?:\w+:)?(\w+)""|<Style\s[^>]*Selector=""([^""]*)"""))
+            {
+                if (tag.Groups[1].Success)
+                {
+                    target = tag.Groups[1].Value;
+                    continue;
+                }
+                string selector = Regex.Replace(tag.Groups[2].Value, @"\[[^\]]*\]|:not\([^)]*\)", string.Empty).Replace("^", target, StringComparison.Ordinal);
+                foreach (string part in Regex.Split(selector, @"\s*,\s*|\s*/template/\s*|\s*>\s*|\s+"))
+                {
+                    Match compound = Regex.Match(part, @"^(?::is\((?:\w+\|)?(\w+)\)|(?:\w+\|)?(\w+))?(.*)$");
+                    string type = compound.Groups[1].Success ? $":is {compound.Groups[1].Value}" : compound.Groups[2].Success ? compound.Groups[2].Value : "*";
+                    foreach (Match style in Regex.Matches(compound.Groups[3].Value, @"\.([A-Za-z_][\w-]*)"))
+                    {
+                        if (!on.TryGetValue(style.Groups[1].Value, out HashSet<string>? types))
+                        {
+                            on[style.Groups[1].Value] = types = new HashSet<string>(StringComparer.Ordinal);
+                        }
+                        types.Add(type);
+                    }
+                }
+            }
+        }
+        return on;
+    }
+
+    /// <summary>Every styled element type of Avalonia's and Passenger's assemblies loaded, by its name.</summary>
+    private static Dictionary<string, Type[]> StyledTypes()
+    {
+        IEnumerable<Type> Of(Assembly assembly)
+        {
+            try
+            {
+                return assembly.GetTypes();
+            }
+            catch (ReflectionTypeLoadException partly)
+            {
+                return partly.Types.OfType<Type>();
+            }
+        }
+        return AppDomain.CurrentDomain.GetAssemblies()
+            .Where(a => a.GetName().Name is { } name && (name.StartsWith("Avalonia", StringComparison.Ordinal) || name.StartsWith("Passenger", StringComparison.Ordinal)))
+            .SelectMany(Of).Where(t => typeof(StyledElement).IsAssignableFrom(t))
+            .GroupBy(t => t.Name.Split('`')[0], StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.Ordinal);
+    }
+
+    /// <summary>The types a file declares each name of (a local, a field, a property, a parameter, a pattern's), by the
+    /// type's own name.</summary>
+    private static Dictionary<string, HashSet<string>> DeclaredTypes(Microsoft.CodeAnalysis.SyntaxNode root)
+    {
+        Dictionary<string, HashSet<string>> declared = new(StringComparer.Ordinal);
+        void Add(string name, Syntax.TypeSyntax? type)
+        {
+            if (TypeName(type) is { } named)
+            {
+                if (!declared.TryGetValue(name, out HashSet<string>? types))
+                {
+                    declared[name] = types = new HashSet<string>(StringComparer.Ordinal);
+                }
+                types.Add(named);
+            }
+        }
+        foreach (Microsoft.CodeAnalysis.SyntaxNode node in root.DescendantNodes())
+        {
+            switch (node)
+            {
+                case Syntax.VariableDeclarationSyntax variables:
+                    foreach (Syntax.VariableDeclaratorSyntax each in variables.Variables)
+                    {
+                        Add(each.Identifier.ValueText, variables.Type);
+                    }
+                    break;
+                case Syntax.ParameterSyntax parameter:
+                    Add(parameter.Identifier.ValueText, parameter.Type);
+                    break;
+                case Syntax.PropertyDeclarationSyntax property:
+                    Add(property.Identifier.ValueText, property.Type);
+                    break;
+                case Syntax.ForEachStatementSyntax each:
+                    Add(each.Identifier.ValueText, each.Type);
+                    break;
+                case Syntax.DeclarationPatternSyntax { Designation: Syntax.SingleVariableDesignationSyntax single } pattern:
+                    Add(single.Identifier.ValueText, pattern.Type);
+                    break;
+            }
+        }
+        return declared;
+    }
+
+    /// <summary>A type's own name, its namespace, generic arguments and nullability left off; null for a var, a tuple or an array.</summary>
+    private static string? TypeName(Syntax.TypeSyntax? type) => type switch
+    {
+        Syntax.NullableTypeSyntax nullable => TypeName(nullable.ElementType),
+        Syntax.QualifiedNameSyntax qualified => TypeName(qualified.Right),
+        Syntax.AliasQualifiedNameSyntax alias => TypeName(alias.Name),
+        Syntax.GenericNameSyntax generic => generic.Identifier.ValueText,
+        Syntax.IdentifierNameSyntax { IsVar: false } name => name.Identifier.ValueText,
+        _ => null,
+    };
+
+    /// <summary>The type an object creation makes: its own, or for <c>new()</c> the type of the variable or property it is
+    /// given to.</summary>
+    private static string? MadeType(Syntax.BaseObjectCreationExpressionSyntax made) => made switch
+    {
+        Syntax.ObjectCreationExpressionSyntax explicitly => TypeName(explicitly.Type),
+        { Parent: Syntax.EqualsValueClauseSyntax { Parent: Syntax.VariableDeclaratorSyntax { Parent: Syntax.VariableDeclarationSyntax variables } } } => TypeName(variables.Type),
+        { Parent: Syntax.EqualsValueClauseSyntax { Parent: Syntax.PropertyDeclarationSyntax property } } => TypeName(property.Type),
+        _ => null,
+    };
+
+    /// <summary>Whether an expression is a control's Classes, <paramref name="owner"/> the control (null for the class's
+    /// own, <c>Classes</c> alone).</summary>
+    private static bool ClassesOwner(Syntax.ExpressionSyntax expression, out Syntax.ExpressionSyntax? owner)
+    {
+        owner = (expression as Syntax.MemberAccessExpressionSyntax)?.Expression;
+        return expression is Syntax.IdentifierNameSyntax { Identifier.ValueText: "Classes" }
+            or Syntax.MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Classes" };
+    }
+
+    /// <summary>The type of a control whose Classes are named: the class's own for <c>this</c>, a cast's, or the one type
+    /// the file declares its name of.</summary>
+    private static string? OwnerType(Syntax.ExpressionSyntax? owner, Microsoft.CodeAnalysis.SyntaxNode at, Dictionary<string, HashSet<string>> declared)
+    {
+        while (owner is Syntax.ParenthesizedExpressionSyntax inner)
+        {
+            owner = inner.Expression;
+        }
+        return owner switch
+        {
+            null or Syntax.ThisExpressionSyntax => at.Ancestors().OfType<Syntax.ClassDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText,
+            Syntax.CastExpressionSyntax cast => TypeName(cast.Type),
+            Syntax.IdentifierNameSyntax name when declared.TryGetValue(name.Identifier.ValueText, out HashSet<string>? types) && types.Count == 1 => types.Single(),
+            _ => null,
+        };
+    }
+
+    /// <summary>A bar's top, its rules and a banner are the shared pieces (ToolBars.Top, ToolBars.Rule, Banner): a panel docked
+    /// at a tool window's top holding its icon buttons, with neither a bar's height nor its rule; a line a pixel wide and
+    /// some high between a bar's groups; and a Border docked at the top on the banner's tint, each built by hand, fail here,
+    /// naming the line.</summary>
+    [Fact]
+    public void Every_bars_top_rule_and_banner_is_the_shared_piece()
+    {
+        Regex border = new(@"(?:\bnew\s+Border\b|\bBorder\s+\w+\s*=\s*new\(\))\s*\{");
+        List<string> found = [];
+        foreach ((string path, string text) in UiFiles().Where(f => f.Path.EndsWith(".cs", StringComparison.Ordinal)))
+        {
+            if (path.EndsWith("/ToolBars.cs", StringComparison.Ordinal) || path.EndsWith("/Banner.cs", StringComparison.Ordinal))
+            {
+                continue;
+            }
+            foreach (Match match in border.Matches(text))
+            {
+                string own = Initializer(text, match.Index + match.Length);
+                if (Regex.IsMatch(own, @"\bWidth\s*=\s*(?:1\b|Hairlines\.Width\b)") && Regex.IsMatch(own, @"\bHeight\s*="))
+                {
+                    found.Add($"{path}:{LineOf(text, match.Index)}: a bar's rule built by hand");
+                }
+            }
+            foreach (Match banner in Regex.Matches(text, @"\b(\w+)\.Bind\(Border\.BackgroundProperty, \1\.GetResourceObservable\(TokenKeys\.Banner\)\)"))
+            {
+                string name = Regex.Escape(banner.Groups[1].Value);
+                if (Regex.IsMatch(text, $@"\b{name}\s*=\s*new\b[^;]*\bDock\.Top\b|SetDock\({name}, Dock\.Top\)"))
+                {
+                    found.Add($"{path}:{LineOf(text, banner.Index)}: a banner built by hand");
+                }
+            }
+            if (path.EndsWith("Dialog.cs", StringComparison.Ordinal))
+            {
+                continue;
+            }
+            Microsoft.CodeAnalysis.SyntaxNode root = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(text, cancellationToken: TestContext.Current.CancellationToken)
+                .GetRoot(TestContext.Current.CancellationToken);
+            HashSet<string> buttons = [.. root.DescendantNodes().OfType<Syntax.VariableDeclaratorSyntax>()
+                .Where(v => v.Initializer?.Value.ToString().StartsWith("ToolButtons.", StringComparison.Ordinal) == true).Select(v => v.Identifier.ValueText)];
+            bool Button(Syntax.ExpressionSyntax held) => held.ToString().StartsWith("ToolButtons.", StringComparison.Ordinal)
+                || held is Syntax.IdentifierNameSyntax { Identifier.ValueText: string named } && buttons.Contains(named);
+            foreach (Syntax.VariableDeclaratorSyntax panel in root.DescendantNodes().OfType<Syntax.VariableDeclaratorSyntax>())
+            {
+                string name = panel.Identifier.ValueText;
+                Syntax.InitializerExpressionSyntax? own = (panel.Initializer?.Value as Syntax.BaseObjectCreationExpressionSyntax)?.Initializer;
+                bool top = own?.ToString().Contains("Dock.Top", StringComparison.Ordinal) == true
+                    || root.DescendantNodes().OfType<Syntax.InvocationExpressionSyntax>().Any(i => i.ToString() == $"DockPanel.SetDock({name}, Dock.Top)");
+                bool holds = own?.Expressions.OfType<Syntax.AssignmentExpressionSyntax>()
+                        .Any(a => a.Left.ToString() == "Children" && a.Right is Syntax.InitializerExpressionSyntax children && children.Expressions.Any(Button)) == true
+                    || root.DescendantNodes().OfType<Syntax.InvocationExpressionSyntax>()
+                        .Any(i => i.Expression.ToString() == $"{name}.Children.Add" && i.ArgumentList.Arguments.Count == 1 && Button(i.ArgumentList.Arguments[0].Expression));
+                if (top && holds)
+                {
+                    found.Add($"{path}:{panel.GetLocation().GetLineSpan().StartLinePosition.Line + 1}: a top bar of {name} built by hand, with neither a bar's height nor its rule");
+                }
+            }
+        }
+        Assert.True(found.Count == 0, $"{found.Count} bars, rules or banners are built by hand, so their heights, rules and room drift from every other's: "
+            + $"make each with ToolBars.Top, ToolBars.Rule or Banner (Banner.Wrapping for words read whole):\n{string.Join("\n", found)}");
+    }
+
     /// <summary>A table's column titles are one piece, ColumnTitles, so every table's are one size and height over one rule:
     /// a grid of titles or a title docked at a table's top over a rule of its own fails here, naming its line.</summary>
     [Gate]
@@ -3262,7 +4701,9 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
 
     /// <summary>A form's rows of a label and the field it names are FormRows, so a screen reader hears each field by its
     /// label and every form's labels stand, wrap and align one way: a grid of an Auto column and a star column given words
-    /// for its first column (a TextBlock added to it, or a helper handed the grid and the words) fails here, naming its line.</summary>
+    /// for its first column (a TextBlock added to it, or a helper handed the grid and the words), or a label of a width of
+    /// its own docked at its field's left, fails here, naming its line; DialogButtonsTests.Check fails a label a dialog
+    /// shows beside or over a field that does not name it.</summary>
     [Fact]
     public void Every_forms_rows_of_a_label_and_its_field_are_FormRows()
     {
@@ -3279,8 +4720,35 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
                 }
             }
         }
+        // A label of a width of its own docked beside its field (a refactoring's rows were), or one stacked over it.
+        Regex docked = new(@"\bTextBlock\s+(\w+)\s*=\s*new(?:\s+TextBlock)?\s*(?:\(\))?\s*\{[^;]*?\bText\s*=\s*\w+[^;]*?\bWidth\s*=\s*\w+");
+        foreach ((string path, string text) in UiFiles().Where(f => f.Path.EndsWith(".cs", StringComparison.Ordinal) && !f.Path.EndsWith("/FormRows.cs", StringComparison.Ordinal)))
+        {
+            foreach (Match match in docked.Matches(text))
+            {
+                if (Regex.IsMatch(text, $@"DockPanel\.SetDock\(\s*{Regex.Escape(match.Groups[1].Value)}\s*,\s*Dock\.Left\s*\)"))
+                {
+                    found.Add($"{path}:{LineOf(text, match.Index)}: a label of a width of its own docked beside its field");
+                }
+            }
+        }
         Assert.True(found.Count == 0, $"{found.Count} forms lay out their labels beside their fields by hand, so a screen reader hears none of those fields by its label "
             + $"and their labels drift from every other form's: make each row with FormRows.Of, its form marked by FormRows.Scope:\n{string.Join("\n", found)}");
+    }
+
+    /// <summary>A form's label is its words alone, with no colon after them, as every Settings row's and run configuration's
+    /// is: a label ending in a colon handed to a form's row (FormRows.Of, a dialog's Row) fails here, naming its line, as
+    /// DialogButtonsTests.Check fails one a dialog shows.</summary>
+    [Fact]
+    public void No_forms_label_ends_in_a_colon()
+    {
+        Regex colon = new(@"\b(?:FormRows\.Of|Row)\(\s*(?:[^""(),;\n]*\?\s*)?""[^""\n]*:""");
+        string[] found = [.. UiFiles().Where(f => f.Path.EndsWith(".cs", StringComparison.Ordinal))
+            .SelectMany(f => colon.Matches(f.Text).Select(m => $"{f.Path}:{LineOf(f.Text, m.Index)}: {m.Value}"))];
+        Assert.True(found.Length == 0, $"{found.Length} form labels end in a colon, where every form's labels are their words alone:\n{string.Join("\n", found)}");
+        Assert.Matches(colon, "                Row(\"Name:\", NameBox),");
+        Assert.Matches(colon, "        Options = Row(toFile ? \"Target file name:\" : \"Target namespace:\", TargetBox);");
+        Assert.DoesNotMatch(colon, "                Row(\"Name\", NameBox),");
     }
 
     /// <summary>A table's rows edited in place are ColumnTitles' ruled rows, so every such table's rows are one height over
@@ -3427,6 +4895,19 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         return own.ToString();
     }
 
+    /// <summary>An object initializer's whole text from just after its opening brace, what its own initializers set
+    /// inside it too (a class list's).</summary>
+    private static string Whole(string text, int from)
+    {
+        int depth = 1;
+        int at = from;
+        for (; at < text.Length && depth > 0; at++)
+        {
+            depth += text[at] switch { '{' => 1, '}' => -1, _ => 0 };
+        }
+        return text[from..Math.Max(from, at - 1)];
+    }
+
     private static int LineOf(string text, int at) => text.AsSpan(0, at).Count('\n') + 1;
 
     /// <summary>A colour that is the content's own, not the window's, so no look has a token for it.</summary>
@@ -3452,6 +4933,18 @@ public sealed class UiRulesTests : IClassFixture<UiRulesTests.Project>, IAsyncLi
         (_, "Color.FromUInt32") when path.EndsWith("Editor/CodeEditor.Render.cs", StringComparison.Ordinal) => true,
         _ => false,
     };
+
+    /// <summary>A kind's badge is one letter on one colour wherever it shows, Go to Symbol's and completion's alike: each
+    /// is drawn from KindBadges, the one map from a kind to its badge, never a letter and colour written beside each other
+    /// elsewhere, which would let one kind read two ways.</summary>
+    [Fact]
+    public void Every_kinds_badge_is_drawn_from_the_one_map()
+    {
+        Regex pair = new(@"\(\s*""[^""]{1,2}"",\s*TokenKeys\.[A-Za-z_]+\s*\)", RegexOptions.NonBacktracking);
+        string[] written = [.. UiFiles().Where(f => f.Path != "src/Passenger.App/KindBadges.cs")
+            .SelectMany(f => pair.Matches(f.Text).Select(m => $"{f.Path}: {m.Value}"))];
+        Assert.True(written.Length == 0, $"A badge's letter and colour written outside KindBadges, so its kind may read otherwise there than elsewhere:\n{string.Join("\n", written)}");
+    }
 
     private static string UiSource() => string.Join("\n", UiFiles().Select(f => f.Text));
 

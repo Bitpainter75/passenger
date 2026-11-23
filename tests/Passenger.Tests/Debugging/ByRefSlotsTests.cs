@@ -5,7 +5,8 @@ namespace Passenger.Tests.Debugging;
 
 /// <summary>By-ref slots of a frame in PassengerCases' Refs (ref, out and in parameters, a member of an in struct, a ref
 /// local, a struct method's this) through the protocol: evaluated, set and read in conditions as the managed locations they
-/// are, a change written where they refer to, which the program goes on with.</summary>
+/// are, a change written where they refer to, which the program goes on with; shown as copies of what they refer to show,
+/// in a frame named as declared.</summary>
 [Collection(DebugSession.Collection)]
 public class ByRefSlotsTests(ITestOutputHelper testOutputHelper)
 {
@@ -15,11 +16,25 @@ public class ByRefSlotsTests(ITestOutputHelper testOutputHelper)
     private static readonly int AddOne = Debuggees.Line("PassengerCases", "return value + one;");
     private static readonly int Climb = Debuggees.Line("PassengerCases", "value += 40;");
     private static readonly int Grow = Debuggees.Line("PassengerCases", "Y += by;");
+    private static readonly int Copied = Debuggees.Line("PassengerCases", "Dial dialCopy = dial;");
+    private static readonly int Summed = Debuggees.Line("PassengerCases", "sum = dialCopy.Level + spotCopy.X + momentCopy.Day;");
+    private static readonly int Doubled = Debuggees.Line("PassengerCases", "return doubled;");
+
+    /// <summary>Ref, out and in parameters and a ref local evaluate and take a value where they refer; a member of an
+    /// in parameter takes a value written into the caller's struct; a condition on a ref parameter stops only where it
+    /// holds; a struct method's this evaluates and is assigned.</summary>
+    [Fact]
+    public async Task A_by_reference_slot_evaluates_and_takes_a_value_where_it_refers_to()
+    {
+        await Flow.StepApartAsync<ByRefSlotsTests>("ref out and in parameters and a ref local evaluate and take a value where they refer to", () => new ByRefSlotsTests(testOutputHelper), t => t.Ref_out_and_in_parameters_and_a_ref_local_evaluate_and_take_a_value_where_they_refer_to());
+        await Flow.StepApartAsync<ByRefSlotsTests>("a member of an in parameter takes a value written into the caller's struct", () => new ByRefSlotsTests(testOutputHelper), t => t.A_member_of_an_in_parameter_takes_a_value_written_into_the_callers_struct());
+        await Flow.StepApartAsync<ByRefSlotsTests>("a condition on a ref parameter stops only where it holds", () => new ByRefSlotsTests(testOutputHelper), t => t.A_condition_on_a_ref_parameter_stops_only_where_it_holds());
+        await Flow.StepApartAsync<ByRefSlotsTests>("a struct method's this evaluates and is assigned", () => new ByRefSlotsTests(testOutputHelper), t => t.A_struct_methods_this_evaluates_and_is_assigned());
+    }
 
     /// <summary>A ref, an out and an in parameter and a ref local evaluate and take a value, the program reading back each
     /// value set where the slot refers to: the caller's variable, the array's element.</summary>
-    [Fact]
-    public async Task Ref_out_and_in_parameters_and_a_ref_local_evaluate_and_take_a_value_where_they_refer_to()
+    private async Task Ref_out_and_in_parameters_and_a_ref_local_evaluate_and_take_a_value_where_they_refer_to()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         int frame = await LaunchToAsync(host, [new DapSourceBreakpoint(Increment), new DapSourceBreakpoint(Assigned), new DapSourceBreakpoint(AddOne)], Increment);
@@ -47,8 +62,7 @@ public class ByRefSlotsTests(ITestOutputHelper testOutputHelper)
 
     /// <summary>A member of an in parameter, a struct C# keeps readonly, takes a value written into the caller's struct,
     /// which the program goes on with.</summary>
-    [Fact]
-    public async Task A_member_of_an_in_parameter_takes_a_value_written_into_the_callers_struct()
+    private async Task A_member_of_an_in_parameter_takes_a_value_written_into_the_callers_struct()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         int frame = await LaunchToAsync(host, [new DapSourceBreakpoint(AddOne)], AddOne);
@@ -64,8 +78,7 @@ public class ByRefSlotsTests(ITestOutputHelper testOutputHelper)
 
     /// <summary>A condition on a ref parameter is evaluated through it at every hit, so the breakpoint stops once, where it
     /// holds, never saying it could not be evaluated.</summary>
-    [Fact]
-    public async Task A_condition_on_a_ref_parameter_stops_only_where_it_holds()
+    private async Task A_condition_on_a_ref_parameter_stops_only_where_it_holds()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         int frame = await LaunchToAsync(host, [new DapSourceBreakpoint(Climb, Condition: "value > 100")], Climb);
@@ -79,8 +92,7 @@ public class ByRefSlotsTests(ITestOutputHelper testOutputHelper)
 
     /// <summary>In a struct's method, this evaluates as the struct, boxed and passed to its own methods, and an assignment
     /// to it changes the struct the method was called on.</summary>
-    [Fact]
-    public async Task A_struct_methods_this_evaluates_and_is_assigned()
+    private async Task A_struct_methods_this_evaluates_and_is_assigned()
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         int frame = await LaunchToAsync(host, [new DapSourceBreakpoint(Grow)], Grow);
@@ -99,27 +111,36 @@ public class ByRefSlotsTests(ITestOutputHelper testOutputHelper)
 
     /// <summary>PassengerCases launched with Refs' breakpoints to its first stop, which must be at <paramref name="line"/>;
     /// its top frame.</summary>
-    private static async Task<int> LaunchToAsync(DebugSession host, List<DapSourceBreakpoint> breakpoints, int line)
+    private static async Task<int> LaunchToAsync(DebugSession host, List<DapSourceBreakpoint> breakpoints, int line) =>
+        (await LaunchToFrameAsync(host, breakpoints, line)).Id;
+
+    private static async Task<DapStackFrame> LaunchToFrameAsync(DebugSession host, List<DapSourceBreakpoint> breakpoints, int line)
+    {
+        await LaunchWithAsync(host, breakpoints);
+        return await StoppedFrameAsync(host, line);
+    }
+
+    /// <summary>PassengerCases launched with Refs' breakpoints, running.</summary>
+    private static async Task LaunchWithAsync(DebugSession host, List<DapSourceBreakpoint> breakpoints)
     {
         await host
             .InitializeAsync()
             .LaunchAsync(Debuggees.Program("PassengerCases"), stopAtEntry: false, justMyCode: true, arguments: ["refs"])
             .WaitForInitializedEvent();
         await host.BreakpointsAsync(File, breakpoints).ConfigurationDoneAsync();
-        return await StoppedAtAsync(host, line);
     }
 
     private static async Task<int> ContinueToAsync(DebugSession host, int line)
     {
         await host.ContinueAsync();
-        return await StoppedAtAsync(host, line);
+        return (await StoppedFrameAsync(host, line)).Id;
     }
 
-    private static async Task<int> StoppedAtAsync(DebugSession host, int line)
+    private static async Task<DapStackFrame> StoppedFrameAsync(DebugSession host, int line)
     {
         StoppedEvent stop = await host.WaitForStoppedEvent();
         Assert.True(stop.ReadStopInfo().line == line, $"The program was to stop at line {line}, but stopped at the {stop.Reason} at line {stop.Line}");
-        return (await host.TopFrameAsync(stop.ThreadId!.Value)).Id;
+        return await host.TopFrameAsync(stop.ThreadId!.Value);
     }
 
     private static async Task<string> Set(DebugSession host, int frame, string expression, string value) =>

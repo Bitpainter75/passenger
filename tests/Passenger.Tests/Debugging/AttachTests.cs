@@ -13,9 +13,23 @@ public class AttachTests(ITestOutputHelper testOutputHelper)
 {
     private static readonly int AfterCount = Debuggees.Line("DebuggableConsoleApp", "HitConditionClass.cs", "// breakpoint here");
 
+    /// <summary>The gate's attaches as one flow: a program held at its start let go and its breakpoint's first pass
+    /// seen, a running program stopped by a pause at once, a program left running when the client goes and attached to
+    /// again, an attached program's end saying only the exit code the system tells, a held program running on when its
+    /// attach ends first, and an attach to a program that is not .NET refused saying why.</summary>
     [Gate]
     [Fact]
-    public async Task A_program_held_at_its_start_is_let_go_by_the_attach_and_its_breakpoints_first_pass_is_seen()
+    public async Task The_gates_attaches_hold_as_one_flow()
+    {
+        await Flow.StepApartAsync("a program held at its start is let go by the attach and its breakpoints first pass is seen", () => new AttachTests(testOutputHelper), t => t.A_program_held_at_its_start_is_let_go_by_the_attach_and_its_breakpoints_first_pass_is_seen());
+        await Flow.StepApartAsync("a program attached to runs on when the client goes without disconnecting and can be attached to again", () => new AttachTests(testOutputHelper), t => t.A_program_attached_to_runs_on_when_the_client_goes_without_disconnecting_and_can_be_attached_to_again());
+        await Flow.StepApartAsync("a running program is the debuggers once configurationDone answers so a pause at once stops it", () => new AttachTests(testOutputHelper), t => t.A_running_program_is_the_debuggers_once_configurationDone_answers_so_a_pause_at_once_stops_it());
+        await Flow.StepApartAsync("an attached programs end says its exit code where the system tells it and makes none up", () => new AttachTests(testOutputHelper), t => t.An_attached_programs_end_says_its_exit_code_where_the_system_tells_it_and_makes_none_up());
+        await Flow.StepApartAsync("a program held at its start runs on when its attach ends before taking hold of it", () => new AttachTests(testOutputHelper), t => t.A_program_held_at_its_start_runs_on_when_its_attach_ends_before_taking_hold_of_it());
+        await Flow.StepApartAsync("an attach to a program that is not dotnet fails its configurationDone saying why", () => new AttachTests(testOutputHelper), t => t.An_attach_to_a_program_that_is_not_dotnet_fails_its_configurationDone_saying_why());
+    }
+
+    private async Task A_program_held_at_its_start_is_let_go_by_the_attach_and_its_breakpoints_first_pass_is_seen()
     {
         await using DebugSession host = DebugSession.ForAttach(testOutputHelper, startSuspended: true, out Process debuggee);
         await host
@@ -33,9 +47,7 @@ public class AttachTests(ITestOutputHelper testOutputHelper)
             $"The first stop came on the breakpoint's pass {passes.Result}: the program ran past it before the debugger had hold of it");
     }
 
-    [Gate]
-    [Fact]
-    public async Task A_program_attached_to_runs_on_when_the_client_goes_without_disconnecting_and_can_be_attached_to_again()
+    private async Task A_program_attached_to_runs_on_when_the_client_goes_without_disconnecting_and_can_be_attached_to_again()
     {
         string counted = Debuggees.Source("DebuggableConsoleApp", "HitConditionClass.cs");
         await using DebugSession first = DebugSession.ForAttach(testOutputHelper, startSuspended: true, out Process debuggee);
@@ -68,9 +80,7 @@ public class AttachTests(ITestOutputHelper testOutputHelper)
             $"The program let go at pass {before.Result} had not run on when attached to again (pass {after.Result})");
     }
 
-    [Gate]
-    [Fact]
-    public async Task A_running_program_is_the_debuggers_once_configurationDone_answers_so_a_pause_at_once_stops_it()
+    private async Task A_running_program_is_the_debuggers_once_configurationDone_answers_so_a_pause_at_once_stops_it()
     {
         await using DebugSession host = DebugSession.ForAttach(testOutputHelper, startSuspended: false, out Process debuggee);
         await host
@@ -84,9 +94,7 @@ public class AttachTests(ITestOutputHelper testOutputHelper)
         Assert.Equal(StopReasons.Pause, (await host.WaitForStoppedEvent()).Reason);
     }
 
-    [Gate]
-    [Fact]
-    public async Task An_attached_programs_end_says_its_exit_code_where_the_system_tells_it_and_makes_none_up()
+    private async Task An_attached_programs_end_says_its_exit_code_where_the_system_tells_it_and_makes_none_up()
     {
         // Held at its start until the attach lets it go, so it cannot end before the debugger has it; its output is read.
         ProcessStartInfo start = Passenger.Core.ChildProcesses.Command(Debuggees.Apphost("PassengerCases"), ["flood"]);
@@ -110,9 +118,7 @@ public class AttachTests(ITestOutputHelper testOutputHelper)
     /// <summary>An attach to a program held at its start that ends before the debugger takes hold of it (Stop or Detach as it
     /// starts, Run Service without Debugger, an agent's stop) lets the program go, which runs on undebugged rather than wait
     /// for good for a debugger that is not coming.</summary>
-    [Gate]
-    [Fact]
-    public async Task A_program_held_at_its_start_runs_on_when_its_attach_ends_before_taking_hold_of_it()
+    private async Task A_program_held_at_its_start_runs_on_when_its_attach_ends_before_taking_hold_of_it()
     {
         ProcessStartInfo start = Passenger.Core.ChildProcesses.Command(Debuggees.Apphost("PassengerCases"), ["child"]);
         start.Environment[RuntimeVariables.DefaultDiagnosticPortSuspend] = "1";
@@ -131,10 +137,20 @@ public class AttachTests(ITestOutputHelper testOutputHelper)
         Assert.Equal("child ran", Debuggees.HeldWrote(await written));
     }
 
+    /// <summary>A program held at its start whose runtime starts after its attach ended runs on; one its attach's end
+    /// could not let go is told as still waiting; an attach whose diagnostic port fails as it is asked says why and
+    /// that the program was not let go.</summary>
+    [Fact]
+    public async Task A_program_held_at_its_start_is_let_go_or_told_as_waiting_however_its_attach_ends()
+    {
+        await Flow.StepApartAsync<AttachTests>("a program held at its start whose runtime starts after its attach ended runs on", () => new AttachTests(testOutputHelper), t => t.A_program_held_at_its_start_whose_runtime_starts_after_its_attach_ended_runs_on());
+        await Flow.StepApartAsync<AttachTests>("a program held at its start that its attach's end could not let go is told as still waiting", () => new AttachTests(testOutputHelper), t => t.A_program_held_at_its_start_that_its_attachs_end_could_not_let_go_is_told_as_still_waiting());
+        await Flow.StepApartAsync<AttachTests>("an attach whose diagnostic port fails as it is asked says why and that the program was not let go", () => new AttachTests(testOutputHelper), t => t.An_attach_whose_diagnostic_port_fails_as_it_is_asked_says_why_and_that_the_program_was_not_let_go());
+    }
+
     /// <summary>As above, for a program whose runtime opens its diagnostic port only after the attach has ended, as one a
     /// busy machine starts late does: the end waits for the port and lets the program go once it is there.</summary>
-    [Fact]
-    public async Task A_program_held_at_its_start_whose_runtime_starts_after_its_attach_ended_runs_on()
+    private async Task A_program_held_at_its_start_whose_runtime_starts_after_its_attach_ended_runs_on()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows has no exec: a program a shell starts late has an id of its own, not the shell's attached to");
         // The shell becomes the program a second after it starts, keeping its id, so the attach ends before the runtime is there.
@@ -157,8 +173,7 @@ public class AttachTests(ITestOutputHelper testOutputHelper)
     /// <summary>A program held at its start whose runtime has not opened its diagnostic port by the time its let-go gives up
     /// (here a shell that becomes it half a minute on, the adapter's waits a tenth as long) is told in the console as left
     /// waiting, with what ends the wait, rather than left held unsaid.</summary>
-    [Fact]
-    public async Task A_program_held_at_its_start_that_its_attachs_end_could_not_let_go_is_told_as_still_waiting()
+    private async Task A_program_held_at_its_start_that_its_attachs_end_could_not_let_go_is_told_as_still_waiting()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows has no exec: a program a shell starts late has an id of its own, not the shell's attached to");
         ProcessStartInfo start = Passenger.Core.ChildProcesses.Command("/bin/sh", ["-c", "sleep 30 && exec \"$0\" child", Debuggees.Apphost("PassengerCases")]);
@@ -183,9 +198,7 @@ public class AttachTests(ITestOutputHelper testOutputHelper)
         }
     }
 
-    [Gate]
-    [Fact]
-    public async Task An_attach_to_a_program_that_is_not_dotnet_fails_its_configurationDone_saying_why()
+    private async Task An_attach_to_a_program_that_is_not_dotnet_fails_its_configurationDone_saying_why()
     {
         Process other = Debuggees.NotDotnet();
         await using DebugSession host = DebugSession.ForAttach(testOutputHelper, other);
@@ -203,8 +216,7 @@ public class AttachTests(ITestOutputHelper testOutputHelper)
     /// <summary>An attach whose let-go meets a diagnostic port that fails as it is asked (here a socket at a path longer than
     /// an address holds, which the diagnostics client throws for as it names it) fails its configurationDone saying why, and
     /// its end tells the program was not let go, rather than the port's fault passing both.</summary>
-    [Fact]
-    public async Task An_attach_whose_diagnostic_port_fails_as_it_is_asked_says_why_and_that_the_program_was_not_let_go()
+    private async Task An_attach_whose_diagnostic_port_fails_as_it_is_asked_says_why_and_that_the_program_was_not_let_go()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows' diagnostic port is a named pipe, with no socket path to be too long");
         Process other = Debuggees.NotDotnet();

@@ -17,8 +17,47 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
 
     private static int Line(string code) => Debuggees.Line("PassengerCases", code);
 
+    /// <summary>An evaluation that cannot be stopped, ends late or is left by a continue: every thread runs on and its
+    /// late end is let go, an answer made past its time is given, implicit evaluation turned off only by one stopped,
+    /// an exception's stop still described and one whose Message never returns named by its type, a continue going
+    /// ahead of the stop's reads, and a lock or a finally block it waits in let out once the program goes
+    /// on.</summary>
     [Fact]
-    public async Task A_continue_runs_every_thread_of_the_program_and_the_evaluations_late_end_is_let_go()
+    public async Task An_evaluation_that_cannot_be_stopped_or_ends_late_leaves_the_program_paused_and_going_on_whole()
+    {
+        await Flow.StepApartAsync<StuckEvaluationTests>("a continue runs every thread of the program and the evaluation's late end is let go", () => new StuckEvaluationTests(testOutputHelper), t => t.A_continue_runs_every_thread_of_the_program_and_the_evaluations_late_end_is_let_go());
+        await Flow.StepApartAsync<StuckEvaluationTests>("an answer made past the evaluation's time is given when only the expression's end was left", () => new StuckEvaluationTests(testOutputHelper), t => t.An_answer_made_past_the_evaluations_time_is_given_when_only_the_expressions_end_was_left());
+        await Flow.StepApartAsync<StuckEvaluationTests>("only an evaluation stopped past its time turns implicit evaluation off naming what it ran", () => new StuckEvaluationTests(testOutputHelper), t => t.Only_an_evaluation_stopped_past_its_time_turns_implicit_evaluation_off_naming_what_it_ran());
+        await Flow.StepApartAsync<StuckEvaluationTests>("an exception stop is still described once an evaluation there could not be stopped", () => new StuckEvaluationTests(testOutputHelper), t => t.An_exception_stop_is_still_described_once_an_evaluation_there_could_not_be_stopped());
+        await Flow.StepApartAsync<StuckEvaluationTests>("an exception whose Message spins is named by its type and the message it was made with", () => new StuckEvaluationTests(testOutputHelper), t => t.An_exception_whose_Message_never_returns_is_named_by_its_type_and_the_message_it_was_made_with("spins"));
+        await Flow.StepApartAsync<StuckEvaluationTests>("an exception whose Message sleeps is named by its type and the message it was made with", () => new StuckEvaluationTests(testOutputHelper), t => t.An_exception_whose_Message_never_returns_is_named_by_its_type_and_the_message_it_was_made_with("sleeps"));
+        await Flow.StepApartAsync<StuckEvaluationTests>("a continue goes ahead of the stop's reads and leaves the evaluation under way to the program", () => new StuckEvaluationTests(testOutputHelper), t => t.A_continue_goes_ahead_of_the_stops_reads_and_leaves_the_evaluation_under_way_to_the_program());
+        await Flow.StepApartAsync<StuckEvaluationTests>("an evaluation waiting on a lock a paused thread holds leaves the lock free once the program goes on", () => new StuckEvaluationTests(testOutputHelper), t => t.An_evaluation_waiting_on_a_lock_a_paused_thread_holds_leaves_the_lock_free_once_the_program_goes_on());
+        await Flow.StepApartAsync<StuckEvaluationTests>("an evaluation a continue leaves waiting on a lock past its time runs to its end once the lock is free", () => new StuckEvaluationTests(testOutputHelper), t => t.An_evaluation_a_continue_leaves_waiting_on_a_lock_past_its_time_runs_to_its_end_once_the_lock_is_free());
+        await Flow.StepApartAsync<StuckEvaluationTests>("an evaluation spinning in a finally block is said to run it and runs to its end once let out", () => new StuckEvaluationTests(testOutputHelper), t => t.An_evaluation_spinning_or_sleeping_in_a_finally_block_is_said_to_run_it_and_runs_to_its_end_once_let_out("Finally.Spins"));
+        await Flow.StepApartAsync<StuckEvaluationTests>("an evaluation sleeping in a finally block is said to run it and runs to its end once let out", () => new StuckEvaluationTests(testOutputHelper), t => t.An_evaluation_spinning_or_sleeping_in_a_finally_block_is_said_to_run_it_and_runs_to_its_end_once_let_out("Finally.Sleeps"));
+    }
+
+    /// <summary>A detach just after an evaluation began, while one a continue left runs, as it ends, or after one that
+    /// could not be stopped, is answered and the program runs on; an evaluation leaves the runtime's tiering worker
+    /// running on this .NET and the newest; a collection in an evaluation ends with the finalizer's litter waiting,
+    /// one that starts a thread gives its answer, and at an exception's stop with a thread at its first instruction a
+    /// getter answers.</summary>
+    [Fact]
+    public async Task A_detach_or_a_collection_during_an_evaluation_ends_it_whole_and_the_program_runs_on()
+    {
+        await Flow.StepApartAsync<StuckEvaluationTests>("a detach just after an evaluation began waits for its end alone and the program runs on", () => new StuckEvaluationTests(testOutputHelper), t => t.A_detach_just_after_an_evaluation_began_waits_for_its_end_alone_and_the_program_runs_on());
+        await Flow.StepApartAsync<StuckEvaluationTests>("a detach while an evaluation a continue left runs runs the stop's thread off its breakpoint and the program runs on", () => new StuckEvaluationTests(testOutputHelper), t => t.A_detach_while_an_evaluation_a_continue_left_runs_runs_the_stops_thread_off_its_breakpoint_and_the_program_runs_on());
+        await Flow.StepApartAsync<StuckEvaluationTests>("a detach as an evaluation a continue left ends takes its end before it listened and goes without waiting out its time", () => new StuckEvaluationTests(testOutputHelper), t => t.A_detach_as_an_evaluation_a_continue_left_ends_takes_its_end_before_it_listened_and_goes_without_waiting_out_its_time());
+        await Flow.StepApartAsync<StuckEvaluationTests>("a detach after an evaluation that could not be stopped is answered", () => new StuckEvaluationTests(testOutputHelper), t => t.A_detach_after_an_evaluation_that_could_not_be_stopped_is_answered());
+        await Flow.StepApartAsync<StuckEvaluationTests>("an evaluation leaves the runtime's tiering worker running so what it compiles holds none up, on this .NET", () => new StuckEvaluationTests(testOutputHelper), t => t.An_evaluation_leaves_the_runtimes_tiering_worker_running_so_what_it_compiles_meanwhile_holds_none_up(false));
+        await Flow.StepApartAsync<StuckEvaluationTests>("an evaluation leaves the runtime's tiering worker running so what it compiles holds none up, on the newest .NET", () => new StuckEvaluationTests(testOutputHelper), t => t.An_evaluation_leaves_the_runtimes_tiering_worker_running_so_what_it_compiles_meanwhile_holds_none_up(true));
+        await Flow.StepApartAsync<StuckEvaluationTests>("a collection in an evaluation ends while the finalizer has litter waiting and finalizes it once let go", () => new StuckEvaluationTests(testOutputHelper), t => t.A_collection_in_an_evaluation_ends_while_the_finalizer_has_litter_waiting_and_finalizes_it_once_let_go());
+        await Flow.StepApartAsync<StuckEvaluationTests>("an evaluation that starts a thread and collects gives its answer and so does the next collection", () => new StuckEvaluationTests(testOutputHelper), t => t.An_evaluation_that_starts_a_thread_and_collects_gives_its_answer_and_so_does_the_next_collection());
+        await Flow.StepApartAsync<StuckEvaluationTests>("at an exception's stop with a thread at its first instruction its getter answers and a collection ends", () => new StuckEvaluationTests(testOutputHelper), t => t.At_an_exceptions_stop_with_a_thread_at_its_first_instruction_its_getter_answers_and_a_collection_ends());
+    }
+
+    private async Task A_continue_runs_every_thread_of_the_program_and_the_evaluations_late_end_is_let_go()
     {
         string worker = "Console.WriteLine(\"worker ran\");";
         await using DebugSession host = await LaunchToBreakpoints(Stop, worker);
@@ -45,8 +84,7 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
 
     /// <summary>A getter that returns just past the evaluation's time, sleeping where no abort takes, has made its answer by
     /// the time the expression reaches its end, which runs nothing more: the answer is given, late, never lost there.</summary>
-    [Fact]
-    public async Task An_answer_made_past_the_evaluations_time_is_given_when_only_the_expressions_end_was_left()
+    private async Task An_answer_made_past_the_evaluations_time_is_given_when_only_the_expressions_end_was_left()
     {
         await using DebugSession host = await LaunchToBreakpoints(Stop);
         StoppedEvent stop = await host.WaitForStoppedEvent();
@@ -57,8 +95,7 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
     /// <summary>A getter run of itself (here a hover's) that ends of itself just past the evaluation's time, in a finally where
     /// no abort is asked, gives its value and leaves the getters after it running, as one slow on a busy machine does; one the
     /// debugger stops past its time turns them off until the program runs on, the words naming the getter it stopped.</summary>
-    [Fact]
-    public async Task Only_an_evaluation_stopped_past_its_time_turns_implicit_evaluation_off_naming_what_it_ran()
+    private async Task Only_an_evaluation_stopped_past_its_time_turns_implicit_evaluation_off_naming_what_it_ran()
     {
         await using DebugSession host = await LaunchCase("leaves", "Console.WriteLine($\"turn {turn}\");");
         StoppedEvent stop = await host.WaitForStoppedEvent();
@@ -80,8 +117,7 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
     private static async Task<string> Hovered(DebugSession host, int frame, string expression) =>
         (await host.RequestAsync<EvaluateResponse>(DapCommands.Evaluate, new EvaluateArguments(expression, frame, EvaluateContexts.Hover))).Result;
 
-    [Fact]
-    public async Task An_exception_stop_is_still_described_once_an_evaluation_there_could_not_be_stopped()
+    private async Task An_exception_stop_is_still_described_once_an_evaluation_there_could_not_be_stopped()
     {
         await using DebugSession host = await DebugSession.LaunchToBreakpoint(testOutputHelper, "PassengerCases", Line("Console.WriteLine(\"end\");"), [DapExceptionFilters.All]);
         StoppedEvent stop = await host.WaitForStoppedEvent();
@@ -100,10 +136,7 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
     /// <summary>An exception whose Message never returns, spinning past the evaluation's time (aborted) or sleeping (which no
     /// abort takes, so it is left to run): the stop still names it and its inner exception by the type and the message each
     /// was made with, read from their fields, and says why no more was read.</summary>
-    [Theory]
-    [InlineData("spins")]
-    [InlineData("sleeps")]
-    public async Task An_exception_whose_Message_never_returns_is_named_by_its_type_and_the_message_it_was_made_with(string how)
+    private async Task An_exception_whose_Message_never_returns_is_named_by_its_type_and_the_message_it_was_made_with(string how)
     {
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         await host
@@ -126,8 +159,7 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
     /// <summary>A continue sent while the stop's values are still being read (here by an evaluation that never returns) goes
     /// ahead of them: the evaluation under way is left to the program before its time is up, which goes on with it and has
     /// it aborted once its time is up; a read still waiting finds the stop gone and runs nothing.</summary>
-    [Fact]
-    public async Task A_continue_goes_ahead_of_the_stops_reads_and_leaves_the_evaluation_under_way_to_the_program()
+    private async Task A_continue_goes_ahead_of_the_stops_reads_and_leaves_the_evaluation_under_way_to_the_program()
     {
         await using DebugSession host = await LaunchCase("leaves", "Console.WriteLine($\"turn {turn}\");");
         StoppedEvent stop = await host.WaitForStoppedEvent();
@@ -152,8 +184,7 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
     /// <summary>A program attached to and let go (Detach) a moment after a read of its stop began an evaluation: the detach
     /// waits for that evaluation's end alone, never for its whole time, here ten minutes, so it is answered once the
     /// evaluation returns, and the program runs on to its own end.</summary>
-    [Fact]
-    public async Task A_detach_just_after_an_evaluation_began_waits_for_its_end_alone_and_the_program_runs_on()
+    private async Task A_detach_just_after_an_evaluation_began_waits_for_its_end_alone_and_the_program_runs_on()
     {
         ProcessStartInfo start = Passenger.Core.ChildProcesses.Command(Debuggees.Apphost("PassengerCases"), ["lets go"]);
         start.Environment[RuntimeVariables.DefaultDiagnosticPortSuspend] = "1";
@@ -196,10 +227,54 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
         Assert.Equal(0, program.ExitCode);
     }
 
+    /// <summary>A program attached to, let go on (Continue) while a read of its stop's evaluation runs, then let go (Detach)
+    /// before that evaluation returns, as Run without Debugger lets a service go just after a person resumed it: the detach
+    /// waits for the evaluation's end, runs the stop's thread, back at its breakpoint, off it, and the program runs on.</summary>
+    private async Task A_detach_while_an_evaluation_a_continue_left_runs_runs_the_stops_thread_off_its_breakpoint_and_the_program_runs_on()
+    {
+        System.Text.StringBuilder written = new();
+        TaskCompletionSource evaluating = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using Process program = StartLetsGo(written, evaluating, out Task heard);
+        await using DebugSession host = DebugSession.ForAttach(testOutputHelper, program, TenMinutes());
+        int thread = await ContinuedWhileHeldAsync(host, program, evaluating.Task);
+
+        // The evaluation ends only once the detach waits for it.
+        Task<bool> detached = host.DisconnectAsync(DebugSession.RequestLimit);
+        Assert.True(await Waiting.UntilAsync(() => host.EngineLog().Contains("given up still to end, waited for", StringComparison.Ordinal), TimeSpan.FromSeconds(30),
+            TestContext.Current.CancellationToken), $"The detach never waited for the evaluation; the engine's log:\n{host.EngineLog()}");
+        await program.StandardInput.WriteLineAsync("given");
+        Assert.True(await detached, "The detach was not answered");
+        await RanOffItsStopAndOnAsync(host, program, thread, heard, written);
+    }
+
+    /// <summary>The same detach as the evaluation's end comes just before the detach listens for it, the program held at that
+    /// end with it queued unread behind the engine's lock (the engine's hold lets it come there): the detach takes that end
+    /// as heard and goes at once, never waiting out the evaluation's time, here ten minutes, in a program that outlives
+    /// it, which runs on.</summary>
+    private async Task A_detach_as_an_evaluation_a_continue_left_ends_takes_its_end_before_it_listened_and_goes_without_waiting_out_its_time()
+    {
+        System.Text.StringBuilder written = new();
+        TaskCompletionSource evaluating = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using Process program = StartLetsGo(written, evaluating, out Task heard);
+        await using DebugSession host = DebugSession.ForAttach(testOutputHelper, program, TenMinutes(new Dictionary<string, string> { [AdapterEnvironment.HoldLetGoVariable] = "1" }));
+        int thread = await ContinuedWhileHeldAsync(host, program, evaluating.Task);
+
+        // The evaluation ends while the detach's hold waits, before the detach listens for its end.
+        Task<bool> detached = host.DisconnectAsync(DebugSession.RequestLimit);
+        Assert.True(await Waiting.UntilAsync(() => host.EngineLog().Contains("Letting go: held until", StringComparison.Ordinal), TimeSpan.FromSeconds(30),
+            TestContext.Current.CancellationToken), $"The detach was never held before it listened for the evaluation's end; the engine's log:\n{host.EngineLog()}");
+        await program.StandardInput.WriteLineAsync("given");
+        Assert.True(await detached, $"The detach was not answered: it waited out the evaluation's ten minutes for an end that had come already; the engine's log:\n{host.EngineLog()}");
+        string log = host.EngineLog();
+        Assert.True(log.Contains($"the evaluation given up on thread {thread} had ended before the let-go listened for its end", StringComparison.Ordinal)
+            && !log.Contains("given up still to end, waited for", StringComparison.Ordinal),
+            $"The detach did not take the evaluation's end that came before it listened as heard, and waited for it; the engine's log:\n{log}");
+        await RanOffItsStopAndOnAsync(host, program, thread, heard, written);
+    }
+
     /// <summary>A Detach after an evaluation that could not be stopped, which has had its time and its abort's window
     /// already, never waits it out again, nor for its thread to leave its stop: it is answered.</summary>
-    [Fact]
-    public async Task A_detach_after_an_evaluation_that_could_not_be_stopped_is_answered()
+    private async Task A_detach_after_an_evaluation_that_could_not_be_stopped_is_answered()
     {
         ProcessStartInfo start = Passenger.Core.ChildProcesses.Command(Debuggees.Apphost("PassengerCases"), ["reads"]);
         start.Environment[RuntimeVariables.DefaultDiagnosticPortSuspend] = "1";
@@ -225,8 +300,7 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
     /// and is never aborted there, which would leave the lock held for good, and the engine's log says where it and the
     /// holder stand. Once the program goes on the evaluation runs to its end, and the lock is every thread's again: another
     /// thread's evaluation takes it, and so does that thread.</summary>
-    [Fact]
-    public async Task An_evaluation_waiting_on_a_lock_a_paused_thread_holds_leaves_the_lock_free_once_the_program_goes_on()
+    private async Task An_evaluation_waiting_on_a_lock_a_paused_thread_holds_leaves_the_lock_free_once_the_program_goes_on()
     {
         await using DebugSession host = await LaunchCase("locks", Held, Later);
         StoppedEvent stop = await host.WaitForStoppedEvent();
@@ -242,8 +316,7 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
 
     /// <summary>As above, with the evaluation left to the program by a continue before its time was up: past its time it
     /// waits still, never aborted, and runs to its end once the holder lets the lock go.</summary>
-    [Fact]
-    public async Task An_evaluation_a_continue_leaves_waiting_on_a_lock_past_its_time_runs_to_its_end_once_the_lock_is_free()
+    private async Task An_evaluation_a_continue_leaves_waiting_on_a_lock_past_its_time_runs_to_its_end_once_the_lock_is_free()
     {
         await using DebugSession host = await LaunchCase("locks", Held, Later);
         StoppedEvent stop = await host.WaitForStoppedEvent();
@@ -259,10 +332,7 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
     /// <summary>An evaluation that spins, or sleeps, in a finally block past its time is not aborted there and is said to
     /// run the block, wherever within it the debugger finds it: it runs to its end once another thread lets it out, past
     /// the code after the block.</summary>
-    [Theory]
-    [InlineData("Finally.Spins")]
-    [InlineData("Finally.Sleeps")]
-    public async Task An_evaluation_spinning_or_sleeping_in_a_finally_block_is_said_to_run_it_and_runs_to_its_end_once_let_out(string getter)
+    private async Task An_evaluation_spinning_or_sleeping_in_a_finally_block_is_said_to_run_it_and_runs_to_its_end_once_let_out(string getter)
     {
         string after = "Console.WriteLine($\"let out, {Turns} turns\");";
         await using DebugSession host = await LaunchCase("finally", "Console.WriteLine(\"a finally next\");", after);
@@ -286,16 +356,16 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
     /// <summary>The runtime's own tiering worker, which runs none of the program's code, is not held while an evaluation
     /// runs, where held it would stand partway through compiling a method, inside the load of a type or the check of a
     /// call to inline, and an evaluation needing what it held there would wait past its time. An evaluation that has it
-    /// compile a method again sees it do so, and the type that compile loads is there for the next.</summary>
-    [Fact]
-    public async Task An_evaluation_leaves_the_runtimes_tiering_worker_running_so_what_it_compiles_meanwhile_holds_none_up()
+    /// compile a method again sees it do so, and the type that compile loads is there for the next: on the program's own
+    /// .NET and on the newest installed, each giving its worker a name of its own, which macOS keeps none of.</summary>
+    private async Task An_evaluation_leaves_the_runtimes_tiering_worker_running_so_what_it_compiles_meanwhile_holds_none_up(bool onNewestRuntime)
     {
-        Assert.SkipWhen(OperatingSystem.IsMacOS(), "macOS keeps no name the runtime gives its tiering worker, the only word of it the debugger has, so an evaluation holds it there with the rest");
         const string looping = "LoopingConsoleApp";
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
         await host
             .InitializeAsync()
-            .LaunchAsync(Debuggees.Program(looping), stopAtEntry: false, justMyCode: true, arguments: ["tiers"], environment: Tiering)
+            .LaunchAsync(Debuggees.Program(looping), stopAtEntry: false, justMyCode: true, arguments: ["tiers"],
+                environment: onNewestRuntime ? new Dictionary<string, string>(Tiering.Concat(Debuggees.NewestRuntime)) : Tiering)
             .WaitForInitializedEvent();
         await host.BreakpointsAsync(Debuggees.Line(looping, "Console.WriteLine(\"tiers\");"), Debuggees.Source(looping, "Program.cs")).ConfigurationDoneAsync();
         StoppedEvent stop = await host.WaitForStoppedEvent();
@@ -303,16 +373,21 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
 
         EvaluateResponse warm = await host.EvaluateAsync(frame, "Warm()");
         Assert.True(warm.Result == "true", $"The tiering worker compiled nothing in the 2 s of an evaluation that called a method past its count ({warm.Result}): the evaluation held it partway; the engine's log:\n{host.EngineLog()}");
+        Assert.True(host.EngineLog().Contains("the runtime's tiering worker", StringComparison.Ordinal),
+            $"No thread was told as the runtime's tiering worker and left running; the engine's log:\n{host.EngineLog()}");
         EvaluateResponse rare = await host.EvaluateAsync(frame, "MakeOptimizedRare()");
         Assert.True(rare.Result == "2", $"The evaluation needing the type the tiering worker loaded was answered {rare.Result}");
+        if (onNewestRuntime)
+        {
+            Assert.Equal("true", (await host.EvaluateAsync(frame, Debuggees.RunsOnNewestRuntime)).Result);
+        }
     }
 
     /// <summary>The finalizer is held while an evaluation runs, before it runs any of the program's code: an evaluation that
     /// leaves litter with finalizers and collects it finalizes none of it meanwhile, and the next, collecting again, ends,
     /// where a finalizer let run and held at its first instruction of the program's, a place no collection may run, would
     /// keep it waiting for good. Let go, the program finalizes the litter.</summary>
-    [Fact]
-    public async Task A_collection_in_an_evaluation_ends_while_the_finalizer_has_litter_waiting_and_finalizes_it_once_let_go()
+    private async Task A_collection_in_an_evaluation_ends_while_the_finalizer_has_litter_waiting_and_finalizes_it_once_let_go()
     {
         const string looping = "LoopingConsoleApp";
         await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
@@ -331,6 +406,59 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
 
         await host.ContinueAsync();
         await host.WaitForEvent<OutputEvent>(o => o.Output.Contains("finalized", StringComparison.Ordinal));
+    }
+
+    /// <summary>A thread the program starts while an evaluation runs is announced from its first instruction, where, held,
+    /// the runtime would count it as standing where no collection can run: it is let past that place before it is held, so
+    /// an evaluation that starts one and then collects gives its answer, and so does the next, collecting again with it
+    /// held, where both would wait past their time for the thread to be let go.</summary>
+    private async Task An_evaluation_that_starts_a_thread_and_collects_gives_its_answer_and_so_does_the_next_collection()
+    {
+        const string looping = "LoopingConsoleApp";
+        await using DebugSession host = DebugSession.ForLaunch(testOutputHelper);
+        await host
+            .InitializeAsync()
+            .LaunchAsync(Debuggees.Program(looping), stopAtEntry: false, justMyCode: true, arguments: ["collects"])
+            .WaitForInitializedEvent();
+        await host.BreakpointsAsync(Debuggees.Line(looping, "Console.WriteLine(\"collects\");"), Debuggees.Source(looping, "Program.cs")).ConfigurationDoneAsync();
+        StoppedEvent stop = await host.WaitForStoppedEvent();
+        int frame = (await host.TopFrameAsync(stop.ThreadId!.Value)).Id;
+
+        EvaluateResponse started = await host.EvaluateAsync(frame, "Starting.StartAndCollect()");
+        Assert.True(started.Result == "42", $"The evaluation that started a thread and collected was answered {started.Result}, its collection kept waiting by the thread held as it started; the engine's log:\n{host.EngineLog()}");
+        EvaluateResponse again = await host.EvaluateAsync(frame, "Starting.Collect()");
+        Assert.True(again.Result == "42", $"The next collection, with the started thread held, was answered {again.Result}; the engine's log:\n{host.EngineLog()}");
+    }
+
+    /// <summary>At an exception's stop with another thread standing at its first instruction, as one a stop caught on its
+    /// way out of its announcement does: the evaluations set up there run from the exception's stop, so its getter answers,
+    /// where the runtime refused to run code at a place the program had been let go from, and the thread is let past its
+    /// start as the evaluation runs, so a collection in the next ends.</summary>
+    private async Task At_an_exceptions_stop_with_a_thread_at_its_first_instruction_its_getter_answers_and_a_collection_ends()
+    {
+        const string looping = "LoopingConsoleApp";
+        const string announced = "Announced, where it was announced";
+        await using DebugSession host = DebugSession.ForLaunch(testOutputHelper, environment: new Dictionary<string, string> { [AdapterEnvironment.HoldStartVariable] = "Announced" });
+        await host
+            .InitializeAsync()
+            .LaunchAsync(Debuggees.Program(looping), stopAtEntry: false, justMyCode: true, arguments: ["starts and throws"])
+            .WaitForInitializedEvent();
+        await host.RequestAsync(DapCommands.SetExceptionBreakpoints, new SetExceptionBreakpointsArguments([DapExceptionFilters.All]));
+        await host.ConfigurationDoneAsync();
+        Assert.True(await Waiting.UntilAsync(() => host.EngineLog().Contains(announced, StringComparison.Ordinal), TimeSpan.FromSeconds(60),
+            TestContext.Current.CancellationToken, TimeSpan.FromMilliseconds(100)), $"The thread Announced was never held where it was announced:\n{host.EngineLog()}");
+        await host.RequestAsync(DapCommands.Input, new InputArguments("go\n"));
+        StoppedEvent stop = await host.WaitForStoppedEvent();
+        Assert.Equal(StopReasons.Exception, stop.Reason);
+        int frame = (await host.TopFrameAsync(stop.ThreadId!.Value)).Id;
+
+        EvaluateResponse message = await host.EvaluateAsync(frame, "$exception.Message");
+        Assert.True(message.Result == "\"thrown while a thread starts\"",
+            $"The exception's Message, with a thread at its first instruction, was answered {message.Result}; the engine's log:\n{host.EngineLog()}");
+        EvaluateResponse collected = await host.EvaluateAsync(frame, "Starting.Collect()");
+        Assert.True(collected.Result == "42", $"The collection at the exception's stop was answered {collected.Result}; the engine's log:\n{host.EngineLog()}");
+        Assert.True(host.EngineLog().Contains("Let past their first instruction", StringComparison.Ordinal),
+            $"No thread was let past its first instruction, so nothing here held the thread Announced there:\n{host.EngineLog()}");
     }
 
     /// <summary>What has the debuggee's runtime promote a method straight to optimized code, and keeps its tiering worker for
@@ -364,6 +492,69 @@ public class StuckEvaluationTests(ITestOutputHelper testOutputHelper)
     }
 
     /// <summary>PassengerCases' "reads" case launched with breakpoints on the lines that hold the code given.</summary>
+    /// <summary>An adapter's environment giving each evaluation ten minutes, over <paramref name="more"/>.</summary>
+    private static Dictionary<string, string> TenMinutes(Dictionary<string, string>? more = null) =>
+        new(more ?? []) { [AdapterEnvironment.EvaluationTimeoutVariable] = TimeSpan.FromMinutes(10).TotalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) };
+
+    /// <summary>PassengerCases' "lets go" started held for the debugger, ending only once given a line after its turns, so
+    /// no let-go waits on its end, its input the test's to give, each line it writes kept in <paramref name="written"/>;
+    /// <paramref name="evaluating"/> ends as LetsGo's getter begins.</summary>
+    private static Process StartLetsGo(System.Text.StringBuilder written, TaskCompletionSource evaluating, out Task heard)
+    {
+        ProcessStartInfo start = Passenger.Core.ChildProcesses.Command(Debuggees.Apphost("PassengerCases"), ["lets go", "then reads"]);
+        start.Environment[RuntimeVariables.DefaultDiagnosticPortSuspend] = "1";
+        start.RedirectStandardInput = true;
+        start.RedirectStandardOutput = true;
+        Process program = Passenger.Core.ChildProcesses.Start(start);
+        heard = Passenger.Core.ChildProcesses.Hear(program, line =>
+        {
+            lock (written)
+            {
+                written.AppendLine(line);
+            }
+            if (line == "evaluating")
+            {
+                evaluating.TrySetResult();
+            }
+        });
+        Passenger.App.IdeErrors.Observe(heard);
+        return program;
+    }
+
+    /// <summary>The program attached to and stopped in its loop, then let go on (Continue) while a read of its stop's
+    /// evaluation waits in LetsGo.Held for the program's input: the stop's thread.</summary>
+    private static async Task<int> ContinuedWhileHeldAsync(DebugSession host, Process program, Task evaluating)
+    {
+        await host
+            .InitializeAsync()
+            .AttachAsync(program.Id)
+            .WaitForInitializedEvent();
+        await host.BreakpointsAsync([Line("Thread.Sleep(10); // each turn of the program let go")], Source).ConfigurationDoneAsync();
+        StoppedEvent stop = await host.WaitForStoppedEvent();
+        int frame = (await host.TopFrameAsync(stop.ThreadId!.Value)).Id;
+        Task<EvaluateResponse> held = host.Send<EvaluateResponse>(DapCommands.Evaluate, new EvaluateArguments("LetsGo.Held", frame, EvaluateContexts.Watch));
+        await evaluating.WaitAsync(DebugSession.RequestLimit, TestContext.Current.CancellationToken);
+        await host.Send<ContinueResponse>(DapCommands.Continue, new ThreadArguments(stop.ThreadId!.Value)).WaitAsync(DebugSession.RequestLimit, TestContext.Current.CancellationToken);
+        Assert.Contains("went on", (await held).Result, StringComparison.Ordinal);
+        return stop.ThreadId!.Value;
+    }
+
+    /// <summary>The detach ran the stop's thread, back at its breakpoint as its evaluation returned, off it, and the program
+    /// let go runs on to its own end once given its last line.</summary>
+    private static async Task RanOffItsStopAndOnAsync(DebugSession host, Process program, int thread, Task heard, System.Text.StringBuilder written)
+    {
+        Assert.Contains($"Letting go: thread {thread} goes back to its stop", host.EngineLog(), StringComparison.Ordinal);
+        await program.StandardInput.WriteLineAsync("end");
+        Assert.True(program.WaitForExit(TimeSpan.FromSeconds(30).Scaled()),
+            $"The program let go did not run on to its end; the engine's log:\n{host.EngineLog()}");
+        Assert.True(await Waiting.Within(heard, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken), "The program's output was not read to its end after it ended");
+        lock (written)
+        {
+            Assert.Contains("ran on", written.ToString(), StringComparison.Ordinal);
+        }
+        Assert.Equal(0, program.ExitCode);
+    }
+
     private Task<DebugSession> LaunchToBreakpoints(params string[] code) => LaunchCase("reads", code);
 
     /// <summary>A case of PassengerCases launched with breakpoints on the lines that hold the code given.</summary>

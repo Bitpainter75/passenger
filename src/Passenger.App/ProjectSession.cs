@@ -179,6 +179,7 @@ public sealed class ProjectSession : IAsyncDisposable
         {
             RunInTerminal = setup.RunForDebugger,
             Folder = folder,
+            Own = () => folder is null ? Reached : [folder, .. Reached],
             Server = () => CSharp?.Session,
             Reads = () => Workspace,
             HotReloadOn = () => setup.Settings().HotReloadWhileDebugging,
@@ -210,6 +211,7 @@ public sealed class ProjectSession : IAsyncDisposable
         Bookmarks.Changed += (_, _) => State?.Bookmarks.Set(Bookmarks.Capture());
         // What a Git operation changes in the files is one change set of the folder's Local History, under its name.
         Vcs.Activity = name => LocalHistory?.During(name);
+        Vcs.LookFirst = paths => LocalHistory?.LookBeforeAsync(paths) ?? Task.CompletedTask;
         Models.Changed += (_, changed) => OnEvaluated(changed);
         Packages = new FolderPackages(() => Projects, () => Solution?.Path is { } solution ? Path.GetDirectoryName(solution) : Folder)
         {
@@ -715,6 +717,9 @@ public sealed class ProjectSession : IAsyncDisposable
 
     /// <summary>The environment the Migrations window runs dotnet ef in for each startup project.</summary>
     public Migrations.EfEnvironmentChoices MigrationEnvironments { get; } = new();
+
+    /// <summary>The folder Add Migration was last given for each context.</summary>
+    public Migrations.EfFolderChoices MigrationFolders { get; } = new();
 
     /// <summary>Where each project of devices, emulators or simulators runs, and each one's targets as last listed.</summary>
     public Run.Devices.DeviceChoices Targets { get; } = new();
@@ -1506,7 +1511,7 @@ public sealed class ProjectSession : IAsyncDisposable
         : document.Language == Languages.Language.Gherkin ? new Editors.FeatureOutline(document.Text, () => FeatureProjectFolder(document.Path))
         : Godot.GodotScriptTypes.IsScript(document.Path) ? new Godot.GDScriptOutline(document.Text)
         : (CSharp?.For(document)?.Lsp ?? Web?.For(document)?.Lsp) is { } lsp ? Passenger.App.Navigation.FileOutline.Served(lsp)
-        : Passenger.Workspace.GodotFile.IsText(document.Path) && GodotOf(document.Path) is { } folder ? new Godot.GodotSceneOutline.Source(GodotScenes, folder)
+        : Passenger.Workspace.GodotFileKinds.IsText(document.Path) && GodotOf(document.Path) is { } folder ? new Godot.GodotSceneOutline.Source(GodotScenes, folder)
         : null;
 
     /// <summary>The folder of the project a .feature file belongs to, whose configuration says the language it is read in;
@@ -1717,7 +1722,7 @@ public sealed class ProjectSession : IAsyncDisposable
     {
         if (openedAt != 0 && Workspace is { } shown && shown.Projects.Where(p => p.Exists).All(p => p.Evaluated is { Complete: true }))
         {
-            IdeErrors.Write($"Solution view shows the {shown.Projects.Count} projects of {shown.Name} as MSBuild evaluates them {Durations.Said(System.Diagnostics.Stopwatch.GetElapsedTime(openedAt))} after the folder opened ({Models.Evaluations} evaluated)");
+            IdeErrors.Write($"Solution view shows the {Numbers.Said(shown.Projects.Count)} projects of {shown.Name} as MSBuild evaluates them {Durations.Said(System.Diagnostics.Stopwatch.GetElapsedTime(openedAt))} after the folder opened ({Numbers.Said(Models.Evaluations)} evaluated)");
             openedAt = 0;
         }
     }
@@ -1745,6 +1750,7 @@ public sealed class ProjectSession : IAsyncDisposable
         State = kept;
         Frameworks.Keep(kept.Workspace);
         MigrationEnvironments.Keep(kept.Workspace);
+        MigrationFolders.Keep(kept.Workspace);
         Targets.Keep(kept.Workspace);
         BuildChoices.Keep(kept.Workspace);
         Configurations.Keep(kept.RunConfigurations, Projects);
@@ -1886,17 +1892,18 @@ public sealed class ProjectSession : IAsyncDisposable
     {
         if (Folder is not null)
         {
-            Read(WorkspaceModel.ReadSolution(Folder, NamedSolution, out UnreadSolution? unread), unread);
+            Read(WorkspaceModel.ReadSolution(Folder, NamedSolution, out UnreadSolution? unread, out string? none), unread, none);
         }
     }
 
     /// <summary>The same folder opened again, with the solution or project named this time, or none: the folder is read
-    /// again with it, and the language server starts again only when what it loads changed.</summary>
-    public void Reopen(string? named, WorkspaceModel? withSolution, UnreadSolution? unread)
+    /// again with it, and the language server starts again only when what it loads changed. Why its read found no solution
+    /// is <paramref name="none"/> (<see cref="WorkspaceModel.NoSolution"/>).</summary>
+    public void Reopen(string? named, WorkspaceModel? withSolution, UnreadSolution? unread, string? none)
     {
         NamedSolution = named;
         OpenedByPerson(withSolution);
-        Read(withSolution, unread);
+        Read(withSolution, unread, none);
     }
 
     /// <summary>A solution opened outside an agent's call is the person's to reach from, what an agent wrote of it taken as
@@ -1913,12 +1920,12 @@ public sealed class ProjectSession : IAsyncDisposable
     }
 
     /// <summary>Takes the folder's solution, read now, with the programs beside it it had; or for a folder without one (or
-    /// with one that does not read, <paramref name="unread"/>) the projects it had, read again now; and those added or gone
-    /// since once a worker has walked its folders for them.</summary>
-    private void Read(WorkspaceModel? withSolution, UnreadSolution? unread)
+    /// with one that does not read, <paramref name="unread"/>; why none, <paramref name="none"/>) the projects it had, read
+    /// again now; and those added or gone since once a worker has walked its folders for them.</summary>
+    private void Read(WorkspaceModel? withSolution, UnreadSolution? unread, string? none)
     {
         reads++;
-        Reload(withSolution?.KeepingPrograms(Workspace!) ?? Workspace!.Reread() with { Unread = unread });
+        Reload(withSolution?.KeepingPrograms(Workspace!) ?? Workspace!.Reread() with { Unread = unread, NoSolution = none });
         WalkForProjects();
     }
 
@@ -1987,6 +1994,10 @@ public sealed class ProjectSession : IAsyncDisposable
     /// solution, or other projects.</summary>
     private void Reload(WorkspaceModel read)
     {
+        if (Workspace?.Solution is { } had && read.Solution is null && read.ProjectFile is null)
+        {
+            IdeLog.Write(IdeLog.Ide, $"A read of {Folder} found no solution where it had {had.Path}: {read.NoSolution ?? "its read gave no reason"}");
+        }
         bool loaded = Workspace is not null && Workspace.LoadsAs(read);
         IReadOnlyList<string>? programs = loaded ? null : Workspace?.ProgramsAddedIn(read);
         TakeFilter(read);

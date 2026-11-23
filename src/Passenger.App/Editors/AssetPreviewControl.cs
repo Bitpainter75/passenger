@@ -5,6 +5,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Passenger.App.Workspace;
+using Passenger.Core;
 
 namespace Passenger.App.Editors;
 
@@ -34,8 +35,8 @@ public sealed class AssetPreviewControl : DockPanel, IDisposable, IOwnKeys
         Bind(BackgroundProperty, this.GetResourceObservable(TokenKeys.Editor_Background));
         if (asset.IsPending)
         {
-            TextBlock loading = new() { Text = asset.Kind == AssetKind.Font ? "Loading the font…" : "Loading the image…", Margin = default };
-            loading.Classes.Add(StyleClasses.EmptyText);
+            TextBlock loading = MutedText.Of(asset.Kind == AssetKind.Font ? "Loading the font…" : "Loading the image…");
+            loading.VerticalAlignment = VerticalAlignment.Center;
             StackPanel waiting = new()
             {
                 Orientation = Orientation.Horizontal,
@@ -50,9 +51,8 @@ public sealed class AssetPreviewControl : DockPanel, IDisposable, IOwnKeys
         }
         if (asset.Bitmap is { } bitmap)
         {
-            TextBlock dimensions = MutedText.Of($"{bitmap.PixelSize.Width} × {bitmap.PixelSize.Height} pixels"
-                + (asset.Frames > 1 ? $" · the first of its {asset.Frames} frames" : ""));
-            dimensions.FontSize = 12;
+            TextBlock dimensions = MutedText.Caption($"{bitmap.PixelSize.Width} × {bitmap.PixelSize.Height} pixels"
+                + (asset.Frames > 1 ? $" · the first of its {Numbers.Said(asset.Frames)} frames" : ""));
             dimensions.Margin = new Thickness(Gaps.Normal, 0);
             dimensions.HorizontalAlignment = HorizontalAlignment.Right;
             picture = new ZoomedPicture { Picture = bitmap };

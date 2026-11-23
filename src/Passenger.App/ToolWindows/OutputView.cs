@@ -33,8 +33,8 @@ public sealed class OutputView : DockPanel, IOwnKeys
     /// <summary>The editor, under what the console says while it is empty.</summary>
     private readonly Panel body = new();
 
-    /// <summary>What the console says while it is empty and nothing runs in it, once given words (<see cref="SayWhenEmpty"/>).</summary>
-    private readonly TextBlock empty = new() { Classes = { StyleClasses.EmptyText }, IsVisible = false };
+    /// <summary>What the console says while it is empty and nothing runs in it, once given words (<see cref="OfferWhenEmpty"/>).</summary>
+    private readonly EmptyState empty = new() { IsVisible = false };
 
     private int limit = DefaultLimitKb * 1024;
     private ConsoleInput? input;
@@ -71,6 +71,7 @@ public sealed class OutputView : DockPanel, IOwnKeys
         stop.Click += (_, _) => StopClicked?.Invoke(this, EventArgs.Empty);
         hotReload.Click += (_, _) => HotReloadClicked?.Invoke(this, EventArgs.Empty);
         clear.Click += (_, _) => Clear();
+        empty.ActionRequested += (_, action) => ActionRequested?.Invoke(this, action);
         Border tools = ToolBars.Side(rerun, stop, hotReload, clear, foldFilter, ToolBars.Gap(), Overlays);
         if (toolbar)
         {
@@ -114,7 +115,7 @@ public sealed class OutputView : DockPanel, IOwnKeys
             LineCommentPrefix = null,
             ShowLineNumbers = false,
             ShowErrorStripe = false,
-            FontSize = 12.5,
+            FontSize = TypeRamp.Code,
             Highlighter = colours,
         };
         editor = made;
@@ -156,14 +157,18 @@ public sealed class OutputView : DockPanel, IOwnKeys
         ActionTips.Set(hotReload, hotReloadAction, "Apply Hot Reload Changes");
     }
 
-    /// <summary>Has the console say, while it is empty and nothing runs in it, what fills it: words naming an action's keys
-    /// as the keymap in force has them (<see cref="ActionTips.SetWords(Control, string, Func{string?, string})"/>).</summary>
-    public void SayWhenEmpty(string action, Func<string?, string> words)
+    /// <summary>Has the console say, while it is empty and nothing runs in it, what shows in it and offer the action that
+    /// fills it, named with its keys in the keymap in force; a press asks for it (<see cref="ActionRequested"/>).</summary>
+    public void OfferWhenEmpty(string words, string action, string title)
     {
-        ActionTips.SetWords(empty, action, words);
+        empty.Text = words;
+        empty.Offer(action, title);
         saysEmpty = true;
         ShowEmpty();
     }
+
+    /// <summary>The action the empty console offers, asked for by its link.</summary>
+    public event EventHandler<string>? ActionRequested;
 
     private void ShowEmpty() => empty.IsVisible = saysEmpty && !running && Document.Snapshot.Length == 0;
 
@@ -305,6 +310,7 @@ public sealed class OutputView : DockPanel, IOwnKeys
         {
             UiThread.Check();
             input = value;
+            InputEnded = false;
             if (value is null)
             {
                 // What was typed and never sent stays as text, no longer a line being typed.
@@ -312,6 +318,13 @@ public sealed class OutputView : DockPanel, IOwnKeys
             }
         }
     }
+
+    /// <summary>Whether the program's input was ended here (<see cref="EndOfInput"/>), so it reads no more, until another
+    /// input is given.</summary>
+    public bool InputEnded { get; private set; }
+
+    /// <summary>The key that ends the program's input: Control with D, on every system.</summary>
+    public static readonly Keystroke EndOfInput = new(Key.D, KeyModifiers.Control);
 
     /// <summary>The console's menu: Copy the selection, Select All, and Clear All.</summary>
     private void ShowMenu(Point? at)
@@ -321,10 +334,10 @@ public sealed class OutputView : DockPanel, IOwnKeys
             PlacementTarget = Editor,
             Items =
             {
-                ListMenus.Keyed("Copy", EditorActions.Copy, () => Editor.TryExecute(EditorActions.Copy), enabled: !Editor.Selections.Primary.IsEmpty),
+                ListMenus.Keyed("Copy", EditorActions.Copy, () => Editor.TryExecute(EditorActions.Copy), Editor.Selections.Primary.IsEmpty ? Refusals.NothingSelected : null),
                 ListMenus.Keyed("Select All", EditorActions.SelectAll, () => Editor.TryExecute(EditorActions.SelectAll)),
                 new Separator(),
-                ListMenus.Item("Clear All", null, Clear),
+                ListMenus.Item("Clear All", () => Clear(sameProgram: true)),
             },
         };
         if (at is null)
@@ -345,7 +358,7 @@ public sealed class OutputView : DockPanel, IOwnKeys
     public void Append(string text, bool error = false)
     {
         UiThread.Check();
-        Flush();
+        Flush(unended: true);
         if (fold?.LetGo() is { } unfinished)
         {
             Insert(unfinished, [new ConsoleRun(0, unfinished.Length, ConsoleStream.Error)]);
@@ -353,23 +366,31 @@ public sealed class OutputView : DockPanel, IOwnKeys
         Insert(text, [new ConsoleRun(0, text.Length, error ? ConsoleStream.Error : ConsoleStream.System)]);
     }
 
-    /// <summary>Empties the console: its text, what is still on its way, and the line being typed.</summary>
-    public void Clear()
+    /// <summary>Empties the console: its text, what is still on its way, and the line being typed, for another program's
+    /// output.</summary>
+    public void Clear() => Clear(sameProgram: false);
+
+    /// <summary>Empties the console, for another program's output or, by Clear All, the same program's, whose containers' paths
+    /// and addresses its links keep (<see cref="ConsoleLinks.Forget"/>).</summary>
+    private void Clear(bool sameProgram)
     {
         UiThread.Check();
         Sink.Drop();
         Document.Clear();
         ShowOffer(null);
-        Links.Forget();
+        Links.Forget(sameProgram);
         ForgetFolds();
     }
 
     /// <summary>Takes in what waits in the sink now, rather than at the next frame: before the IDE says a program
-    /// ended or stopped, or reads what it wrote.</summary>
-    public void Flush()
+    /// ended or stopped, or reads what it wrote. A line a program has not ended yet stays held back for its end.</summary>
+    public void Flush() => Flush(unended: false);
+
+    /// <summary>Takes in what waits in the sink, with the lines a program has not ended where <paramref name="unended"/>.</summary>
+    private void Flush(bool unended)
     {
         UiThread.Check();
-        if (Sink.Take() is not { } batch)
+        if (Sink.Take(unended) is not { } batch)
         {
             return;
         }
@@ -568,7 +589,7 @@ public sealed class OutputView : DockPanel, IOwnKeys
                 LineCommentPrefix = null,
                 ShowLineNumbers = false,
                 ShowErrorStripe = false,
-                FontSize = 12.5,
+                FontSize = TypeRamp.Code,
                 Highlighter = new FoldColours(this),
             };
             filtered.Links = Links.On;
@@ -759,7 +780,7 @@ public sealed class OutputView : DockPanel, IOwnKeys
         input is null ? null
         : e.Key == Key.Enter && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift ? SendLine
         : e.Key == Key.Back && e.KeyModifiers == KeyModifiers.None ? Backspace
-        : e.Key == Key.D && e.KeyModifiers == KeyModifiers.Control ? EndInput
+        : Keystroke.From(e) == EndOfInput ? EndInput
         : AppActions.Keymap().ActionFor(new Shortcut(Keystroke.From(e))) is EditorActions.Paste ? InputEdit(EditorActions.Paste)
         : null;
 
@@ -843,6 +864,7 @@ public sealed class OutputView : DockPanel, IOwnKeys
         }
         typedFrom = text.Length;
         Input = null;
+        InputEnded = true;
         Append("^D\n");
         ending.Close();
     }

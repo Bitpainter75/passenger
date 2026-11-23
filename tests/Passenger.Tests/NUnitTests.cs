@@ -122,11 +122,51 @@ public sealed class NUnitTests : NUnitFolders
         "Worded(\"a.b\").Long(1): Passed", "Worded(\"a.b\").Long(2): Passed", "Worded(\"x(y\").Long(1): Passed", "Worded(\"x(y\").Long(2): Passed",
     ];
 
-    [AvaloniaTheory]
-    [InlineData(NUnitInstall.OnVSTest)]
-    [InlineData(NUnitInstall.OnItsRunner)]
-    [InlineData(NUnitInstall.FourOnVSTest)]
-    public void Every_way_of_installing_nunit_makes_the_same_rows_of_its_cases_named_cases_and_fixtures_instances(NUnitInstall install)
+    /// <summary>Every way of installing NUnit (on VSTest, on its own runner, NUnit 4 on VSTest) makes the same rows of
+    /// its cases, named cases and fixtures' instances; a case named by its data is a row of its method that runs
+    /// alone; a project on NUnit's runner shows its tests from code, tells each result and runs the caret and a row
+    /// alone; a generic fixture says where it is; a failure's stack shows once.</summary>
+    [AvaloniaFact]
+    public void NUnits_cases_fixtures_and_results_are_rows_of_their_methods_however_NUnit_is_installed()
+    {
+        Flow.StepApart<NUnitTests>("NUnit on VSTest makes the rows of its cases, named cases and fixtures' instances", t =>
+        {
+            t.Every_way_of_installing_nunit_makes_the_same_rows_of_its_cases_named_cases_and_fixtures_instances(NUnitInstall.OnVSTest);
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<NUnitTests>("NUnit on its own runner makes the same rows", t =>
+        {
+            t.Every_way_of_installing_nunit_makes_the_same_rows_of_its_cases_named_cases_and_fixtures_instances(NUnitInstall.OnItsRunner);
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<NUnitTests>("NUnit 4 on VSTest makes the same rows", t =>
+        {
+            t.Every_way_of_installing_nunit_makes_the_same_rows_of_its_cases_named_cases_and_fixtures_instances(NUnitInstall.FourOnVSTest);
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<NUnitTests>("a case named by its data is a row of its method that runs alone", t =>
+        {
+            t.A_case_named_by_its_data_is_a_row_of_its_method_that_runs_alone(NUnitInstall.OnItsRunner);
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<NUnitTests>("an NUnit project on its own runner shows its tests from code and tells each result and runs the caret and a row alone", t =>
+        {
+            t.An_nunit_project_on_its_own_runner_shows_its_tests_from_code_and_tells_each_result_and_runs_the_caret_and_a_row_alone();
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<NUnitTests>("a generic fixture found by its runner says where it is and is marked beside its code", t =>
+        {
+            t.A_generic_fixture_found_by_its_runner_says_where_it_is_and_is_marked_beside_its_code(NUnitInstall.OnVSTest);
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<NUnitTests>("a failure's stack shows once", t =>
+        {
+            t.A_failures_stack_shows_once_however_nunit_is_installed(NUnitInstall.OnVSTest);
+            OpenWindows.CloseAll();
+        });
+    }
+
+    private void Every_way_of_installing_nunit_makes_the_same_rows_of_its_cases_named_cases_and_fixtures_instances(NUnitInstall install)
     {
         MainWindow window = Ui.OpenFolder(Restored(install, "Cases.cs", Cases), languageServer: false);
         Tree(window);
@@ -145,11 +185,7 @@ public sealed class NUnitTests : NUnitFolders
 
     /// <summary>A case named by its data shows under its method and runs alone from its row, the class that inherits a named
     /// case holding one of its own, whichever way NUnit is installed.</summary>
-    [AvaloniaTheory]
-    [InlineData(NUnitInstall.OnVSTest)]
-    [InlineData(NUnitInstall.OnItsRunner)]
-    [InlineData(NUnitInstall.FourOnVSTest)]
-    public void A_case_named_by_its_data_is_a_row_of_its_method_that_runs_alone(NUnitInstall install)
+    private void A_case_named_by_its_data_is_a_row_of_its_method_that_runs_alone(NUnitInstall install)
     {
         MainWindow window = Ui.OpenFolder(Restored(install, "Cases.cs", Cases), languageServer: false);
         ListBox tree = Tree(window);
@@ -178,8 +214,7 @@ public sealed class NUnitTests : NUnitFolders
     /// <summary>On NUnit's own runner the tests are read from their code before a build and marked beside it; a run gives each
     /// its result, a failure's message and place, a skip's reason, what a test wrote and a mark; the test at the caret runs
     /// its every row, and a row chosen runs alone.</summary>
-    [AvaloniaFact]
-    public void An_nunit_project_on_its_own_runner_shows_its_tests_from_code_and_tells_each_result_and_runs_the_caret_and_a_row_alone()
+    private void An_nunit_project_on_its_own_runner_shows_its_tests_from_code_and_tells_each_result_and_runs_the_caret_and_a_row_alone()
     {
         MainWindow window = Opened(Restored(NUnitInstall.OnItsRunner, SumTestsFile, SumTests));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -231,11 +266,7 @@ public sealed class NUnitTests : NUnitFolders
 
     /// <summary>A generic fixture, which its code alone never shows, is told where it is and marked beside its code once a
     /// run has found it, whichever way NUnit is installed.</summary>
-    [AvaloniaTheory]
-    [InlineData(NUnitInstall.OnVSTest)]
-    [InlineData(NUnitInstall.OnItsRunner)]
-    [InlineData(NUnitInstall.FourOnVSTest)]
-    public void A_generic_fixture_found_by_its_runner_says_where_it_is_and_is_marked_beside_its_code(NUnitInstall install)
+    private void A_generic_fixture_found_by_its_runner_says_where_it_is_and_is_marked_beside_its_code(NUnitInstall install)
     {
         string folder = Restored(install, "Cases.cs", Cases);
         MainWindow window = Ui.OpenFolder(folder, languageServer: false);
@@ -255,11 +286,7 @@ public sealed class NUnitTests : NUnitFolders
 
     /// <summary>A failure's stack shows once, though NUnit's adapter tells it again after its assertion's number, and of
     /// several failures in one test each assertion's stack shows once, with its failure; whichever way NUnit is installed.</summary>
-    [AvaloniaTheory]
-    [InlineData(NUnitInstall.OnVSTest)]
-    [InlineData(NUnitInstall.OnItsRunner)]
-    [InlineData(NUnitInstall.FourOnVSTest)]
-    public void A_failures_stack_shows_once_however_nunit_is_installed(NUnitInstall install)
+    private void A_failures_stack_shows_once_however_nunit_is_installed(NUnitInstall install)
     {
         const string Failing = """
             using NUnit.Framework;
@@ -320,10 +347,29 @@ public sealed class NUnitTests : NUnitFolders
 [Collection(Alone.Name)]
 public sealed class NUnitDebuggingTests : NUnitFolders
 {
-    [AvaloniaTheory]
-    [InlineData(NUnitInstall.OnVSTest)]
-    [InlineData(NUnitInstall.OnItsRunner)]
-    public void Debug_tests_at_the_caret_stops_at_a_breakpoint_inside_an_nunit_test(NUnitInstall install)
+    /// <summary>Debug Tests at the caret stops at a breakpoint inside an NUnit test on VSTest and on NUnit's own
+    /// runner, whose run settings set a variable the test reads.</summary>
+    [AvaloniaFact]
+    public void Debug_Tests_stops_inside_an_NUnit_test_however_NUnit_is_installed()
+    {
+        Flow.StepApart<NUnitDebuggingTests>("Debug Tests at the caret stops at a breakpoint inside an NUnit test on VSTest", t =>
+        {
+            t.Debug_tests_at_the_caret_stops_at_a_breakpoint_inside_an_nunit_test(NUnitInstall.OnVSTest);
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<NUnitDebuggingTests>("Debug Tests at the caret stops at a breakpoint inside an NUnit test on its own runner", t =>
+        {
+            t.Debug_tests_at_the_caret_stops_at_a_breakpoint_inside_an_nunit_test(NUnitInstall.OnItsRunner);
+            OpenWindows.CloseAll();
+        });
+        Flow.StepApart<NUnitDebuggingTests>("debug tests stops at a breakpoint in a test on NUnit's runner whose run settings set a variable", t =>
+        {
+            t.Debug_tests_stops_at_a_breakpoint_in_a_test_on_nunits_runner_whose_run_settings_set_a_variable();
+            OpenWindows.CloseAll();
+        });
+    }
+
+    private void Debug_tests_at_the_caret_stops_at_a_breakpoint_inside_an_nunit_test(NUnitInstall install)
     {
         MainWindow window = Opened(Restored(install, SumTestsFile, SumTests));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -345,8 +391,7 @@ public sealed class NUnitDebuggingTests : NUnitFolders
 
     /// <summary>Run settings with a variable, which a test host on NUnit's own runner would start a process of its own to set,
     /// leave the test in the process the debugger holds, reading the variable at a breakpoint.</summary>
-    [AvaloniaFact]
-    public void Debug_tests_stops_at_a_breakpoint_in_a_test_on_nunits_runner_whose_run_settings_set_a_variable()
+    private void Debug_tests_stops_at_a_breakpoint_in_a_test_on_nunits_runner_whose_run_settings_set_a_variable()
     {
         string folder = Restored(NUnitInstall.OnItsRunner, SumTestsFile, SumTests.Replace("int sum = 2 + 2;", "int sum = System.Environment.GetEnvironmentVariable(\"SETTLED_BY\")!.Length / 4;", StringComparison.Ordinal));
         string project = Path.Combine(folder, "Sums.Tests.csproj");
@@ -367,226 +412,4 @@ public sealed class NUnitDebuggingTests : NUnitFolders
         Ui.WaitFor(() => window.Debugger.Session is null || window.Debugger.Session.State == DebugState.Ended, "the test host to end once its run was done");
         window.Close();
     }
-}
-
-/// <summary>NUnit as an agent meets it, however it is installed: a run's answer says which case of a method failed,
-/// tests_list where a test its runner alone finds is, and a run takes what its project's run settings say.</summary>
-public sealed class NUnitMcpTests : McpRig
-{
-    /// <summary>A method of two named cases, one failing, and a method whose only case is named and fails.</summary>
-    private const string Named = """
-        using NUnit.Framework;
-
-        namespace Cases.Tests;
-
-        public class Arithmetic
-        {
-            public static readonly TestCaseData[] Titled = [new TestCaseData(1, 1).SetName("OneIsOne"), new TestCaseData(1, 2).SetName("OneIsTwo")];
-
-            public static readonly TestCaseData[] Alone = [new TestCaseData(2, 3).SetName("TwoIsThree")];
-
-            [TestCaseSource(nameof(Titled))]
-            public void Compared(int a, int b) => Assert.That(a, Is.EqualTo(b));
-
-            [TestCaseSource(nameof(Alone))]
-            public void Lone(int a, int b) => Assert.That(a, Is.EqualTo(b));
-        }
-
-        """;
-
-    [Theory]
-    [InlineData(NUnitInstall.OnVSTest)]
-    [InlineData(NUnitInstall.OnItsRunner)]
-    [InlineData(NUnitInstall.FourOnVSTest)]
-    public async Task An_agents_run_names_a_failing_case_named_in_place_of_its_method(NUnitInstall install)
-    {
-        await using McpClient client = await Start(["--mcp", await Restored(install, Named)], languageServer: false);
-        JsonElement run = await Call(client, McpTools.TestsRun);
-        Assert.StartsWith("Tests passed: 1, failed: 2 of 3", run.GetProperty("summary").GetString(), StringComparison.Ordinal);
-        Assert.StartsWith("OneIsTwo: Failed", Details(run, "Cases.Tests.Arithmetic.Compared"), StringComparison.Ordinal);
-        Assert.StartsWith("TwoIsThree: Failed", Details(run, "Cases.Tests.Arithmetic.Lone"), StringComparison.Ordinal);
-
-        JsonElement alone = await Call(client, McpTools.TestsRun, new() { ["filter"] = "Lone" });
-        Assert.StartsWith("Tests passed: 0, failed: 1 of 1", alone.GetProperty("summary").GetString(), StringComparison.Ordinal);
-        Assert.StartsWith("TwoIsThree: Failed", Details(alone, "Cases.Tests.Arithmetic.Lone"), StringComparison.Ordinal);
-    }
-
-    /// <summary>tests_list's location of a test only a runner finds, on NUnit's own runner as on VSTest.</summary>
-    [Theory]
-    [InlineData(NUnitInstall.OnVSTest)]
-    [InlineData(NUnitInstall.OnItsRunner)]
-    [InlineData(NUnitInstall.FourOnVSTest)]
-    public async Task An_agent_is_told_where_a_generic_fixture_is_however_nunit_is_installed(NUnitInstall install)
-    {
-        const string Typed = "using NUnit.Framework;\n\nnamespace Cases.Tests;\n\n[TestFixture(typeof(int))]\npublic class Typed<T>\n{\n    [Test]\n    public void Named() { }\n}\n";
-        await using McpClient client = await Start(["--mcp", await Restored(install, Typed)], languageServer: false);
-        await Call(client, McpTools.TestsRun);
-        JsonElement test = Assert.Single((await Call(client, McpTools.TestsList, new() { ["filter"] = "Typed" })).EnumerateArray());
-        Assert.True(test.TryGetProperty("location", out JsonElement location) && location.GetString() == "Cases.cs:9", $"tests_list says nowhere a run of it found the test: {test}");
-    }
-
-    /// <summary>A project's run settings file reaches its tests however NUnit is installed, a parameter and a variable as a
-    /// run of it reads them, and a test only a runner finds still says where it is.</summary>
-    [Theory]
-    [InlineData(NUnitInstall.OnVSTest)]
-    [InlineData(NUnitInstall.OnItsRunner)]
-    [InlineData(NUnitInstall.FourOnVSTest)]
-    public async Task A_projects_run_settings_reach_its_tests_however_nunit_is_installed(NUnitInstall install)
-    {
-        const string Settled = """
-            using NUnit.Framework;
-
-            namespace Cases.Tests;
-
-            [TestFixture(typeof(int))]
-            public class Typed<T>
-            {
-                [Test]
-                public void Parameter() => Assert.That(TestContext.Parameters["who"], Is.EqualTo("the parameter"));
-
-                [Test]
-                public void Variable() => Assert.That(System.Environment.GetEnvironmentVariable("SETTLED_BY"), Is.EqualTo("the run settings"));
-            }
-
-            """;
-        string folder = await Restored(install, Settled);
-        string project = Path.Combine(folder, "Sums.Tests.csproj");
-        File.WriteAllText(project, File.ReadAllText(project).Replace("</PropertyGroup>", "  <RunSettingsFilePath>$(MSBuildProjectDirectory)/settled.runsettings</RunSettingsFilePath>\n  </PropertyGroup>", StringComparison.Ordinal));
-        File.WriteAllText(Path.Combine(folder, "settled.runsettings"), NUnitFolders.RunSettings);
-        await using McpClient client = await Start(["--mcp", folder], languageServer: false);
-
-        JsonElement run = await Call(client, McpTools.TestsRun);
-        Assert.True(run.GetProperty("summary").GetString()!.StartsWith("Tests passed: 2, failed: 0 of 2", StringComparison.Ordinal),
-            $"The tests ran without what their project's run settings say: {run}");
-        JsonElement test = Assert.Single((await Call(client, McpTools.TestsList, new() { ["filter"] = "Parameter" })).EnumerateArray());
-        Assert.True(test.TryGetProperty("location", out JsonElement location) && location.GetString() == "Cases.cs:9",
-            $"Given its project's run settings, a host looking for tests no longer says where they are: {test}");
-    }
-
-    /// <summary>What a run's answer says of a test's failure.</summary>
-    private static string Details(JsonElement run, string test) =>
-        run.GetProperty("failures").EnumerateArray().Where(f => f.GetProperty("test").GetString() == test).Select(f => f.GetProperty("details").GetString()).FirstOrDefault()
-            ?? throw new Xunit.Sdk.XunitException($"The run's answer has no failure of {test}: {run}");
-
-    /// <summary>A folder holding a project that takes NUnit as given, with the code given, restored.</summary>
-    private async Task<string> Restored(NUnitInstall install, string code)
-    {
-        string folder = PathNames.Canonical(TestFolders.Create("mcp-nunit-"));
-        DeleteAtEnd(folder);
-        await TestFolders.PrepareAsync(async () =>
-        {
-            File.WriteAllText(Path.Combine(folder, "Sums.Tests.csproj"), NUnitFolders.Project(install));
-            File.WriteAllText(Path.Combine(folder, "Cases.cs"), code);
-            await Restore.RunAsync(folder);
-        }, folder);
-        return folder;
-    }
-}
-
-/// <summary>How a test project takes NUnit.</summary>
-public enum NUnitInstall
-{
-    /// <summary>NUnit and its adapter beside VSTest's SDK.</summary>
-    OnVSTest,
-
-    /// <summary>NUnit's own runner on the Testing Platform: an executable with no test SDK.</summary>
-    OnItsRunner,
-
-    /// <summary>NUnit 4 and the adapter of its day beside VSTest's SDK.</summary>
-    FourOnVSTest,
-}
-
-/// <summary>The NUnit project each test writes for itself, and the window on it.</summary>
-public abstract class NUnitFolders : UnitTestsFolders
-{
-    protected const string SumTestsFile = "SumTests.cs";
-
-    /// <summary>A test of each ending, the lines the tests name being those of this text.</summary>
-    protected const string SumTests = """
-        using NUnit.Framework;
-
-        namespace Sums.Tests;
-
-        public class SumTests
-        {
-            [Test]
-            public void Adds()
-            {
-                TestContext.Out.WriteLine("adding two and two");
-                int sum = 2 + 2;
-                Assert.That(sum, Is.EqualTo(4));
-            }
-
-            [Test]
-            public void Fails()
-            {
-                Assert.That(2 + 2, Is.EqualTo(5));
-            }
-
-            [Test]
-            [Ignore("later")]
-            public void Not_yet() { }
-
-            [TestCase(1, 2)]
-            [TestCase(2, 4)]
-            public void Doubles(int value, int twice) => Assert.That(value * 2, Is.EqualTo(twice));
-        }
-
-        """;
-
-    /// <summary>A run settings file giving a test a variable of 16 letters and a parameter.</summary>
-    internal const string RunSettings = """
-        <RunSettings>
-          <RunConfiguration>
-            <EnvironmentVariables>
-              <SETTLED_BY>the run settings</SETTLED_BY>
-            </EnvironmentVariables>
-          </RunConfiguration>
-          <TestRunParameters>
-            <Parameter name="who" value="the parameter" />
-          </TestRunParameters>
-        </RunSettings>
-
-        """;
-
-    protected NUnitFolders()
-        : base(null)
-    {
-    }
-
-    /// <summary>A folder of its own holding a project that takes NUnit as given, with the code given, restored.</summary>
-    protected string Restored(NUnitInstall install, string file, string code)
-    {
-        string folder = NewFolder();
-        Write(folder, "Sums.Tests.csproj", Project(install));
-        Write(folder, file, code);
-        Restore.Run(folder);
-        return folder;
-    }
-
-    /// <summary>A window on a project of <see cref="SumTests"/> with its file open and shown in the Unit Tests window, with
-    /// no C# language server, which finding, running and debugging tests ask nothing of.</summary>
-    protected static MainWindow Opened(string folder)
-    {
-        MainWindow window = Ui.OpenFolder(folder, languageServer: false);
-        window.OpenFile(Path.Combine(folder, SumTestsFile));
-        Ui.Settle();
-        Tree(window);
-        Ui.WaitFor(() => Method(window, "Adds") is not null, "the tests read from the code");
-        return window;
-    }
-
-    /// <summary>The project file that takes NUnit as given.</summary>
-    internal static string Project(NUnitInstall install) => install switch
-    {
-        NUnitInstall.OnItsRunner => Project(
-            "    <OutputType>Exe</OutputType>\n    <EnableNUnitRunner>true</EnableNUnitRunner>\n", TestPackages.NUnit, TestPackages.NUnitAdapter, testSdk: false),
-        NUnitInstall.FourOnVSTest => Project(string.Empty, TestPackages.NUnitFour, TestPackages.NUnitFourAdapter, testSdk: true),
-        _ => Project(string.Empty, TestPackages.NUnit, TestPackages.NUnitAdapter, testSdk: true),
-    };
-
-    private static string Project(string properties, string nunit, string adapter, bool testSdk) =>
-        $"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>{TestProjects.Framework}</TargetFramework>\n{properties}  </PropertyGroup>\n  <ItemGroup>\n" +
-        (testSdk ? $"    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"{TestPackages.TestSdk}\" />\n" : string.Empty) +
-        $"    <PackageReference Include=\"NUnit\" Version=\"{nunit}\" />\n    <PackageReference Include=\"NUnit3TestAdapter\" Version=\"{adapter}\" />\n  </ItemGroup>\n</Project>\n";
 }

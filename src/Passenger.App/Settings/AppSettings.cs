@@ -31,6 +31,12 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     /// theme's ground, so the areas stay told apart), or null for the theme's own.</summary>
     public SourcedTheme? ColourScheme { get; init; }
 
+    /// <summary>Whether High Contrast shows in the theme's and the scheme's place while the system asks for high contrast.</summary>
+    public bool FollowSystemContrast { get; init; } = true;
+
+    /// <summary>The colours of tests', changes' and signatures' states: the theme's own, or the colour-blind safe palette over it.</summary>
+    public StatePalette StatePalette { get; init; }
+
     /// <summary>The theme sources the person added, each as <see cref="ThemeSource"/> keeps it, beside Passenger's themes
     /// repository, which every Passenger lists.</summary>
     public IReadOnlyList<string> ThemeSources { get; init; } = [];
@@ -80,6 +86,9 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     public double CaretWidth { get; init; } = Passenger.Editor.Carets.DefaultWidth;
     public bool Ligatures { get; init; }
     public bool ShowLineNumbers { get; init; } = true;
+
+    /// <summary>The navigation bar over each editor of a file with an outline, naming where its caret is.</summary>
+    public bool ShowNavigationBar { get; init; } = true;
 
     /// <summary>Rainbow braces: brackets coloured by how deeply they nest.</summary>
     public bool RainbowBraces { get; init; } = true;
@@ -191,6 +200,16 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     /// <summary>An edit Hot Reload cannot apply (a rude edit) restarts the debugged program, built again with the same
     /// configuration and breakpoints, without asking; off, the restart is asked first.</summary>
     public bool RestartOnRudeEdit { get; init; } = true;
+
+    /// <summary>"When the debugger stops": what a stop of a program the person debugs (a breakpoint, an exception, a step's
+    /// end) does while they are in another program: the window comes to the front, asking for them where the system keeps
+    /// the other in front; only asks for them; or nothing. An agent's debugging never brings it forward.</summary>
+    public DebuggerStop WhenDebuggerStops { get; init; } = DebuggerStop.ComeForward;
+
+    /// <summary>Whether Run, Debug or Profile of a configuration that runs asks first, rather than stopping what runs of it
+    /// and starting it again at once: Stop and Rerun, Stop alone, or Cancel. On at first; an agent's start, and one in a
+    /// window nobody sees, never asks.</summary>
+    public bool AskBeforeRerun { get; init; } = true;
 
     /// <summary>"Tool Window: when build is explicitly invoked, open the build progress view in a tool window": the
     /// Build menu's builds, rebuilds and cleans open the Build window as they start.</summary>
@@ -418,6 +437,41 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     /// <summary>Highlight Words in a change bar's popup: the words that changed marked in what the lines were and in
     /// the file while the popup is open; the popup's toggle changes it.</summary>
     public bool ChangePopupWords { get; init; } = true;
+
+    /// <summary>When the sound cues play (<see cref="SoundCues"/>): while the system says a screen reader runs, at first, so
+    /// a person who sees the screen hears none; always; or never.</summary>
+    public SoundCuesPlayed SoundCues { get; init; } = SoundCuesPlayed.WithScreenReader;
+
+    /// <summary>A sound as the caret comes to a line holding an error.</summary>
+    public bool SoundOnErrorLine { get; init; } = true;
+
+    /// <summary>A sound as the caret comes to a line holding a warning and no error.</summary>
+    public bool SoundOnWarningLine { get; init; } = true;
+
+    /// <summary>A sound as the caret comes to a line holding a breakpoint.</summary>
+    public bool SoundOnBreakpointLine { get; init; } = true;
+
+    /// <summary>A sound as the caret comes to a line that begins a folded region.</summary>
+    public bool SoundOnFoldedLine { get; init; } = true;
+
+    /// <summary>A sound as the caret comes to a line changed since the last commit.</summary>
+    public bool SoundOnChangedLine { get; init; } = true;
+
+    /// <summary>A sound as a build passes or fails, each its own.</summary>
+    public bool SoundOnBuildEnd { get; init; } = true;
+
+    /// <summary>A sound as a test run passes or fails, each its own.</summary>
+    public bool SoundOnTestsEnd { get; init; } = true;
+
+    /// <summary>A sound as the debugger stops the program the person debugs.</summary>
+    public bool SoundOnDebuggerStop { get; init; } = true;
+
+    /// <summary>A sound as a command the person ran in the terminal fails, where its shell tells.</summary>
+    public bool SoundOnTerminalFailure { get; init; } = true;
+
+    /// <summary>A sound as a save the person asked for is refused (a read-only file, one another program holds, a write
+    /// the system refused).</summary>
+    public bool SoundOnSaveRefused { get; init; } = true;
 
     /// <summary>"Show files with the same names as nested": the Solution view nests files by their nesting rules
     /// (Counter.razor.cs under Counter.razor), on until the Explorer's File Nesting... turns it off.</summary>
@@ -687,6 +741,14 @@ public enum ToolConfiguration
     Manual,
 }
 
+/// <summary>The choices for "When the debugger stops", in the order Settings lists them.</summary>
+public enum DebuggerStop
+{
+    ComeForward,
+    AskForAttention,
+    Nothing,
+}
+
 /// <summary>The choices for "Open project in", in the order Settings lists them.</summary>
 public enum OpenProjectIn
 {
@@ -708,6 +770,14 @@ public enum DiffPlace
 {
     Window,
     Tab,
+}
+
+/// <summary>When the sound cues play, in the order Settings lists them.</summary>
+public enum SoundCuesPlayed
+{
+    WithScreenReader,
+    Always,
+    Never,
 }
 
 /// <summary>What Discord's activity names beyond Passenger, in the order Settings lists them.</summary>

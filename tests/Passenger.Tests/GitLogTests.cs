@@ -30,11 +30,24 @@ public sealed class GitLogTests : IDisposable
         }
     }
 
+    /// <summary>The Git log as one flow, each step the check one test made in an instance of its own: two thousand
+    /// commits read with no copy of git's output on the window's thread, each lane's line running unbroken to the
+    /// commit it joins with every row's author and date lined up, a merge commit listing the merged branch's files,
+    /// each opening its diff against the first parent, and a wheel step down the log costing what it does down a short
+    /// one.</summary>
+    [AvaloniaFact]
+    public void The_log_reads_thousands_of_commits_cheaply_and_draws_each_lane_unbroken_to_its_commit()
+    {
+        Flow.StepApart<GitLogTests>("reading two thousand commits into the log makes no copy of gits output on the ui thread", t => t.Reading_two_thousand_commits_into_the_log_makes_no_copy_of_gits_output_on_the_ui_thread());
+        Flow.StepApart<GitLogTests>("each lanes line runs unbroken to the commit it joins and every rows author and date line up", t => t.Each_lanes_line_runs_unbroken_to_the_commit_it_joins_and_every_rows_author_and_date_line_up());
+        Flow.StepApart<GitLogTests>("a merge commit lists the merged branchs files each opening its diff against the first parent", t => t.A_merge_commit_lists_the_merged_branchs_files_each_opening_its_diff_against_the_first_parent());
+        Flow.StepApart<GitLogTests>("a scroll step down two thousand commits hands the rows other commits never making one again", t => t.A_scroll_step_down_two_thousand_commits_hands_the_rows_other_commits_never_making_one_again());
+    }
+
     /// <summary>Reading the log again over 2,000 commits allocates on the UI thread less than a copy of git's output for
     /// the 1,900 more than over 100 would take as text, the least of three reads each; every commit is listed as git has
     /// it.</summary>
-    [AvaloniaFact]
-    public void Reading_two_thousand_commits_into_the_log_makes_no_copy_of_gits_output_on_the_ui_thread()
+    private void Reading_two_thousand_commits_into_the_log_makes_no_copy_of_gits_output_on_the_ui_thread()
     {
         (long few, int fewText) = Read(100);
         (long many, int manyText) = Read(2000);
@@ -69,59 +82,84 @@ public sealed class GitLogTests : IDisposable
         }
     }
 
-    /// <summary>Scrolling the log draws other commits' parts of the graph with the pens made for its lanes' colours, none
-    /// made again; the light theme makes its own once, one for each colour, and draws in its colours.</summary>
-    [AvaloniaFact]
-    public void The_graph_draws_its_rows_with_the_pens_its_theme_made_once_and_the_light_themes_in_its_colours()
+    /// <summary>Over a merged branch and one not merged, each lane's line runs on unbroken from row to row, in its own lane
+    /// until the row of the commit it waits for, and every row's author and date stand at one place, however many lanes
+    /// its part of the graph crosses.</summary>
+    private void Each_lanes_line_runs_unbroken_to_the_commit_it_joins_and_every_rows_author_and_date_line_up()
     {
-        string root = Repository(400);
+        string root = PathNames.Canonical(TestFolders.Create("gitlanes-"));
+        folders.Add(root);
+        File.WriteAllText(Path.Combine(root, "Notes.txt"), "base\n");
+        TestGit.Init(root);
+        void Commit(string text, string message)
+        {
+            File.WriteAllText(Path.Combine(root, "Notes.txt"), text);
+            TestGit.Run(root, "commit", "-q", "-am", message);
+        }
+        TestGit.Run(root, "switch", "-q", "-c", "feature");
+        Commit("feature\n", "On feature");
+        TestGit.Run(root, "switch", "-q", "main");
+        File.WriteAllText(Path.Combine(root, "Other.txt"), "main\n");
+        TestGit.Run(root, "add", "Other.txt");
+        TestGit.Run(root, "commit", "-q", "-m", "On main");
+        TestGit.Run(root, "merge", "-q", "--no-edit", "feature");
+        TestGit.Run(root, "switch", "-q", "-c", "topic");
+        Commit("topic\n", "On topic");
+        TestGit.Run(root, "switch", "-q", "main");
+        Commit("main again\n", "Main again");
         MainWindow window = Ui.OpenFolder(root, languageServer: false, width: 1300, height: 900);
         window.RequestedThemeVariant = ThemeVariant.Dark;
         window.Perform(AppActions.ShowGit);
         GitLogView log = window.GitLog;
-        Ui.Landed(() => log.Rows.Count == 400, "the log's 400 commits");
+        Ui.Landed(() => log.Rows.Count == 6, "the log's six commits");
+        Assert.True(log.Rows.Count(r => r.Width > 1) >= 3, $"The history laid out {log.Rows.Count(r => r.Width > 1)} rows in two lanes, where its branches make three or more");
         ListBox list = log.GetVisualDescendants().OfType<ListBox>().Single(l => l.ItemsSource is IReadOnlyList<GraphRow>);
-        Assert.True(log.Rows.Any(r => r.Width > 1), "The history laid out no row in more than one lane");
-        Point middle = list.TranslatePoint(new Point(list.Bounds.Width / 2, list.Bounds.Height / 2), window)!.Value;
-        int made = GitLogView.PensMade;
-        for (int step = 0; step < 20; step++)
-        {
-            window.MouseWheel(middle, new Vector(0, -1));
-            Ui.Settle();
-        }
-        Assert.True(GitLogView.PensMade == made,
-            $"Twenty wheel steps down the log made {GitLogView.PensMade - made} pens for the rows they brought in, where each lane's colour has its pen");
-        Drawn(ThemeVariant.Dark);
-
-        window.RequestedThemeVariant = ThemeVariant.Light;
         Ui.Settle();
-        Assert.True(GitLogView.PensMade - made == 6, $"The light theme made {GitLogView.PensMade - made} pens for the graph's six colours");
-        made = GitLogView.PensMade;
-        Drawn(ThemeVariant.Light);
-        for (int step = 0; step < 20; step++)
+        Control[] rows = [.. log.Rows.Select(r => list.GetRealizedContainers().Single(c => ReferenceEquals(c.DataContext, r)))];
+
+        List<string> broken = [];
+        for (int i = 0; i + 1 < rows.Length; i++)
         {
-            window.MouseWheel(middle, new Vector(0, 1));
-            Ui.Settle();
+            Control upper = Graph(rows[i]);
+            Control lower = Graph(rows[i + 1]);
+            for (int lane = 0; lane < log.Rows[i].Below.Count; lane++)
+            {
+                if (log.Rows[i].Below[lane] is null)
+                {
+                    continue;
+                }
+                Point[] at = [Place(upper, lane, upper.Bounds.Height - 0.5), Place(lower, lane, 0.5), Place(upper, -1, upper.Bounds.Height - 0.5), Place(lower, -1, 0.5)];
+                Color[] seen = Ui.Pixels(window, at);
+                if (seen[0] == seen[2] || seen[1] == seen[3])
+                {
+                    broken.Add($"lane {lane} between '{log.Rows[i].Commit.Subject}' ({(seen[0] == seen[2] ? "not drawn at its foot" : "drawn")}) and "
+                        + $"'{log.Rows[i + 1].Commit.Subject}' ({(seen[1] == seen[3] ? "not drawn at its head" : "drawn")})");
+                }
+            }
         }
-        Assert.True(GitLogView.PensMade == made, $"Twenty wheel steps up the log in the light theme made {GitLogView.PensMade - made} pens");
-        Drawn(ThemeVariant.Light);
+        Assert.True(broken.Count == 0, $"The graph's lines break where one row meets the next: {string.Join("; ", broken)}");
+
+        double[] authors = [.. rows.Select(row => Left(row, 1))];
+        double[] dates = [.. rows.Select(row => Left(row, 2))];
+        Assert.True(authors.Distinct().Count() == 1 && dates.Distinct().Count() == 1,
+            $"The rows' authors stand at [{string.Join(", ", authors)}] and their dates at [{string.Join(", ", dates)}], where each column stands at one place");
         window.Close();
 
-        // The first row shown in lane 0 has its dot in the theme's first colour.
-        void Drawn(ThemeVariant theme)
-        {
-            Control row = list.GetRealizedContainers().First(c => c.DataContext is GraphRow { Lane: 0 }
-                && c.TranslatePoint(default, list) is { } top && top.Y >= 0 && top.Y + c.Bounds.Height <= list.Bounds.Height);
-            Control graph = row.GetVisualDescendants().OfType<Grid>().First().Children[0];
-            Color dot = Ui.Pixel(window, graph.TranslatePoint(new Point(10, graph.Bounds.Height / 2), window)!.Value);
-            Assert.True(dot == Lane(theme), $"In the {theme} theme lane 0's dot is drawn {dot}, not its {Lane(theme)}");
-        }
+        // A lane's middle in a row's part of the graph, or (lane -1) a place right of every lane, where only its ground is.
+        Point Place(Control graph, int lane, double y) =>
+            graph.TranslatePoint(new Point(lane < 0 ? graph.Bounds.Width - 2 : 10 + (lane * 12), y), window)!.Value;
+
+        // Where a row's column (1 the author's, 2 the date's) begins in the list.
+        double Left(Control row, int column) =>
+            row.GetVisualDescendants().OfType<Grid>().First().Children.Single(c => Grid.GetColumn(c) == column).TranslatePoint(default, list)!.Value.X;
     }
+
+    /// <summary>A row's part of the graph.</summary>
+    private static Control Graph(Control row) => row.GetVisualDescendants().OfType<Control>().First(c => c.GetType().Name == "Graph");
 
     /// <summary>A merge commit chosen in the log lists what the branch it merged brought in, against its first parent, and a
     /// file of it opens its diff against that parent.</summary>
-    [AvaloniaFact]
-    public void A_merge_commit_lists_the_merged_branchs_files_each_opening_its_diff_against_the_first_parent()
+    private void A_merge_commit_lists_the_merged_branchs_files_each_opening_its_diff_against_the_first_parent()
     {
         const string Shop = "class Shop\n{\n    int count;\n}\n";
         string root = PathNames.Canonical(TestFolders.Create("gitlog-merge-"));
@@ -165,10 +203,19 @@ public sealed class GitLogTests : IDisposable
         window.Close();
     }
 
-    private static Color Lane(ThemeVariant theme) =>
-        Application.Current!.TryFindResource(TokenKeys.Graph_0, theme, out object? brush) && brush is ISolidColorBrush solid
-            ? solid.Color
-            : throw new Xunit.Sdk.XunitException($"The {theme} theme has no {TokenKeys.Graph_0}");
+    /// <summary>A wheel step down a log of 2,000 commits allocates on the UI thread what one down 100 does, and the rows
+    /// on screen are handed other commits as it scrolls, none made again.</summary>
+    private void A_scroll_step_down_two_thousand_commits_hands_the_rows_other_commits_never_making_one_again()
+    {
+        LongListsTests.Holds("The Git log", "commits", 100, 2000, commits =>
+        {
+            string root = Linear(commits);
+            MainWindow window = Ui.OpenFolder(root, languageServer: false, width: 1300, height: 900);
+            window.Perform(AppActions.ShowGit);
+            Ui.Landed(() => window.GitLog.Rows.Count == commits, $"the log's {commits} commits");
+            return (window.GitLog.GetVisualDescendants().OfType<ListBox>().Single(l => l.ItemsSource is IReadOnlyList<GraphRow>), window.Close);
+        });
+    }
 
     /// <summary>The log lists each commit of git's output (records ended by 0x1E, fields apart at 0x1F) as git has it: its
     /// hash, parents, author, email, time, branches and tags (less HEAD's arrow) and subject, in git's order.</summary>
@@ -246,5 +293,29 @@ public sealed class GitLogTests : IDisposable
             }
             made++;
         }
+    }
+
+    /// <summary>A repository of this many commits on main, one after another, each adding a file: its history alone,
+    /// which is all the log reads, none of its files checked out (a sparse checkout of nothing).</summary>
+    private string Linear(int commits)
+    {
+        string root = PathNames.Canonical(TestFolders.Create("gitlog-"));
+        folders.Add(root);
+        TestGit.Run(root, "init", "-q", "-b", "main");
+        StringBuilder stream = new();
+        for (int commit = 0; commit < commits; commit++)
+        {
+            string subject = $"Commit {commit}";
+            string text = $"class C{commit}x0 {{ }}\n";
+            stream.Append(CultureInfo.InvariantCulture, $"commit refs/heads/main\ncommitter Passenger Tests <tests@passenger.invalid> {1_700_000_000 + (commit * 60)} +0000\n");
+            stream.Append(CultureInfo.InvariantCulture, $"data {Encoding.UTF8.GetByteCount(subject)}\n{subject}\n");
+            stream.Append(CultureInfo.InvariantCulture, $"M 644 inline src/Area0/C{commit}x0.cs\ndata {Encoding.UTF8.GetByteCount(text)}\n{text}\n");
+        }
+        ChildResult imported = Ui.AwaitPumped(Waiting.Apart(() => ChildProcesses.RunAsync(ChildProcesses.Command("git", ["fast-import", "--quiet"], root), stream.ToString(),
+            TimeSpan.FromMinutes(1).Scaled())), "git fast-import", TimeSpan.FromMinutes(1) + TestFolders.Spare);
+        Assert.True(imported.Succeeded, $"git fast-import made no repository of {commits} commits: {imported.Error}");
+        TestGit.Run(root, "sparse-checkout", "set", "--no-cone", "/none");
+        TestGit.Run(root, "reset", "-q", "--hard");
+        return root;
     }
 }

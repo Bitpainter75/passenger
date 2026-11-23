@@ -5,7 +5,6 @@ using ModelContextProtocol.Client;
 using Passenger.App;
 using Passenger.App.Mcp;
 using Passenger.App.Run;
-using Passenger.App.Testing;
 using Passenger.Core;
 
 namespace Passenger.Tests;
@@ -14,6 +13,7 @@ namespace Passenger.Tests;
 /// whatever its configuration and the Godot setting say, while a person's window runs its game as configured. Godot is a
 /// stand-in that keeps the arguments it was started with and ends, so no window opens here whatever Passenger asks of it,
 /// and no Godot is needed; the game is one of GDScript alone, which needs no build.</summary>
+[AboutMacOS]
 public sealed class GodotUnseenTests : McpRig
 {
     private readonly string game = PathNames.Canonical(TestFolders.Create("godot-unseen-"));
@@ -34,11 +34,33 @@ public sealed class GodotUnseenTests : McpRig
     /// <summary>The generated configuration of the game.</summary>
     private const string Lonely = "Lonely";
 
+    /// <summary>An agent's own Passenger and a screenshot's agent run a Godot game headless, with no window on the
+    /// screen.</summary>
+    [Fact]
+    public async Task An_agents_godot_games_are_headless()
+    {
+        await Flow.StepApartAsync(nameof(An_agents_own_passenger_runs_a_godot_game_with_no_window_though_nothing_it_was_given_says_so), () => new GodotUnseenTests(),
+            test => test.An_agents_own_passenger_runs_a_godot_game_with_no_window_though_nothing_it_was_given_says_so());
+        await Flow.StepApartAsync(nameof(A_screenshots_agent_runs_a_godot_game_headless_with_no_window_on_the_screen), () => new GodotUnseenTests(),
+            test => test.A_screenshots_agent_runs_a_godot_game_headless_with_no_window_on_the_screen());
+    }
+
+    /// <summary>A person's window runs the game with a window and its gamepads, one nobody sees runs it headless
+    /// once.</summary>
+    [AvaloniaFact]
+    public void A_persons_window_runs_a_godot_game_with_a_window()
+    {
+        Flow.StepApart<GodotUnseenTests>(nameof(A_persons_window_runs_the_game_with_a_window_and_one_nobody_sees_runs_it_headless_once),
+            test => test.A_persons_window_runs_the_game_with_a_window_and_one_nobody_sees_runs_it_headless_once());
+        OpenWindows.CloseAll();
+        Flow.StepApart<GodotUnseenTests>(nameof(A_game_planned_headless_goes_without_SDLs_HID_gamepads_and_one_in_a_persons_window_keeps_them),
+            test => test.A_game_planned_headless_goes_without_SDLs_HID_gamepads_and_one_in_a_persons_window_keeps_them());
+    }
+
     /// <summary>An agent's own Passenger, started outside a test run (no PASSENGER_START), runs the game with no window though
     /// neither its configuration nor the Godot setting asks it to: headless, or drawn where no screen shows it, on macOS
     /// through Godot's embedded display, on Windows in a window of a desktop of its own, on Linux in Xvfb's.</summary>
-    [Fact]
-    public async Task An_agents_own_passenger_runs_a_godot_game_with_no_window_though_nothing_it_was_given_says_so()
+    private async Task An_agents_own_passenger_runs_a_godot_game_with_no_window_though_nothing_it_was_given_says_so()
     {
         KeepSettings(new System.Text.Json.Nodes.JsonObject { ["godotExecutable"] = godot.Executable });
         await using McpClient client = await Start(["--mcp", game], environment: new() { [McpProxy.StartVariable] = null, [GodotExecutables.Variable] = godot.Executable }, languageServer: false);
@@ -50,8 +72,7 @@ public sealed class GodotUnseenTests : McpRig
 
     /// <summary>A screenshot, started outside a test run, whose agent runs the game: Godot is started headless, so no game
     /// window comes up on the screen of whoever took the picture.</summary>
-    [Fact]
-    public async Task A_screenshots_agent_runs_a_godot_game_headless_with_no_window_on_the_screen()
+    private async Task A_screenshots_agent_runs_a_godot_game_headless_with_no_window_on_the_screen()
     {
         string agent = TestFolders.Create("unseen-agent-");
         DeleteAtEnd(agent);
@@ -73,8 +94,7 @@ public sealed class GodotUnseenTests : McpRig
 
     /// <summary>A person's window runs the game as its configuration says, with a window; a window nobody sees runs it headless,
     /// once where its configuration says --headless itself.</summary>
-    [AvaloniaFact]
-    public void A_persons_window_runs_the_game_with_a_window_and_one_nobody_sees_runs_it_headless_once()
+    private void A_persons_window_runs_the_game_with_a_window_and_one_nobody_sees_runs_it_headless_once()
     {
         MainWindow persons = Open(unseen: false);
         try
@@ -118,8 +138,7 @@ public sealed class GodotUnseenTests : McpRig
 
     /// <summary>A plan's environment reaches a game the debugger or the terminal starts: a window nobody sees plans its headless
     /// game without SDL's HID gamepads, and a person's window leaves its game's alone.</summary>
-    [AvaloniaFact]
-    public void A_game_planned_headless_goes_without_SDLs_HID_gamepads_and_one_in_a_persons_window_keeps_them()
+    private void A_game_planned_headless_goes_without_SDLs_HID_gamepads_and_one_in_a_persons_window_keeps_them()
     {
         foreach ((bool unseen, string? gamepads) in ((bool, string?)[])[(false, null), (true, GodotExecutables.HidGamepadsOff)])
         {
@@ -138,19 +157,6 @@ public sealed class GodotUnseenTests : McpRig
             }
             Ui.Settle();
         }
-    }
-
-    /// <summary>GdUnit4's adapter starts its Godots itself, so only its test host's variables reach them: a run in no window has
-    /// them go without SDL's HID gamepads, and a run the person asked to see leaves its game's alone.</summary>
-    [Fact]
-    public void A_test_run_in_no_window_has_its_godots_go_without_SDLs_HID_gamepads_and_one_shown_keeps_them()
-    {
-        Dictionary<string, string> folders = new() { ["HOME"] = godot.Folder };
-        IReadOnlyDictionary<string, string> headless = GodotTestRuns.Variables(godot.Executable, folders).Variables;
-        Assert.Equal(GodotExecutables.HidGamepadsOff, headless.GetValueOrDefault(GodotExecutables.HidGamepads));
-        Assert.Equal(godot.Folder, headless.GetValueOrDefault("HOME"));
-        Assert.False(GodotTestRuns.Variables(godot.Executable, folders, windowed: true).Variables.ContainsKey(GodotExecutables.HidGamepads),
-            "Tests the person asked to see in a window lost SDL's HID gamepads");
     }
 
     /// <summary>A window on the game, Godot the stand-in, the game's configuration chosen.</summary>

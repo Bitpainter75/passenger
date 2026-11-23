@@ -29,6 +29,7 @@ public partial class MainWindow
         {
             settingsStore.LookAgain();
             SystemMotion.LookAgain();
+            SystemContrast.LookAgain();
         };
         Themes.SaidChanged += OnThemesSaid;
         Themes.FontsChanged += OnThemeFonts;
@@ -122,6 +123,7 @@ public partial class MainWindow
         {
             ApplyTo(group.Editor, next);
         }
+        Editors.ShowsNavigationBar = next.ShowNavigationBar;
         FollowViewSettings(visualSettings, next);
         FollowArrangement(next);
         FollowTitleBar(next);

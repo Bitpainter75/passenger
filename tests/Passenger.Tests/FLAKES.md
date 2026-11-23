@@ -28,6 +28,606 @@ the gate until it is rewritten, and a report-lane failure is an issue (`ci-repor
   - Outside the code: 7 (the runner, GitHub, xunit, Rosetta).
   - Unlabelled: 7.
 
+## 2026-11-22
+
+- `McpAspireStandInTests`' `An_agent_runs_an_AppHost_its_resources_commands_and_one_replicas_debugging_as_the_AppHost_…`,
+  CI 45088645427 (Windows report shard 1), at 4a288a12f: "An agent's run of the AppHost answered with a console that
+  is not the AppHost's, so it reads nothing of its start: {… "output":"…\\StandIn.AppHost.exe\n"}". **The test waited
+  wrong**: an agent's run of an AppHost answers once the AppHost's resources are up, and the stand-in AppHost wrote the
+  key that lets its stand-in resource service list them before it said it was up, so on the loaded runner the resources
+  came in the moment between the key and its first line (the first write to .NET's console, which sets it up) and the
+  run answered, rightly, with a console holding only the command that started it. With 1.5 s stalled there the old test
+  failed with CI's words on the Mac. The stand-in now says it is up before it writes its key; with the same stall after
+  the key it passes on the Mac, and McpAspireStandInTests passes on the Windows VM (7cd8a2763).
+- macOS's report shard 1, CI 45075856385 (an M1 of 7 GB and three processors), at 5ab484ccf: no test ran, the job
+  cancelled 7 minutes into its Build, "The operation was canceled.". **The workflow, starving its runner**: 5ab484ccf
+  booted the iOS simulator in the background as the solution built; the build, which prints a project every few
+  seconds, printed nothing from 22:11:51 until GitHub cancelled the job at 22:18:53, 11 minutes into its 95 as the run's
+  other jobs went on, and report shard 3's build beside its own boot printed nothing for 4.5 minutes and took 10.3
+  minutes, against 1.4 to 4.9 for both shards in the six runs before. The boot is taken out (b98279487): the first iOS
+  test boots the simulator as before, the device classes running last in their shard.
+- `MarkdownPreviewTests`' `A_readme_draws_beside_its_editor_and_follows_it`, CI 45075856385 (Linux report shard 1), at
+  5ab484ccf: "A heading typed made 2 blocks' controls and kept 44 of 45, not one and all". **The test waited wrong**: it
+  typed "## Typed heading" and two Enters and took it that no typing pause came between them, but where the runner took
+  more than the run's 100 ms between the heading's text and its first Enter, Avalonia's headless key ran the pause's
+  read first, which drew "## Typed heading## Getting started" as the one heading it then was, in place of Getting
+  started's block, as it should for a person who paused there. With 700 ms stalled there the old test failed with CI's
+  words on the Ubuntu VM and the Mac. The test now holds the preview's typing pause open across the keys
+  (`MarkdownPreview.HoldTypingOpen`, through `Debounce.HoldOpen`); with the same stall it passes on both (506b62d9e).
+- `McpIosSimulatorTests`' `An_agent_chooses_an_ios_heads_simulator_and_runs_it_in_a_call_each_…`, CI 45069301166
+  (macOS report shard 3), at f4262be65: "run failed: … The simulator iPhone 17 - iOS 27.2 did not start: Device boot
+  failed … (domain=com.apple.CoreSimulator.SimError, code=405): Unable to boot device in current state: Booted". **A
+  race in the IDE**: a start that found the simulator shut down booted it with `simctl bootstatus -b`, which looks at
+  the simulator before it asks for the boot and is refused where another boot of it lands between the two, though the
+  simulator is then up; a `simctl boot` fired on the Mac as the start finished reading its build met it in 1 of 2 runs
+  (the other's boot losing in the other). What booted iPhone 17 on the runner then was not found: the run keeps no IDE
+  log of the class before, MauiSimulatorTests, whose test host was ended at its 10-minute hang just before. A start
+  whose boot simctl refuses now waits for the boot under way where simctl lists the simulator booting or booted
+  (1c8e14f4c); the test passed on the Mac in 4 of 4 such runs, the other boot first in 2.
+- `AvaloniaSimulatorTests`' `An_avalonia_apps_ios_head_debugged_on_a_simulator_stops_at_a_breakpoint_in_its_shared_…`,
+  CI 45062369510 (macOS report shard 3, a 7 GB runner), at 5d54a9074: "The IDE was not quiet while waiting 547.7685194 s
+  for the build, the install and the debugged start on the simulator", the IDE's log timing the simulator's boot at 2.3
+  minutes and the question of which app the build made (`_ReadAppManifest`) at 3.5, begun 1.5 minutes after the boot
+  ended. **The IDE, slow on a loaded machine**: a start asked that question only once the simulator had booted, while
+  its system goes on starting, and MSBuild asked then takes many times as long: 1.2 to 5.5 s in the 20 s after a boot on
+  the Mac against 0.4 s, and on the runners 3.5 minutes here and 1.6 in CI 45033982948's MAUI Debug start, where their
+  other questions took 1 to 4 s. A start reads the app before any boot (e3dbbbeb8); AvaloniaSimulatorTests,
+  MauiSimulatorTests and McpIosSimulatorTests pass on the Mac.
+- `SelfDebuggingTests`' `Passenger_opened_on_its_repository_debugs_itself_on_a_state_of_its_own_stopping_stepping_and_evaluating_in_its_ui_code`,
+  CI 45055574992 (Linux report shard 1), at 9350b8538: "Building Passenger rewrote the checkout's restore of 30 projects
+  … Passenger.Analyzers.csproj.nuget.dgspec.json, line 25, read "https://api.nuget.org/v3/index.json": {}" and now reads
+  "/usr/share/dotnet/library-packs": {},"". **The repository's build**: the deal put the class in the shard that
+  installs the mobile workloads after restoring the checkout, and once MAUI's library packs stand beside the SDK, the
+  SDK names their folder among every restore's sources, so any build after it, the person's own as much as Passenger's,
+  restored all of Passenger.App's projects again; the Linux VM, given such a folder only once the checkout was built,
+  failed the same way. Passenger's projects name no such folder (`DisableImplicitLibraryPacksFolder`), which
+  nuget.config's source mapping already kept from giving any package (f51aef8cb); the test passed on the VM with and
+  without one.
+- `GodotTuneTests`' `A_tuned_value_reaches_the_game_and_is_kept_where_asked`, CI 45047787920 (Linux report shard 3), at
+  1ba3ef0e1, its second step, and CI 44984656678 (Windows gate shard 2), its first: "Waited 180 s for the colour picker
+  over Tint's swatch". **A race in the IDE**: the Live Visual Tree showed a Godot game's monitors' line only as the first
+  came, a second after the game connected, pushing the tree and the properties under it down 21 points, and a press
+  whose button moves before its release opens nothing; the runners reached the swatch's click about then. A probe
+  holding the click across the line's coming opened nothing on the Mac. The line holds its room from the game's start,
+  saying its monitors are coming (3528dd5c7); the test passed on the Mac and the Linux VM.
+- `GodotAddonTests`' `The_addon_plays_debugs_and_relays_godots_editor_games`, CI 45047787920 (macOS report shard 4, in
+  the gate's job 1), at 1ba3ef0e1, and CI 44989932645 (macOS gate shard 2): "The relayed game's profile lacks Godot's
+  frames or its samples: Snapshot of process 66198: 0 samples, … 37 frames, 0 samples". **The test**: its game ran a few
+  microseconds of C# a frame at some 3,000 frames a second, so the third of a second recorded held 12 samples on the
+  Mac, two of them the game's own and the rest the profiling session's start, against a runner's sampler catching
+  several times fewer; the game spins in a loop that calls nothing each frame (102 samples of it on the Mac) and the
+  test holds the profile to that C# (296358317); it passed on the Mac and the Linux VM.
+- `HomeDotnetTests`' `The_dotnet_a_global_json_asks_for_in_the_home_folder_or_its_paths_is_the_one_a_folder_uses`, CI
+  45041101576 (macOS report shard 3, on the image with Xcode 27, as its deal began just after the simulator classes),
+  at 27115546e: "find_symbol failed: ... Passenger waited 4 minutes for the C# language server to restore Lib, which has
+  not come", the server's log saying "Could not find dotnet executable from PATH". **A race in the IDE**: an agent's
+  Passenger on a runtime apart from any dotnet, given launchd's bare PATH, started its language server ahead of its
+  window (`HeadStart`) before the window put the installation it found first on Passenger's PATH, and Roslyn's server
+  finds the dotnet it restores with on its PATH alone, never DOTNET_HOST_PATH, so its restore could not start and never
+  said it ended; the Mac lost that race in 2 of 2 starts. The server is given the folder's dotnet first on its PATH as
+  it starts (`ChildProcesses.FindingDotnet`) (cf7612a2d).
+- `ProjectWindowsTests`' `Solutions_open_in_windows_of_their_own_and_come_back_each_on_its_own_layout`, CI 45041101576
+  (macOS report shard 3), at 27115546e: "A start after the quit reopened .../beta-fd3f88fc and .../alpha-9cff842d, not
+  both solutions", at the second start after the system's quit. **A race in the IDE**: the start before reopened alpha
+  in its window and beta in a new one at once, and each was kept among the recent ones as opened when its folder's kept
+  state, read off the window's thread, landed, so beta, landing first, was kept as the older and the next start reopened
+  it first. An open is now kept as of when it was asked for, in the order asked (ab2800a77); not met on the Mac.
+- `GodotTests`' `A_debugged_and_profiled_game_ends_and_shows_its_tree`, CI 45041101576 (macOS report shard 3, alone), at
+  27115546e: "The call tree beside the GDScript names no time of the C# method the GDScript called". **The test**: the
+  C# method the GDScript calls spun a tenth of the game's own spin, 47 samples of it on the Mac against the runner's
+  sampler catching several times fewer, so a run there could catch none; it spins as long as the game's (806 samples on
+  the Mac), and the message names the C# functions sampled (6f4ab91c0).
+- `LongFileAssistTests`' `A_key_in_a_file_of_twenty_thousand_lines_costs_what_it_changed_…`, CI 45033982948 (Windows
+  report shard 3) and 44984656678 (Windows gate shard 1): "A ';' allocated 144,008 bytes on the UI thread in a file of
+  20,000 lines, against 76,896 in a short one: it read the file there" (156,424 against 75,272), and in 1 of 2 runs on
+  the Mac. **The test**: it counted from the key's change to the end of Avalonia's headless `KeyTextInput`, which after
+  the key runs the work come due and draws until nothing more is pending, two to four frames of the editor and, in most
+  rounds, the language server's layout of the statement landing, about 100 KB more in a round where the layout landed
+  within it, in the short file as in the long, so the least of three rounds differed by when the server answered; the
+  key itself costs 22 KB in either. It now counts the key to the end of its routed event and what the input runs after
+  it as frames, each its share (5407eeb2b).
+- `MauiSimulatorTests`' `A_maui_apps_ios_head_debugged_on_a_simulator_stops_steps_evaluates_and_takes_…`, CI
+  45033982948 (macOS report shard 1): "The IDE was not quiet within 180 s" at Apply Hot Reload Changes in the stopped
+  app, the language server's `EmitHotReload` unanswered for 2.6 minutes and the server then ended as not responding and
+  started again. **Outside the code**: the runner starved. The server answered a folding request 55 s late and its
+  check 100 s late, and the IDE's own timers ran as late: the check's 20 s, from 15:21:05, was judged run out only at
+  15:23:27, and the long wait's words were written a minute after they were measured; the run's other macOS jobs' free
+  memory fell to 0.7 to 2.0 GB of 7 (this job's figure missing, as it ran out its time) with a simulator booted here. On
+  the Mac the same emit takes about a second, the test 1:10, and the test's own programs 1 to 2 GB. The jobs now end the
+  compiler server and MSBuild nodes their build leaves before the tests begin, which held them into the tests (713c6d8ad).
+- `AvaloniaSimulatorTests`' `An_avalonia_apps_ios_head_on_a_simulator_shows_its_tree_takes_a_xaml_edit_and_…`, CI
+  45033982948 (macOS report shard 1): "Waited 0 s for the saved XAML's TextBlock in the app's tree in place of its
+  TextBox", the app started on the simulator 9 minutes 18 s into the test, leaving the edit's wait none of the test's
+  9.5 minutes. **The test, at its limit on a slow runner**: it took 6:50 to 8:02 of those 9.5 minutes on CI's runner in
+  the runs before (1:10 to 1:28 on the Mac), and this job ran about a quarter slower, as starved as the MAUI step above
+  (`MauiSimulatorTests`' run 6:50 against 4:41 to 5:51 before). Which step took the time was not said; a wait of such a
+  test that gives up now says the test's time was spent and ends with the IDE's log, which times each program the steps
+  ran (a6ed48d5b), and the jobs end their build's servers before the tests (713c6d8ad); the flow, a Run and a Debug
+  start of minutes each, is now two tests, each with its own 9.5 minutes (c174791c8).
+- `GodotEditorCompletionTests`' `An_open_godot_editors_unsaved_names_complete_until_it_ends` (the gate), CI 45027932334
+  (Linux gate shard 2), at 8f0cca610, passing on its retry: "Completion never offered editor_dash, which only Godot's
+  editor holds", a client of the test's own answered with it at once. **A race in the IDE**: Godot's editor at times
+  takes a request asked in its first moments and answers neither it nor any later one on that connection, a new one
+  answered at once (2 of 55 probe starts of Godot 4.7.2 on the Mac), and Passenger's link kept that connection while the
+  editor's meta file named it, matching each later answer to the request before it, so every ask waited out its 5 s for
+  two minutes; met in 2 of 13 runs on the Mac. A request given up on now ends its connection, and the next ask connects
+  again (ee4695964).
+- `NewServiceSetupTests`' `New_Project_sets_a_service_up_to_run_in_its_container_or_with_Compose_the_persons_edits_out_of_its_Undo`,
+  CI 45027932334 (Windows report shard 3), at 8f0cca610: "The Explorer shows no Solution Shop: [svc-7088fa0e, Tool,
+  Shop.slnx]" after New Project's Undo, which had read the solution without Api. **A race in the IDE**: a read of the
+  folder during the Undo found no solution, so the Explorer showed the folder's files in its place, and kept them once
+  the next read found it, showing again whatever view it last showed rather than the view the folder keeps, as it did
+  for good after any solution that did not read. It now shows the view asked for once the solution reads (54a22dcb0).
+  What made that read find none on Windows was not caught: the run keeps no IDE log, and the Mac did not meet it.
+- `BindingValuesTests`' `A_debugged_apps_bindings_show_their_values_and_a_window_shown_is_collected_once_it_closes`,
+  CI 45022036262 (Linux report shard 3), after 028f29fa3: "TimeoutException: The operation has timed out. at the
+  collection of a task whose fault nothing observed", as below. **A race in the IDE**: of the timed waits a Godot game's
+  run takes, the wait for its loop (`GodotGame.LoopedAsync`, before Passenger's helper comes in) was the one the game's
+  end left to run out: a game ended under it, stopped in the debugger or before its first monitors, left it waiting an
+  answer's whole limit (20 s on CI) for a beat no game would send. Begun on `GodotCopiesTests`' window as its copies
+  ended, it ran out after that test's window thread had stopped, unheard until collected, 18 to 38 s after that test in
+  each of the five failures; probes that collected for 100 s after the class on the Mac and the Linux VM never caught
+  one, and a probe ending a game under the wait had it end 10 s later. It now ends as the game does (f7e5b2b6e, #2104).
+- `GodotPinsTests`' `Errors_stay_pinned_at_their_lines_with_their_counts_after_Stop_the_console_folds_them_and_an_edit_takes_a_pin_off`,
+  CI 45022036262 (Windows report shard 3), after 45b0b0bd6: "The IDE was not quiet while waiting 450 s for the game's
+  build and start", the console's wait on a line still coming and Problems' Godot tab's gathering each begun within the
+  last 160 ms. **The test**: its headless game ran uncapped, thousands of frames a second on that runner, each raising an
+  error the console, the pins and Problems took in, so the window was never quiet for the wait to look again; it now
+  runs at 20 frames a second, as a game drawn to a screen runs about (76f7fccf9, #2103).
+- `FileColoursTests`' `Colours_follow_typing_and_a_line_too_long_or_slow_to_colour_never_holds_the_window`, CI
+  45022036262 (Windows report shard 1), its step of a comment line run out of the grammar's time: "The line after a
+  comment the grammar ran out of time on is coloured Text". **The test**: with a millisecond for every line, the line
+  after the comment, read for the first time with its patterns yet to parse, ran out of it twice too and kept the colours
+  found before it stopped; the lines after the comment are now read once first with a line's whole time (8a4c4c577, #679).
+- `XamlTests`' `Xaml_gets_its_help_as_projects_and_packages_arrive_and_change`, CI 45022036262 (Windows report shard
+  1), its step of a project taking Avalonia: "dotnet restore … exited with code 1: … error : Cannot create a file when
+  that file already exists". **The test**: its own restore ran beside the language server's, which restored the project
+  itself as it loaded it with the package, and on Windows the two wrote the project's obj files at once; the steps that
+  restore while their XAML is open ask nothing of C# and now open without the server (eb4be0e91, #298).
+- `MigrationsTests`' `Ef_cores_projects_and_packages_are_those_dotnet_ef_takes`, CI 45022036262 (Windows report shard
+  1), its step of a provider behind EF Core: "Button 'Bring … and EF Core into Step' is not laid out in its window". **A
+  race in the IDE**, the one `Migrations_run_against_the_database_…` met in CI 45016390450 below: that run was of
+  f67e06a66, before the Migrations window kept its rows while its gaps stay as they were; the flow passed on the Windows
+  VM since (70374013e, #689).
+- `BuildRunTests`' `With_hot_reload_edits_reach_the_running_program_a_signature_change_restarts_it_and_it_ends_with_the_window`,
+  CI 45016390450 (Windows gate shard 1): "Waited 150 s for dotnet watch to start the program again and watch it", the Run
+  window showing dotnet watch's restart, its build, "Waiting for changes" and the program run again for the wait's 150 s.
+  **Cause not found**: the program run again writes its process id first, and the wait never read an id unlike the one
+  of the program before; the same step passed in that run's flow of BuildRunTests and seven times on the Windows VM, and
+  Windows gave no program the id of one just ended in 80 starts there. The test now tells each start again by its id file
+  written again, not by an id unlike the last, and a wait that gives up says what the file holds, when it was written and
+  whether the program before still runs (d0880af08, #701).
+- `McpIosSimulatorTests`' `An_ios_heads_app_an_agents_passenger_ran_on_a_simulator_it_booted_ends_…`, CI 45016390450
+  (macOS report shard 1): "The settings_set call had no answer in 120 s", its Passenger's log holding only its first line
+  (the folder opened ahead of its window) and nothing on its standard error. **Cause not found**: that Passenger had
+  ended before the call gave up (the failure, which samples a Passenger's threads while it runs, sampled none) on a
+  runner whose free memory fell to 0.9 GB of 7 in that job; a call a Passenger gone never answers now says it had ended,
+  with its exit code and the signal that ended it (69550d61f, #1792).
+- `AspireConsoleBytesTests`' `An_AppHosts_console_and_its_containers_merged_log_cost_a_small_constant_for_each_line_however_many_come`,
+  CI 45016390450 (macOS report shard 2): "left programs' runtime files … dotnet-diagnostic-47119-1795347663-socket", as
+  `McpGDScriptFixTests`' below. **Another program's doing**: by its start the program began at 11:41:03, while
+  `AspirePackageAppHostTests`' starter ran through the window just before it in the run's process of classes alone.
+  Sampled on the Mac, Aspire's dashboard, which the bundle's orchestrator starts and ends as the AppHost goes, makes a
+  diagnostic socket and no debugger pipes, the one file left in both runs, and killed leaves it for the next test's
+  check. The starter test now reads the files of the bundle's programs while they run and takes them once those have
+  gone, as `AspireExternalDataTests` does (4f269c3e1, #2092).
+- `StoredTracesTests`' `An_exceptions_stack_trace_is_read_from_what_it_stores_as_its_getter_writes_it`, CI 45016390450
+  (Windows report shard 3): "$exception.StackTrace was answered: error: The evaluation took longer than 3 s and could not
+  be stopped, as it runs outside managed code". **The test's limit**, as `ImplementedTests`' and `InterpreterTests`'
+  before it: the program's first StackTrace getter loaded System.Diagnostics.StackTrace, System.Reflection.Metadata and
+  System.Collections.Immutable (1.5 to 2.2 s apart in the engine's log) and was still reading the program's PDB 6.5 s in,
+  against the run's 3 s, a developer machine's time; both sessions that compare getters now take
+  `DebugSession.ScaledEvaluations` (70a743dd5, #1123).
+- `MigrationsTests`' `Migrations_run_against_the_database_and_their_tools_are_fixed_in_place`, CI 45016390450 (Windows
+  report shard 1), its step of typing while a fix adds a package: "Button 'Add Microsoft.EntityFrameworkCore.Design
+  10.0.15' is not laid out in its window". **A race in the IDE**: the Migrations window made its rows of gaps and their
+  buttons anew at every change of its state, and one (its environments read, its projects evaluated) ran with the queued
+  work the click's draw ran, after the test found the button and before it pressed it, so the button pressed was in no
+  window, as a person's press met by such a change does nothing. The rows are made again only when a gap's words, weight
+  or fixes change (70374013e, #689).
+- `LocalHistoryTests`' `Each_change_is_kept_under_the_name_of_what_made_it_and_what_it_wrote_over_kept_too`, CI
+  45016390450 (Windows report shard 1), its step of a conflict resolved each way: "Waited 225 s for Theirs.txt's
+  resolution kept, its history listing []". **The IDE**: Local History kept a change to a file it had not seen under the
+  activity's name only where the file read as made since the folder opened, by its creation time, and NTFS gives a file
+  deleted and made again under its name within 15 s the old one's creation time (as on the Windows VM), so git's writing
+  Theirs.txt anew for Accept Theirs, a file never opened, was a first sight with no row; on macOS and Linux it was kept
+  as the file made, with nothing of what it held before. Accept Yours, Accept Theirs and Rollback now have Local History
+  read their files before git writes them, so each is a change from the file as it stood (58b384386, #2062).
+- `BindingValuesTests`' `A_debugged_apps_bindings_show_their_values_and_a_window_shown_is_collected_once_it_closes`,
+  CI 45009557197 (Linux report shard 3), as `GDScriptTypesTests` (CI 44995132904, macOS gate), `AvaloniaListsTests` (CI
+  44989932645) and `TestingPlatformDebuggingTests` (CI 44970786971, both Linux report shard 3): "The IDE caught 1 error
+  during the test: TimeoutException: The operation has timed out." with no stack. **A race in the IDE, its place not yet
+  named**: an exception never thrown, a timed wait's, reached `IdeErrors` and failed whichever window test it landed in,
+  each time 10 to 40 s after `GodotCopiesTests` in the same process; it said nothing of where it came from, and neither
+  the Mac nor the probe of that class held a minute after it reproduced it. Such an error now ends at the place its
+  task was observed, or says it was found as its task was collected, and the three waits that handed `WaitAsync`'s own
+  task to `Ended`, leaving its timeout for the finalizer (`LiveSession`'s stop, `SessionStarts`' check of an unanswered
+  port, a NuGet credential provider's end), wait through `UnawaitedWork.EndedWithin`, which IdeErrorsTests' IL rule now
+  holds (028f29fa3, #2104).
+- `McpGDScriptFixTests`' `An_agent_lists_and_applies_a_gdscripts_fixes_as_show_context_actions_offers_them_the_persons_undo_taking_each_back`,
+  CI 45009557197 (Linux report shard 2): "left programs' runtime files … dotnet-diagnostic-82563-188521-socket".
+  **Another program's doing**: by its start (1,885 s after boot, against `McpAspireTests`' own files later in that job)
+  the program began between 10:22:28 and 10:22:55, while `AspirePackageAppHostTests`' starter ran through the window just
+  before it in the run's one process of classes alone, and it ended before this test's check, which comes before the
+  test's own Passenger is ended; the class passed in every other run, none of which ran it after that one. The
+  orchestrator ends the starter's services as their AppHost goes, after that test's own check, leaving their sockets for
+  the next test's: #2095's batch 6 takes the runtime files DCP leaves (#2092).
+- `UnitTestsDebuggingTests`' `Debug_tests_stops_at_a_breakpoint_…` and `Stop_unit_tests_ends_a_debugged_run_…`, CI
+  44968934038 to 44995132904 (macOS and Linux), `DebuggerTests`'
+  `Debugged_in_the_terminal_a_program_stops_on_Mains_first_line_…`, CI 44968934038, 44970786971 and 44984656678 (macOS
+  gate, Linux report), and `HotReloadTests`' `An_edit_applied_while_paused_runs_from_the_next_call_…`, CI 44989932645
+  (macOS report shard 2): "left programs' runtime files … dotnet-diagnostic-…-socket". **The IDE**: Stop of a program
+  the debugger attached to (a test host VSTest started, a program in the terminal, an app attached to quietly for Hot
+  Reload) ends it through ICorDebug's Terminate, a kill, and the debugger took the runtime files only of a program it had
+  launched. It takes them of any program it ends but one on a device (be547a6a4, #2097). The tests, and #2095's flows of
+  them since (UnitTestsDebuggingTests', DebuggerTests' session-end and console flows, MemorySnapshotsTests' second flow,
+  which left a `clr-debug-pipe-…-out` on the Linux VM), pass on the Mac and the Linux VM; HotReloadTests' run is taken
+  for the same, its test not rerun.
+- `MauiCatalystTests`' `A_maui_apps_mac_catalyst_head_debugged_and_run_at_once_ends_each_instance_alone_with_its_own_start`,
+  CI 44984656678 to 45000646248 (macOS report shard 1), since 72ce5fd4f the Catalyst flow's last step: "Process … or …
+  does not run …/MauiApp1". **The test was written before what it reads changed**: it debugged the app and then ran the
+  same configuration, and since 67237a544 Run of a configuration being debugged ends the debugged program first, one
+  copy of a configuration running; a probe on the Mac found the debugged instance gone as Run's opened. Run now opens its
+  instance from a twin configuration (731e68032, #2103).
+- `AndroidTargetChoiceTests`' `After_a_run_on_an_android_target_this_machines_head_and_the_simulators_are_still_offered`,
+  CI 44984656678 to 45000646248 (Linux report shard 1), as in CI 44970786971 below: "Only Passenger Relisted is listed,
+  so a run's listing has nothing else to keep". **The test held a Mac's or Windows' targets**: on Linux its stand-in app
+  had no head but Android's. It now has, on Linux, an Avalonia desktop head, which Choose Where It Runs offers as
+  "Desktop (this machine)" and a run on Android must leave listed, in place of 156281110's skip there; with that head
+  given on the Mac too it passed there, the desktop head listed before and after the run (ced22b5eb, #2103).
+- `SoundCuesTests`' `A_command_failing_in_a_shell_plays_its_cue_once_and_Read_as_Text_reads_the_last_command_by_its_marks(kind: "pwsh")`,
+  CI 44970786971 to 44995132904 (Linux), and `Debugging.SyntheticVariablesTests`'
+  `A_step_out_lists_what_the_method_stepped_out_of_returned`, CI 44968934038 (Linux gate shard 2), a class run beside the
+  pwsh case, which passed 10 ms before: "left programs' runtime files … clr-debug-pipe-…, dotnet-diagnostic-…-socket".
+  **The IDE**: a terminal kills its shell as it closes, and PowerShell, a .NET program, killed takes none of its runtime
+  files away. The terminal now takes them as it ends its shell (f89230392, #2103); neither the Mac nor the Linux VM has
+  PowerShell, so the case is left to CI.
+- `DebuggerTests`' `A_debugger_killed_while_its_program_is_paused_takes_the_program_with_it`, CI 44989932645 and
+  44995132904 (Linux report shard 2, macOS report shard 3): "left programs' runtime files … dotnet-diagnostic-…-socket,
+  clr-debug-pipe-…-in, -out". **A race in the IDE**: the files were the debug adapter's, which the test kills a moment
+  after the program stops, as a crash would; Lifeline followed a child group's runtime files only as it looked through
+  the groups once a second, so an adapter killed before that look was never followed and its files stayed. A probe of
+  Lifeline's looks found the adapter unfollowed in each failing run on the Mac (about one in three). A group's leader is
+  now followed as it is adopted; the test passed 5 of 5 on the Mac and on the Linux VM (19195764b, #2097).
+- `GodotPinsTests`' `Errors_stay_pinned_at_their_lines_with_their_counts_after_Stop_the_console_folds_them_and_an_edit_takes_a_pin_off`,
+  CI 44970786971 to 44995132904 (Windows gate shard 2): "Expected: 5704 Actual: 1000", 7752 in CI 44989932645. **The
+  test read wrong**: the headless game raises an error a frame, and on the Windows runner it ran thousands of frames
+  before Stop took, where a pin keeps the newest `GodotErrorPins.Kept` (1,000) occurrences, the earlier ones counted
+  alone; the test held the badge's list to the pin's whole count. It holds it to what a pin keeps (45b0b0bd6, #2103).
+- `Debugging.ProtocolTests`' `A_message_too_large_to_read_ends_the_conversation_saying_so` (its three cases) and
+  `ContainersTests`' `A_memory_snapshot_a_containers_tools_send_that_does_not_hold_together_is_refused_saying_so`, CI
+  44968934038 to 44995132904 (every system's gate; Linux report shards 2 and 3): "The adapter's log does not say why the
+  conversation ended: … over the 268,435,456 bytes the connection reads of one" and "Not found: "more than the 1073741824
+  the IDE reads of one"". **The tests were written before what they read**: since #1734 the DAP connection's and the
+  container tools' limits are said through `Numbers.Said`, and the tests still looked for plain digits. They read them
+  through it too: ProtocolTests in bf39357c1, with its flows, and ContainersTests in b14fa80f7 (#2097).
+- `AndroidTargetChoiceTests`' `After_a_run_on_an_android_target_this_machines_head_and_the_simulators_are_still_offered`,
+  CI 45000646248 (Linux, report shard 1): "Only Passenger Relisted is listed, so a run's listing has nothing else to
+  keep". **The test held a Mac's or Windows' targets**, as on 2026-11-21: on Linux, which runs no head of its own and no
+  simulator, Android's stand-in is the only target, and the test now skips there saying so (156281110, #2095).
+- `AspireStandInTests`' `Debug_of_one_replica_says_the_next_run_debugs_every_replica_which_it_does`, CI 44989932645
+  (macOS and Linux, report shard 3), and `McpAspireStandInTests`' `An_agents_debug_start_of_one_replica_debugs_that_replicas_own_program`
+  on the Mac: "left programs' runtime files … dotnet-diagnostic-…-socket". **The IDE**: the debugger, ending a program it
+  had attached to (a replica held at its start), took no runtime files, only those of a program it launched, so each Stop
+  of such a session left the program's diagnostic socket; the debugger's fix for #2097 holds it, taking the files of any
+  program it ends (be547a6a4, #2092).
+- `McpAspireTests`' `An_AppHosts_session_container_a_crashed_Passenger_left_is_removed_as_the_next_one_starts_and_a_persistent_one_stays`,
+  CI 44989932645 (Linux, report shard 2): "left programs' runtime files … clr-debug-pipe-…". **The test's own doing**: the
+  crash it makes kills Passenger, its watchdog and the orchestrator alone, which leaves their runtimes' files with nobody
+  to take them; the test now reads them before the kill and takes them once gone (47f44728e, #2103).
+- `AspireExternalDataTests`' `An_external_AppHost_is_found_and_its_environment_values_are_masked_in_the_window`, CI
+  44989932645 (macOS and Linux, report shard 2): "left programs' runtime files … clr-debug-pipe-…". **Another program's
+  doing**: the external AppHost's orchestrator ends the services it started as the AppHost goes, leaving their debugger
+  pipes; the test reads each program's files while it runs and takes them once it has gone (47f44728e, #2103).
+
+## 2026-11-21
+
+- `McpAspireStandInTests`' `An_agent_reads_a_services_request_duration_through_telemetry_metrics`, CI 44962354408
+  (Windows, report shard 1, at 85366e457): "The agent was not told the web service's request duration", its last reading
+  hearing web idle with no ASP.NET Core instrument, and "web answered 0 requests" though web's console showed its one
+  request answered, in 5,184 ms beside Kestrel's word that its thread pool was starved. **The test waited wrong**: its
+  loop of requests ended for good at the first one slower than its client's 5 s, whose timeout, a cancellation, passed a
+  catch that took only the test's own stop, so web was sent nothing more while the agent read it, and a reading hears
+  only requests ended while it listens. It sends the next request past a slow one, and its stand-in for DCP reads the
+  notifications it subscribes to, which unread filled their socket once web logged every request, the IDE then ending
+  the AppHost's sessions (web killed 33.5 s in on the Windows VM) (fd7df2b22). The run before's "took no session in
+  10 s (… answered another request at once)" (CI 44953680429, below) is now asked once more by the IDE wherever the port
+  answers at once after, saying so (3bf5103cf, #2094).
+- `MauiAndroidTests`' `A_maui_apps_android_head_debugged_on_an_emulator_shows_its_main_pages_label_and_button_in_the_live_tree`,
+  CI 44970786971 (Linux, report shard 1, the shard #2095 sets up Android's emulator for): it skipped, "No Android device
+  is connected and no emulator is made", and failed for "left programs' runtime files … dotnet-diagnostic-…-socket".
+  **The CI set-up's emulator never booted**: avdmanager wrote its AVD where the emulator never looked ("Unknown AVD name
+  [passenger] … no file passenger.ini in $HOME/.android/avd"), so every Android device test there skipped; the AVD is now
+  where ANDROID_AVD_HOME names, which avdmanager, the emulator and the tests all read (fdd5630ba, #2095). The socket a
+  program left as the test skipped is the test's or the IDE's own, left to Mobile's batch.
+- `AndroidTargetChoiceTests`' `After_a_run_on_an_android_target_this_machines_head_and_the_simulators_are_still_offered`,
+  CI 44970786971 (Linux, report shard 1): "Only Passenger Relisted is listed, so a run's listing has nothing else to
+  keep". **The test holds a Mac's or Windows' targets**: a run on its Android stand-in is to leave the other targets
+  listed, and on Linux there is no other (no head of this machine's, no simulator), first seen as #2095 gave CI the
+  Android workload. Left to Mobile's batch.
+- `GodotAddonTests`' `A_scene_nodes_position_colour_and_exported_enum_edited_in_its_outline_each_write_its_line_alone_one_step_of_Undo_each`,
+  CI 44970786971 (Windows, report shard 4): "Expected: typeof(Avalonia.Controls.ComboBox) Actual:
+  typeof(Passenger.App.ToolDropDown)". **The test was written before what it reads**: 37bd7bca4 made a scene node's enum
+  a ToolDropDown while no Godot test ran on CI, the first run with Godot (#2095). The flow now reads it as one, and runs
+  whole with Godot 4.7.2 on the Mac and Linux (#2095).
+- `ContainersTests`' `A_memory_snapshot_a_containers_tools_send_that_does_not_hold_together_is_refused_saying_so`, CI
+  44970786971 (Linux, report shard 2): "Not found: "more than the 1073741824 the IDE reads of one"". **The test was
+  written before what it reads**: since #2091 the container tools' limit is said through `Numbers.Said`
+  ("1,073,741,824"), and the test still looks for plain digits. Left to #2091.
+- `McpAspireStandInTests`' `An_agent_reads_a_services_request_duration_through_telemetry_metrics`, CI 44953680429
+  (Windows, report shard 1, three test processes at once): "web: Its metrics could not be read: its runtime took no
+  session in 10 s (process 11428 runs, and its diagnostic port … answered another request at once)", web having answered
+  no request yet. **Most likely the test run's limit, shorter than the IDE's own**: since #2028 the run held every live
+  session's start to 4 s, 10 s at the Windows runner's scale, where the IDE gives 10 s, 25 s there, and the port's next
+  request, answered at once once the start was given up, shows the runtime still turning its metrics on as web started,
+  not held up for good (a held-up port answers nothing, as in the .NET 10 hang below). Every real session in the run has
+  the IDE's limit again; only a test standing in for a silent runtime shortens it, in its own process while its
+  `SilentPort` stands (`SessionStarts.HoldLimit`), so an agent's Passenger a class beside starts keeps the IDE's
+  (85366e457, #2091). Passes on the Windows VM with the silent-port tests of MetricsPaneTests and LiveRequestsTests.
+- `FindInFilesTests`' `Replace_all_past_the_lists_thousand_matches_replaces_every_match_in_the_scope_and_says_how_many`
+  and `…_is_stopped_by_Stop_while_it_finds_them_replacing_nothing`, `BindingErrorsTests`'
+  `An_app_failing_thousands_of_bindings_…` and `GitFileFormsBytesTests`' `A_changed_large_binary_file_costs_its_probe_…`,
+  CI 44953680429 (every system): "Expected: "Replaced 1100 matches in 110 files" Actual: "Replaced 1,100 matches in 110
+  files"", a Problems row of "N more binding failures" not found, and "Waited 180 s for the Commit window's Show Diff …
+  where the status says "… asset.bin is 104,858,624 bytes now …"". **The tests were written before what they read**:
+  #1734 had every count and size said to a person go through `Numbers`, a comma between its thousands, and these still
+  wrote theirs as plain digits. They write each through `Numbers.Said` (ec38b0cbf); the binding failures' other counts,
+  still plain beside the row's ("its first 1000 failed bindings"), go through it too (70793e126, #2091).
+- `KeymapChoiceTests`' `A_floating_terminal_keeps_the_shells_keys_and_lets_the_IDEs_through`, CI 44953680429 (Windows
+  report shard 3): "Waited 225 s for the shell's prompt a row lower, the empty line Ctrl+J entered read". **#2080's fix
+  missed a case**, the shell marks having changed no prompt it waits for: the fix (76fe95e93) waited after Ctrl+J for the
+  prompt sh draws a row lower once Ctrl+J ends its empty line, and cmd.exe, the test's shell on Windows, ends no line at
+  Ctrl+J. A probe on the Windows VM found cmd's screen unchanged 3 s after it, the cursor still on its prompt, and
+  `echo floated` typed then ran as it did before the fix; the fixed test failed there as on CI. The wait now holds off
+  Windows alone, and the test passed on the Windows VM, the Mac and the Linux VM (8b3598bf4).
+- `ReadAsTextTests`' `The_terminals_last_command_and_its_output_open_as_text_and_Escape_gives_the_terminal_its_keys_back`,
+  CI 44953680429 (macOS report shard 1): "ArgumentOutOfRangeException : index ('-1') must be a non-negative value",
+  thrown by `TerminalScreen.LineAt` inside the test's wait. **The test read wrong**, not #1849's marks, which /bin/sh is
+  given none of: its wait for the prompt under `first` read the line above the cursor whenever the cursor stood past a
+  line's start, and while the cursor still stood on the first line, on the prompt and the command typed there before sh
+  had echoed Enter, there is no line above, so it asked for line -1. It reads the line above only once there is one
+  (3a5203ff7).
+- `SoundCuesTests`' `A_command_failing_in_a_shell_plays_its_cue_once_and_Read_as_Text_reads_the_last_command_by_its_marks(kind: "pwsh")`,
+  CI 44948517766 (macOS report shard 4): "Waited 180 s for the shell's next prompt after 'echo first'", the screen
+  showing `PS …> echo first` and `echo first` again on the row below. **The test waited wrong**: it typed at pwsh's
+  first marked prompt, which PowerShell's host draws before its line editor takes the terminal, and on macOS PSReadLine's
+  first line first runs `/usr/bin/defaults` to ask whether VoiceOver is on, which .NET runs with the terminal back in
+  its line modes; the command typed meanwhile was echoed by the terminal and its Enter reached PSReadLine as Ctrl+J,
+  which leaves the line unrun. With the runner's pwsh 7.6.10, a probe typing at the first marked prompt lost its command
+  in 2 of 6 runs, and none of 6 once it waited for the line editor to ask where its line begins (a cursor position
+  report at the prompt's end), which the test now waits for at every pwsh prompt on macOS and Linux (1d17e3d7e).
+- `TerminalTests`' `Programs_override_the_configured_cursor_and_reset_restores_it(reset: "\033[0 q")`, CI 44948517766
+  (macOS report shard 3): "Assert.NotEqual() Failure: Values are equal … #ff0f131c". **The test waited wrong**, not
+  #1849's marks, which /bin/sh is given none of: it read the drawn cursor as soon as the cursor stood at the start of
+  the line under the command, where the shell's echo of Enter puts it before sh runs the printf asking for a block, so
+  the configured bar was still drawn there. It did not come again in 4 runs of the 3 cases beside a busy loop a core,
+  but a probe whose program slept a second before its printf failed every case with that wait; the test now waits for
+  the block's request to reach the screen, and the probe passed every case (1ad1c34d1).
+- `ColourSwatchesTests`' `The_colour_picker_in_an_editor_at_the_windows_smallest_width_shows_whole_under_its_line_and_chooses_there`,
+  CI 44948517766 and 44953680429 (report lane, every system): "The picker at 341, 170, 251, 304 covers the swatch's
+  line, whose foot is at 173, where it was to hang under it". **A regression in the IDE**: #1969's navigation bar takes
+  32 of the editor's height, which left 301 under the palette's third line in a window at its smallest, short of the
+  306 the picker narrowed to that editor needs with its gap, and a popup fitting neither under nor over its line was
+  only moved in to show whole, so the picker covered the foot of the line whose colour it edits. It now gives way in
+  height, its square of shades lowered to the room on the side with more, and the test checks the window as before
+  (23f5176be, #1969).
+- `KeymapChoiceTests`' `A_floating_terminal_keeps_the_shells_keys_and_lets_the_IDEs_through`, the Linux VM in a run of
+  308 tests landing #2034 (#2080): "Waited 180 s for what was typed run in the floating terminal". **The test waited
+  wrong**: it typed `echo floated` as soon as its Ctrl+J had gone to the shell, and Linux's /bin/sh (dash) edits no line
+  of its own, so the terminal echoes what is typed as it comes; where dash had not yet read the empty line and drawn its
+  next prompt, the command was echoed ahead of that prompt and its output followed the prompt ("$ floated"), on no line
+  beginning "floated", however long it waited. A probe typing at once after Ctrl+J showed that screen in 3 of 6 runs
+  beside a busy loop a core, where the same probe waiting for the prompt passed 6 of 6. The test now types only once the
+  prompt has come a row lower, and the class passed 10 of 10 runs beside a busy loop a core (76fe95e93).
+- `AspireStandInTests`' `An_edit_made_after_the_AppHosts_build_as_its_service_starts_is_applied_once_the_service_runs`,
+  CI 44940279906 (Windows, report shard 3): "The edit made before the API started was not applied: The program's
+  runtime has not loaded its CoreLib yet". **A race in the IDE**: the quiet attach for Hot Reload lets a program held
+  at its runtime's start go before the runtime loads CoreLib, which names the edits it takes, and Apply Hot Reload
+  Changes asked at once found nothing to read them from. The debug adapter now waits for CoreLib's load, outside the
+  engine's lock, before it says what the program takes (9b0d4c0c7, #947).
+- `NuGetTests`' `At_the_smallest_window_a_rows_id_gives_way_to_its_version_and_mark_and_the_details_version_picker_wraps_under_it`,
+  CI 44940279906 (macOS report shard 3): "Waited 180 s for Passenger.Legacy.Storage.Client.Extensions listed
+  deprecated: 1 package installed". **Most likely a race in the IDE**, not reproduced: a list marks its rows with the
+  deprecations read so far, then asks for the read, and passed over one that had ended by then as marked already, so a
+  read the list before it began, ending between those two steps, marked no list. A read found ended is now taken as one
+  ending then, the rows marked again where it says otherwise, as is the details' word on a version chosen (fe31af057, #2041).
+- `CommandLineTests`' `A_malformed_value_or_a_flag_…(--look sakura)`, CI 44940279906 (gate, every system): "--look takes
+  passenger, cubicle, high contrast, harbour, …". **The test was written before what it reads**: #1851 carried High
+  Contrast, which `--look`'s refusal lists after Cubicle, and the test still expected Harbour there. It now reads the
+  list as it stands (13ee48cf5, #1851).
+- `McpTests`' `An_agent_lists_every_action_the_ide_declares_and_one_it_runs_says_why_when_it_cannot`, CI 44940279906
+  (Linux x64 and Windows, gate shard 2): "Assert.Single() Failure: The collection contained 2 matching items … Match
+  indices: 395, 412". **The test read wrong**: reading on through a group ide_actions names as left out, it took the
+  group's whole list, so the actions of it the first answer listed before its cut, Show Game among them, came twice.
+  It now takes from a group only the actions it has not read (2c4bda616, #2070).
+- `AgreeingWordsTests`' `A_word_agreeing_with_a_count_is_chosen_only_through_Plural`, CI 44940279906 (Linux x64, gate
+  shard 2): "ManagedDebugger_LetGo.cs:198: running.Count == 1 ? "has" : "have"". **The IDE broke its own rule**: the
+  debugger's log of a let-go held for evaluations given up chose its verb by hand. It goes through `Plural.Agreeing`
+  (fef5b13c8, #2079).
+- `McpLongAnswersTests`' `Every_answer_that_grows_with_the_code_holds_to_the_limit_…`, CI 44940279906 (macOS report
+  shard 2): "A list of many actions listed 423, saying: 1 more action left out: …". **The test read wrong**: it took
+  only a plural count of what a cut list left out, and ide_actions, cut one short, said "1 more action". It takes the
+  count as written, holding any other to its plural (d3efaefa5, #2070).
+- `VcsTests`' `A_renamed_and_a_moved_files_rows_in_the_Commit_window_name_where_each_came_from`, CI 44940279906 (Linux
+  x64, report shard 2): "Expected: ("Store.cs  ← Shop.cs", …) Actual: ("Store.cs  R  ← Shop.cs", …)". **The test was
+  written before the design it reads**: #1851 put each changed file's letter beside its name, and the test still read
+  the row without it. It now reads the letter (R for a moved file, M for one modified) and its word on the tip and to a
+  screen reader (38d16158e, #1851).
+- `VcsTests`' `A_screenshot_of_a_working_tree_taken_with_no_wait_shows_its_branch_and_change_bars`, CI 44940279906
+  (Linux x64, report shard 2): "The changed line's bar is drawn #ff0f131c, not the modified bar's colour". **The test
+  was written before the design it reads**: #1851 broke a changed line's bar into dashes, and the one pixel the test read
+  at the line's middle fell in a gap between them. It now reads the bar down the line, two runs of the modified colour
+  at least with a gap between, which a solid bar or another colour fails (d06bf1200, #1851).
+- `McpAspireStandInTests`' `An_agent_reads_a_services_request_duration_through_telemetry_metrics`, CI 44896789551
+  (Windows, report shard 1): "The AppHost resource service connection failed (Cancelled): Call canceled by the
+  client", 32.5 s after the AppHost's build. **A bug in the IDE**: the AppHost's resource service was given 30 s to
+  answer whatever `PASSENGER_WAIT_SCALE` said, unlike the IDE's other waits on what it starts, on a runner where the
+  sample's restore took 29.7 s and a console app's build 12.9 s, the stand-in itself giving its AppHost 75 s there; and
+  the run said only the call's cancel. The wait scales, a run past it says the service did not answer in its time, and
+  the test says when the stand-in began and wrote its key. Not met in 27 runs of the class on the Windows VM beside six
+  busy loops (d00b6b0ea, #2077).
+- `ContainerServicesTests`' `A_services_Debug_Restart_Run_without_Debugger_and_Attach_…`, CI 44896789551 (Linux x64,
+  gate shard 2): "web gave no answer", its program running, its engine's log ending with the Variables' read of
+  WebApplication on Main's thread given up by a Continue, a Disconnect 5 ms later, and that evaluation ending as the
+  program was let go. **Most likely a gap in the debugger**: the let-go ran off their stop only the threads of a stop
+  still shown, so the stop's thread, back at its breakpoint once its given-up evaluation returned, was let go inside the
+  runtime's handling of its patch, which on x64 the runtime itself handles only in part (its
+  `DebuggerPatchSkip::DebuggerDetachClean`); #2050's exit 132 at the same step fits it too. On this Mac the thread stood
+  at its breakpoint still once its evaluation had returned; it is now run off it, from where the stop found it. Not met
+  on arm64, which emulates single steps, so unproven on x64 until CI (0b9153577, #2077).
+- `HiddenFramesTests`' `A_step_into_a_line_reading_a_class_without_Just_My_Code_…(newestRuntime: False)`, the Mac under
+  load (#1899's runs): "No stopped event came in 60 s", the step's end waiting for CoreLib's symbols to be decompiled.
+  **The test waited wrong**: a stop in CoreLib without Just My Code comes once CoreLib is decompiled, once a run, which
+  took 37 to 46 s on this Mac beside twelve busy loops and longer beside two test processes and a VM. The protocol
+  tests' waits for an event begin their time again while the engine's log says a decompile is under way (a1de75015,
+  #2078).
+- `AsyncStepTests`' `A_step_over_an_await_whose_question_of_the_run_that_went_on_is_held_unfinished_…`, the Mac under
+  load (#1899's runs): "the question of which run resumed was never held unfinished". **The test's await**:
+  `Task.Delay(10)`, whose returned value the step watches, stopping the thread at the call's return, a round trip to
+  the debugger that under load outlasted the 10 ms, so the await found its task complete and never left the method, no
+  run resuming to be asked of (1 of 12 steps in a loaded probe, its log ending the step with no yield). The test steps
+  over `Task.Yield`'s await, which always leaves it (877b5143c, #2078).
+- `McpAttachTimingTests`' `An_attached_diagnostic_stops_waiting_on_a_suspended_server_…(revokeConnection: False)`,
+  CI 44896789551 (macOS, report, alone): "Waited 20 s for the diagnostic's request to clear while its server is still
+  suspended". **The test waited wrong**: it waited for every request of the server's to clear, and the window's own pull
+  of the file it shows, made at the server's word that its diagnostics moved (which follows the sample's load and can
+  come as the test suspends the server), waits on the suspended server for good by design; a probe holding that word
+  until just after the suspension failed so every time. The test holds the word while the server is suspended, and its
+  wait names what is still in flight (9161ba7ed, #2077).
+
+- `FolderWatchTests`' `Watching_each_folder_as_on_Linux_…`, CI 44872855052 (Linux, report): "Waited 180 s for the
+  renamed folders to be watched under their new names alone". **A bug in the IDE**: a renamed folder's own watch can be
+  heard ending before its parent reports the rename, as each .NET watcher's events come on a thread of their own, and
+  then only the folder itself was let go of, its subfolders left watched under their old names; a watch reported gone
+  lets go of every watch under its folder while it still holds the folder's place (f1f4cff69, #2067).
+- `UpdatesTests`' `On_Windows_another_Passenger_running_from_the_install_…`, same run (Windows, report): "The program
+  running from …\current\Passenger.exe (process N) is not found". **A bug in the IDE**: `Process.MainModule` names a
+  just-started program only once its loader has run, so a Passenger started a moment before was passed over and the
+  update would have installed over it; the executable is read through QueryFullProcessImageName
+  (`Kernel32.ExecutableOf`; 755ea3eef, #2067).
+
+- `McpLanguagesTests`' YAML test, CI 44763221323 (Windows, report): "Its code help needs the YAML language server: it
+  is starting…". **A bug in the IDE**: an agent's 2-minute wait for its language server never scaled with
+  `PASSENGER_WAIT_SCALE`, and the YAML server's first start reads about 380 modules cold (29.5 s on a loaded VM against
+  1.6–3.3 s after) on a runner where a 1.4 s build took 33.8 s. The wait scales now, says what it waits for, and its
+  refusal names the wait (`Refusals.StillStarting`; 79cd3b108, #2040).
+
+## 2026-11-20
+
+- `XamlTests`' `Passengers_own_main_window_completes_its_theme_tokens_and_its_style_classes`, CI 44855772233 (every
+  system): "'<Button Name="MenuButton" Classes="' is not in the file". **The test read wrong**: #2045's
+  `ToolButtons.Give` makes the menu button's class in code; the test completes the project button's classes (e06a7994c).
+- `ProjectFileHelpTests`' `A_version_s_card_near_the_editor_s_edge_…`, same run (every system): "The card was to go
+  to the list's left". **A bug in the IDE**: #2045 raised the list's least width to Narrow (360), leaving 184 beside it
+  in the narrowest editor, under a card's 200, so the card went under the list; the least gives way to
+  `PopupPlacement.BesideRoom` now (1838ff846, #2054).
+- `UiRulesTests`' `A_greyed_check_box_shows_its_tooltip_under_the_pointer`, same run (Linux): waited for "Enabled" and
+  found only the why. **A bug in the IDE and the test**: the box, greyed rightly, had no name, so its tip lost what it
+  is; it is named now and the test waits for "Enabled: <why>" (c03cfc6eb, #2054).
+- `DialogButtonsTests`' `Every_dialog_…(look: "Harbour")`, same run (Windows): "'Reformat' and 'Availability
+  configuration' one over the other". **The test read wrong**: the Availability button's tooltip opened under the
+  pointer left on it, and `LayoutFaults` counted it; it passes over tooltips (08d6b5477, #2054).
+- `MigrationsTests`' `A_provider_behind_EF_Core_moves_up_…`, same run (Windows): "Waited 225 s for the fix's question
+  (status: Reading how Shop runs…)". **Cause not found**: the window's own listing stood in `ResolvePlanAsync` with the
+  IDE quiet, most likely on the project host's Properties answer or its gate; a wait that gives up now names the hosts'
+  unanswered requests (93c041e66, #2054).
+
+- `McpTests`' `With_no_git_on_the_path_a_repository_is_said_to_need_git_…`, CI 44848029756 (report, every system):
+  "holds, rather than "Git is not installed" greyed: MenuItem.menuNotice …". **The test read wrong**: since ca5a24cda
+  (#2045) the item is a `ListMenus.Notice`, which the test's exact `MenuItem "…"` no longer matched; it reads the notice
+  by its class now and checks ide_actions' Create Git Repository saying git is not installed (c8f88907a, #2051).
+- `AspireCodeHelpTests`' `Renaming_a_resource_…`, Linux, CI 44792503264 and 44848029756 (report): "Waited 180 s for the
+  rename of connected to store to be made, or say why not". **The test read a state that moved**: in CI's Linux order the
+  rename runs a few windows after a test that touched OtherHost.csproj, and the class's kept server, told at each keep
+  that the project changed, loads it again a second into each later window, its warning replacing "Renamed connected to
+  store in 3 files" before the settled wait looked. The test hears the status bar as it is said (52f497763, #2051).
+
+- `XamlTests`' `Passengers_own_xaml_which_compiles_is_marked_with_no_problem`, CI 44836100225 (gate, every system):
+  "Resource 'Passenger.CodeFont' is not found". **A bug in the IDE**: the type ramp's `code` style named the code
+  font's resource by its words, a key the app sets only from code, which Passenger's XAML check can't find; it names it
+  from its home through `x:Static CodeFonts.Key` now (571d4aabf).
+- `AspirePackageServicesTests`' `Orchestration_adds_a_service_to_Aspire_17s_AppHost_…`, same run (gate, every system):
+  a check row's name cut at the least width. **A bug in the IDE**: with its label now beside the list, Add Aspire
+  Orchestration at its least width cut a check row's name with no ellipsis; `CheckRows`' name ends in one now
+  (6d6e463e8).
+- `RetainedRowsTests`' `A_key_draws_again_only_the_rows_it_changed_…`, same run (gate, Linux): a row kept through a key
+  showed what it showed before. **A race in the test**: the caret blinked between the two captures it compares on the
+  slow runner; the class holds each caret steady (8c4acf342).
+- `HtmlPreviewTests`' `A_system_without_a_web_view_for_the_page_says_so_in_its_place`, same run (report, every
+  system). **The test read wrong**: the words moved into an `EmptyState`, and the test looked only at the preview's own
+  children (4c27446ea).
+
+- `McpAttachTimingTests`' `An_attached_diagnostic_stops_waiting_on_a_suspended_server_when_cancelled_or_shut_out`,
+  both rows, every system, CI 44824859727: "Waited 10 s for the attached agent's diagnostic to wait on the suspended
+  server". **The test looked for the wrong request**: since b60508aea the call first asks the extension what was
+  written on disk, which a suspended server never answers, so the call never reached the pull; given up or shut out, it
+  still let the request go at once (af4664a63, #2049).
+- `LongFileAssistTests`' `Typing_through_completion_over_four_thousand_members_…`, macOS, same run: "The diagnostics
+  call failed: A task was canceled". **Another test's leftover**: the attached-diagnostic test's own call, unawaited
+  after it failed, faulted as its client was disposed and went unobserved into the next class; that test now dismisses
+  it (af4664a63, #2049).
+- `NewServiceSetupTests`' `New_Project_of_an_MVC_app_keeps_its_folder_for_Undo_without_its_bytes`, macOS, same run:
+  "Undo left the new project's folder: Waiting for the design-time build of Site…". **A turn the IDE took with nothing
+  held**: the let-go's wait ended on the thread pool even with nothing under way, so the settle ended before the Undo
+  went on (d3c81a831, #2050).
+- `ContainerServicesTests`' `A_services_Debug_Restart_Run_without_Debugger_and_Attach_…`, Linux, same run: web exited
+  132 (illegal instruction) 0.8 s after Run without Debugger detached it, as its first request arrived. **Cause not
+  found**, not met in 4 arm64 runs; the engine's log is now kept and read from the stopped container (921dd5120, #2050).
+
+- `BuildRunTests`' `With_hot_reload_edits_saved_one_after_another_each_reach_the_program_…`, CI 44763221323 (Windows
+  report shard 2): "dotnet watch should have applied each of the 4 edits once", its lines holding "dotnet watch : said
+  1". **The test read wrong**: dotnet watch writes "dotnet watch : " and its words to stderr in two writes, and the
+  program's stdout line came between them in the Run window's text; each save was heard once and applied, and the
+  runner's lines, which the status bar reads, held them whole (2 of 6 loaded rounds on the Windows VM). The test reads
+  the runner's lines now (552d81075, #2039).
+
+- `WindowArrangementTests`' `Unit_Tests_dragged_onto_the_editors_…` and `Editor_tabs_set_down_a_side_…`, CI 44777681924
+  and 44792503264 (all three systems): a drag that changed nothing. **A race in the test**: each pressed to drag a tab
+  where it had just clicked it, and `Ui.Drag`'s left-button form never waited apart from that click. Once settles
+  stopped waiting out the binding values' (af6b85202), the screen reader's (051e04f5e) and the typing (66cab998e)
+  pauses, the press fell inside the 500 ms double-click time and the tab maximized the editors, as it does for a
+  person. Every drag now waits apart from a click at its spot (34026a657, #2044).
+- `EditorSplitTests`' `A_closed_split_is_let_go_by_the_file_it_showed_…`, CI 44792503264 (Windows, Linux): "The closed
+  split … is still alive". **A race in the test**: with the test run's typing pause at 100 ms (66cab998e) it collected
+  285 ms after the close click, while Avalonia's 300 ms hold-gesture timer still held the pressed button and so the
+  split. It checks through `Ui.Collected` now (b5e728023, #2044).
+
+- `XamlTests`' `A_window_wider_than_the_preview_is_drawn_by_the_previewer_at_the_scale_shown_pixel_for_pixel`, CI
+  44604254929, 44625900224, 44649367892 and 44751057600 (macOS report shard 4): the previewer ended with SIGABRT, "No
+  precompiled XAML found for Gallery.App". **A race in the test**: `SharedProject.Reset` put MainWindow.axaml and its
+  code-behind back timed after the last .dll but before the Avalonia resources the C# server's design-time build had
+  made from the rename test's XAML, so the next build compiled that XAML against the restored code-behind and failed
+  after csc wrote obj/Gallery.dll, and the build after it copied that never-XAML-compiled assembly to bin. Reset now
+  times what it puts back after everything under bin and obj (0f44ae8f8, #2006).
+
+- `AgreeingWordsTests`' `A_word_agreeing_with_a_count_is_chosen_only_through_Plural`, CI 44751057600 (all three
+  systems): "2 choices pick a word agreeing with a count of their own". **A bug in the IDE**: d04bbb63d's engine log
+  chose "go"/"goes" itself; it goes through `Plural.Of` now (0f3b7961b, #2002, #2020).
+- `StoredTracesTests`' `Each_exceptions_stack_trace_read_from_what_it_stores_is_what_its_StackTrace_getter_writes`,
+  CI 44751057600 (Linux report shard 4): "a thread is stopped at a point where garbage collection is impossible". **A
+  bug in the IDE**: at the exception's stop a new pool worker and the finalizer stood at their first instruction, and
+  `ClearStartsAsync` let the program go to move them past it before the first evaluation; ICorDebug forgets a thread's
+  exception whenever the program is let go, so the runtime refused every evaluation at that stop. Such threads are now
+  let past once the evaluation itself is let go (226d54784, #2020).
+- `SyntheticVariablesTests`' `A_step_out_whose_box_of_the_returned_struct_is_held_unfinished_stops_in_the_caller_saying_why_it_was_not_kept`,
+  CI 44751057600 (Linux report shard 4): "System.Environment.Version.Major … runs outside managed code". **A bug in
+  the IDE**: on .NET 11 the engine held the runtime's tiering worker through evaluations, as .NET 11 names it ".NET
+  Tiered JIT" and only the earlier name was known; both are now (a15f372d7, #1999).
+
+- `ExplorerFilesTests`' `Typing_in_a_file_while_its_folders_delete_waits_for_a_design_time_build_goes_to_the_Trash_with_it`,
+  CI 44625900224 (Windows report shard 4): "Lib could not be deleted: Access to the path … is denied". **A bug in the
+  IDE**: the folder watcher's look at the file saved just before the move (`File.Exists`, its write time) raced the
+  folder's move, and Windows refuses to move a folder while any file under it is open, even for that look (626 of 20,000
+  moves in a probe). The watchers now read nothing under a folder being moved until it has gone (`MovingFolders`;
+  d478d23ec, #2015).
+
+- `SyntheticVariablesTests`' `A_step_out_lists_what_the_method_stepped_out_of_returned`, CI 44649367892 (Linux report
+  shard 3): "The session ended while a stopped event was awaited". **A bug in the IDE**: the evaluation boxing
+  `Count()`'s returned int was held up by a collection waiting on a thread the evaluation held at the runtime's
+  thread-start patch (#2020, the same at v0.4.0), and the step took the evaluation's frame for its own, so the program
+  ran on to its end. A step now stops below an evaluation left running, and a returned number is kept as its bytes
+  with no evaluation at all (dc5acac9c, #2019; #2018).
+
 ## 2026-11-19
 
 - `DecompiledSymbolsTests`' `An_adapter_starting_deletes_symbols_unused_for_a_month_and_writes_never_finished_and_keeps_those_in_use`,

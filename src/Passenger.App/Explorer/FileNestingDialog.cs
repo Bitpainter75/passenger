@@ -13,7 +13,7 @@ public sealed class FileNestingDialog : IdeWindow
     public FileNestingDialog(bool nest)
     {
         Title = "File Nesting";
-        Width = 720;
+        Width = DialogWidths.Wide;
         Height = 480;
         MinWidth = 420;
         MinHeight = 300;
@@ -32,13 +32,13 @@ public sealed class FileNestingDialog : IdeWindow
                     Text = text,
                     Margin = new Thickness(0, Gaps.Hair, Gaps.Wide, Gaps.Hair),
                     TextWrapping = TextWrapping.Wrap,
-                    FontWeight = heading ? FontWeight.SemiBold : FontWeight.Normal,
                     [Grid.RowProperty] = row,
                     [Grid.ColumnProperty] = column,
                 };
                 if (heading)
                 {
                     cell.Classes.Add(StyleClasses.Muted);
+                    cell.Classes.Add(StyleClasses.Strong);
                 }
                 table.Children.Add(cell);
             }

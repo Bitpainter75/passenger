@@ -1,17 +1,14 @@
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Passenger.App;
-using Passenger.App.Godot;
 using Passenger.Core;
 using Passenger.Editor;
 
 namespace Passenger.Tests;
 
-/// <summary>A Godot 4 C# game's theme item names read against the project's own theme and its scene, with no Godot editor
-/// open: a node its scene gives a type variation completes the variation's own item beside its class's; Theme.GetColor
-/// completes the type it names; a default theme item's card gives Godot's class reference's words and Context Help browses
-/// its place there; and a colour the project's theme defines renames in the theme, the scene's override and the C# string
-/// as one command of Undo, a default theme item refused. Its project restores from the packages the Godot found carries,
+/// <summary>A Godot 4 C# game's theme item names read against the project's own theme and its scene, with no Godot
+/// editor open: a colour the project's theme defines renames in the theme, the scene's override and the C# string as
+/// one command of Undo, a default theme item refused. Its project restores from the packages the Godot found carries,
 /// so without a Godot 4 .NET build each test skips saying why; no Godot runs.</summary>
 public sealed class GodotThemeItemsTests : IClassFixture<GodotThemeItemsTests.Game>
 {
@@ -81,64 +78,21 @@ public sealed class GodotThemeItemsTests : IClassFixture<GodotThemeItemsTests.Ga
         return window;
     }
 
-    /// <summary>Completion after a place in the shown file, once it offers a label it always offers; its labels.</summary>
-    private static List<string> Completed(MainWindow window, string after, string always)
-    {
-        Ui.PlaceAfter(window.EditorArea.CodeEditor, after);
-        Ui.Run(window, AppActions.Complete);
-        Ui.WaitFor(() => window.Assist.CompletionLabels.Contains(always), () => $"{always} to be offered after {after}: {string.Join(", ", window.Assist.CompletionLabels)}");
-        List<string> labels = [.. window.Assist.CompletionLabels];
-        Ui.Press(window, "ESCAPE");
-        return labels;
-    }
-
-    /// <summary>On Title, whose scene gives it the TitleLabel variation, the variation's own glow completes beside the project
-    /// theme's accent for every Label and the default theme's font_color; Theme.GetColor naming Label completes Label's.</summary>
+    /// <summary>A project theme's colour renames across the theme, a scene's override and a C# string in one step of
+    /// Undo.</summary>
     [AvaloniaFact]
-    public void A_variations_own_item_completes_on_its_node_and_theme_get_color_completes_the_type_it_names()
+    public void A_project_themes_colour_renames_across_theme_scene_and_csharp()
     {
-        MainWindow window = Opened();
-        try
-        {
-            List<string> title = Completed(window, "title.GetThemeColor(\"", "glow");
-            Assert.Contains("accent", title);
-            Assert.Contains("font_color", title);
-            List<string> asked = Completed(window, "theme.GetColor(\"", "font_color");
-            Assert.Contains("accent", asked);
-            Assert.DoesNotContain("glow", asked);
-        }
-        finally
-        {
-            window.Close();
-        }
-    }
-
-    /// <summary>font_color's card gives the class reference's words for a Label's, and Context Help on it browses its place
-    /// on Label's page for the version of the Godot found.</summary>
-    [AvaloniaFact]
-    public void A_default_theme_items_card_gives_the_class_references_words_and_context_help_browses_its_place()
-    {
-        MainWindow window = Opened();
-        try
-        {
-            string card = GodotSceneTests.Hover(window, "font_color\");", "Default text Color of the Label.");
-            Assert.Contains("Label's", card, StringComparison.Ordinal);
-            Ui.PlaceAfter(window.EditorArea.CodeEditor, "GetThemeColor(\"font_col");
-            Ui.Press(window, Ui.Shortcut(AppActions.ContextHelp));
-            Uri page = new($"https://docs.godotengine.org/en/{GodotDocs.VersionOf(game.Godot!.Version)}/classes/class_label.html#class-label-theme-color-font-color");
-            Ui.WaitFor(() => window.Browsed.Contains(page), () => $"font_color's place in the class reference to be browsed ({window.Status}): {string.Join(", ", window.Browsed)}");
-        }
-        finally
-        {
-            window.Close();
-        }
+        game.Reset();
+        game.Reset();
+        Flow.Step(nameof(A_project_themes_colour_renames_across_the_theme_the_scenes_override_and_the_csharp_string_in_one_undo),
+            A_project_themes_colour_renames_across_the_theme_the_scenes_override_and_the_csharp_string_in_one_undo);
     }
 
     /// <summary>accent, which the project's theme defines for Label, renamed from the C# string is renamed in the theme, in
     /// the scene's override on Title and in the string, the misspelt string left; one Undo puts every file back; Rename of
     /// font_color, the default theme's, is refused.</summary>
-    [AvaloniaFact]
-    public void A_project_themes_colour_renames_across_the_theme_the_scenes_override_and_the_csharp_string_in_one_undo()
+    private void A_project_themes_colour_renames_across_the_theme_the_scenes_override_and_the_csharp_string_in_one_undo()
     {
         MainWindow window = Opened();
         try

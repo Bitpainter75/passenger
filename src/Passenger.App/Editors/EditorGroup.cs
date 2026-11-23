@@ -43,9 +43,9 @@ public sealed class EditorTab(OpenDocument document) : Observable
     }
 }
 
-/// <summary>One editor of a split: its tabs (the pinned ones first), its find bar and its editor, which shows the
-/// active tab's file. A file may be open in two groups at once (Split Right on it), each with its own carets and scroll
-/// over the one text.</summary>
+/// <summary>One editor of a split: its tabs (the pinned ones first), its navigation bar, its find bar and its editor,
+/// which shows the active tab's file. A file may be open in two groups at once (Split Right on it), each with its own
+/// carets and scroll over the one text.</summary>
 public sealed class EditorGroup : DockPanel
 {
     private readonly EditorArea area;
@@ -144,7 +144,9 @@ public sealed class EditorGroup : DockPanel
         });
         mergeLink.Name = "MergeLink";
         mergeLink.IsVisible = false;
+        Navigation = new NavigationBar(area, this);
         Children.Add(tabBar);
+        Children.Add(Navigation.Bar);
         Children.Add(banner);
         Children.Add(Find);
         editorPlace = new Panel { Children = { Editor } };
@@ -195,6 +197,9 @@ public sealed class EditorGroup : DockPanel
     private event EventHandler? CurrentChanged;
 
     public CodeEditor Editor { get; }
+
+    /// <summary>The bar over the editor naming where its caret is in the file's outline.</summary>
+    public NavigationBar Navigation { get; }
 
     /// <summary>The columns of the editor's gutter, fed from the file it shows.</summary>
     public EditorGutter Gutter { get; }
@@ -557,6 +562,7 @@ public sealed class EditorGroup : DockPanel
             editorPlace.Children.Add(preview);
             ShowBanner(document);
             tabBar.IsVisible = true;
+            Navigation.Show(null);
             FollowSidePreview();
             return;
         }
@@ -575,11 +581,11 @@ public sealed class EditorGroup : DockPanel
         Editor.Highlighter = document.Highlighter;
         AutomationProperties.SetName(Editor, document.Title);
         Gutter.Show(document);
-        Editor.ContextLabel = ContextShown(document);
         FollowReadOnly(document);
         ShowBanner(document);
         Editor.IsVisible = true;
         tabBar.IsVisible = true;
+        Navigation.Show(document);
         ShowTable(document);
         ShowGodotPage(document);
         AttachFind();
@@ -731,6 +737,7 @@ public sealed class EditorGroup : DockPanel
                 Editor.IsVisible = false;
                 tabBar.IsVisible = false;
                 banner.IsVisible = false;
+                Navigation.Show(null);
                 tables?.Hide();
                 godotPage?.Hide();
                 Side = null;
@@ -836,10 +843,6 @@ public sealed class EditorGroup : DockPanel
             case nameof(OpenDocument.Notice) or nameof(OpenDocument.NoticeAction) or nameof(OpenDocument.EncodingWarning) or nameof(OpenDocument.InConflict):
                 ShowBanner(document);
                 break;
-            case nameof(OpenDocument.ProjectContexts):
-            case nameof(OpenDocument.ProjectContext):
-                Editor.ContextLabel = ContextShown(document);
-                break;
             case nameof(OpenDocument.IsReadOnly):
                 FollowReadOnly(document);
                 ShowBanner(document);
@@ -888,12 +891,9 @@ public sealed class EditorGroup : DockPanel
         RowIcon icon = new();
         TextBlock name = new() { Classes = { StyleClasses.TabName }, VerticalAlignment = VerticalAlignment.Center };
         Ellipse modified = new() { Classes = { StyleClasses.Modified }, Width = 7, Height = 7 };
-        RowIcon closeGlyph = new() { Width = 10, Height = 10, DataKey = IconKeys.Close };
-        Button close = new() { Classes = { StyleClasses.TabClose }, Content = closeGlyph };
-        ToolButtons.Tip(close, "Close");
-        RowIcon pinGlyph = new() { Width = 10, Height = 10, DataKey = IconKeys.Pin };
-        Button pin = new() { Classes = { StyleClasses.TabPin }, Content = pinGlyph };
-        ToolButtons.Tip(pin, "Unpin Tab");
+        Button close = ToolButtons.Small(IconKeys.Close, "Close");
+        close.Classes.Add(StyleClasses.TabClose);
+        Button pin = ToolButtons.Small(IconKeys.Pin, "Unpin Tab");
         Panel ends = new() { Width = 16, Height = 16, Children = { modified, close } };
         bool down = tabsPlace != EditorTabsPlace.Top;
         Border border = new() { Classes = { StyleClasses.Tab } };
@@ -1047,18 +1047,5 @@ public sealed class EditorGroup : DockPanel
             part.Margin = new Thickness(apart, 0, 0, 0);
             return part;
         }
-    }
-
-    /// <summary>What the editor's context switcher shows for a file in several of the server's projects: the target
-    /// framework alone (Roslyn names a multi-targeted project's "Lib (net10.0)") when they are one project's, else the
-    /// project's name too; nothing for a file in one.</summary>
-    private static string? ContextShown(OpenDocument document)
-    {
-        if (document.ProjectContexts.Count < 2 || document.ProjectContext is not { } chosen)
-        {
-            return null;
-        }
-        return document.ProjectContexts.Select(ProjectContext.ProjectOf).Distinct(StringComparer.Ordinal).Count() == 1
-            && ProjectContext.FrameworkOf(chosen) is { } framework ? framework : chosen;
     }
 }

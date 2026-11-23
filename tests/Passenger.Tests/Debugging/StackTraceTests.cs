@@ -17,9 +17,20 @@ public class StackTraceTests(ITestOutputHelper testOutputHelper)
     private static readonly int MiddleAwaits = Debuggees.Line("DebuggableConsoleApp", "AsyncStackTraceClass.cs", "await InnerAsync();");
     private static readonly int TestAwaits = Debuggees.Line("DebuggableConsoleApp", "AsyncStackTraceClass.cs", "await MiddleAsync();");
 
+    /// <summary>The gate's stacks as one flow: a stop's frames down to Main with an async method by its own name, the
+    /// async methods awaiting a stop with their locals, a library frame without source decompiled as it is resolved,
+    /// and a stack down to Main through code a program emitted.</summary>
     [Gate]
     [Fact]
-    public async Task A_stop_lists_its_frames_down_to_Main_the_librarys_subtle_and_an_async_methods_by_its_own_name()
+    public async Task The_gates_stacks_hold_as_one_flow()
+    {
+        await Flow.StepApartAsync("a stop lists its frames down to Main the librarys subtle and an async methods by its own name", () => new StackTraceTests(testOutputHelper), t => t.A_stop_lists_its_frames_down_to_Main_the_librarys_subtle_and_an_async_methods_by_its_own_name());
+        await Flow.StepApartAsync("a stop in an awaited method lists the async methods awaiting it with their locals", () => new StackTraceTests(testOutputHelper), t => t.A_stop_in_an_awaited_method_lists_the_async_methods_awaiting_it_with_their_locals());
+        await Flow.StepApartAsync("a library frame without source is decompiled when it is resolved", () => new StackTraceTests(testOutputHelper), t => t.A_library_frame_without_source_is_decompiled_when_it_is_resolved());
+        await Flow.StepApartAsync("a stop in a method emitted code calls has its stack down to Main through the emitted frame", () => new StackTraceTests(testOutputHelper), t => t.A_stop_in_a_method_emitted_code_calls_has_its_stack_down_to_Main_through_the_emitted_frame());
+    }
+
+    private async Task A_stop_lists_its_frames_down_to_Main_the_librarys_subtle_and_an_async_methods_by_its_own_name()
     {
         bool startSuspended = true;
         await using DebugSession debugProtocolHost = DebugSession.ForAttach(testOutputHelper, startSuspended, out Process p2);
@@ -45,8 +56,8 @@ public class StackTraceTests(ITestOutputHelper testOutputHelper)
         List<DapStackFrame> expectedStackFrames =
         [
             new() { Id = 1, Column = 3, EndColumn =   16, Line = Selected, EndLine = Selected, Name = "DebuggableConsoleApp.dll!DebuggableConsoleApp.ClassWithBclCall.Selector(int x)",   Source = new DapSource { Name = "ClassWithBclCall.cs", SourceReference = 0, Path = breakpointedFilePath } },
-            new() { Id = 2, Column = 0, EndColumn = null, Line =  0, EndLine = null, Name = "System.Linq.dll!System.Linq.Enumerable.RangeSelectIterator<int, int>.Fill(System.Span<int> results, int start, System.Func<int, int> func)",    Source = null, PresentationHint = "subtle" },
-            new() { Id = 3, Column = 0, EndColumn = null, Line =  0, EndLine = null, Name = "System.Linq.dll!System.Linq.Enumerable.RangeSelectIterator<int, int>.ToArray()",   Source = null, PresentationHint = "subtle" },
+            new() { Id = 2, Column = 0, EndColumn = null, Line =  0, EndLine = null, Name = "System.Linq.dll!System.Linq.Enumerable.RangeSelectIterator<int, int>.Fill(System.Span<int> results, int start, System.Func<int, int> func)",    Source = null, PresentationHint = FrameHints.Subtle },
+            new() { Id = 3, Column = 0, EndColumn = null, Line =  0, EndLine = null, Name = "System.Linq.dll!System.Linq.Enumerable.RangeSelectIterator<int, int>.ToArray()",   Source = null, PresentationHint = FrameHints.Subtle },
             new() { Id = 4, Column = 3, EndColumn =   67, Line = Ranged, EndLine = Ranged, Name = "DebuggableConsoleApp.dll!DebuggableConsoleApp.ClassWithBclCall.Test(int myParam)", Source = new DapSource { Name = "ClassWithBclCall.cs", SourceReference = 0, Path = breakpointedFilePath } },
             new() { Id = 5, Column = 4, EndColumn =   29, Line = BclCalled, EndLine = BclCalled, Name = "DebuggableConsoleApp.dll!DebuggableConsoleApp.Program.Main(string[] args)",        Source = new DapSource { Name = "Program.cs",          SourceReference = 0, Path = Debuggees.Source("DebuggableConsoleApp", "Program.cs") } },
 			// TODO: Return internal frames (thread.ActiveInternalFrames), such as a subtle "[Native to Managed Transition]".
@@ -120,9 +131,7 @@ public class StackTraceTests(ITestOutputHelper testOutputHelper)
         Assert.Single((await host.StackTraceAsync(thread, levels: 1)).StackFrames);
     }
 
-    [Gate]
-    [Fact]
-    public async Task A_stop_in_an_awaited_method_lists_the_async_methods_awaiting_it_with_their_locals()
+    private async Task A_stop_in_an_awaited_method_lists_the_async_methods_awaiting_it_with_their_locals()
     {
         bool startSuspended = true;
         await using DebugSession debugProtocolHost = DebugSession.ForAttach(testOutputHelper, startSuspended, out Process process);
@@ -152,9 +161,7 @@ public class StackTraceTests(ITestOutputHelper testOutputHelper)
         Assert.Contains(variables, variable => variable.Name == "middleValue" && variable.Value == "17");
     }
 
-    [Gate]
-    [Fact]
-    public async Task A_library_frame_without_source_is_decompiled_when_it_is_resolved()
+    private async Task A_library_frame_without_source_is_decompiled_when_it_is_resolved()
     {
         bool startSuspended = true;
         await using DebugSession debugProtocolHost = DebugSession.ForAttach(testOutputHelper, startSuspended, out Process process);
@@ -179,7 +186,7 @@ public class StackTraceTests(ITestOutputHelper testOutputHelper)
 
         Assert.Equal(unresolvedFrame.Id, response.StackFrame.Id);
         Assert.True(response.StackFrame.IsResolved);
-        Assert.Equal("subtle", response.StackFrame.PresentationHint);
+        Assert.Equal(FrameHints.Subtle, response.StackFrame.PresentationHint);
         Assert.EndsWith(".cs", response.StackFrame.Source?.Path);
         Assert.True(response.StackFrame.Line > 0);
         DapDecompiledSource? decompiledSourceInfo = response.StackFrame.DecompiledSourceInfo;
@@ -189,9 +196,7 @@ public class StackTraceTests(ITestOutputHelper testOutputHelper)
         Assert.EndsWith("DebuggableConsoleApp.dll", decompiledSourceInfo.CallingUserCodeAssemblyPath);
     }
 
-    [Gate]
-    [Fact]
-    public async Task A_stop_in_a_method_emitted_code_calls_has_its_stack_down_to_Main_through_the_emitted_frame()
+    private async Task A_stop_in_a_method_emitted_code_calls_has_its_stack_down_to_Main_through_the_emitted_frame()
     {
         // System.Reflection.Emit's module has no file and no image in memory.
         int calledBack = Debuggees.Line("PassengerCases", "Console.WriteLine($\"called back with {value}\");");

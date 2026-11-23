@@ -10,6 +10,22 @@ public class CompletionRankingTests
 {
     private const int MostShown = 200;
 
+    /// <summary>Seeded random lists narrowed, filtered and sent in parts, key by key, each against the whole list scored
+    /// afresh; and a list saying how well its items fit, or of more than 10,000, in the order the server meant.</summary>
+    [Fact]
+    public void Each_key_shows_the_rows_in_the_order_scoring_the_whole_list_afresh_shows() => Cases.All(
+        ("narrowing key by key shows the rows in the order scoring the whole list afresh shows", () => Cases.Each([1, 2, 3, 4, 5, 6, 7, 8], Narrowing_key_by_key_shows_the_rows_in_the_order_scoring_the_whole_list_afresh_shows)),
+        ("filtered key by key the rows are the whole list's less those the filter leaves out", () => Cases.Each([1, 2, 3, 4], Filtered_key_by_key_the_rows_are_the_whole_lists_less_those_the_filter_leaves_out)),
+        ("a list whose later part is added as it comes ranks as the whole list sent as one", () => Cases.Each([1, 2, 3, 4], A_list_whose_later_part_is_added_as_it_comes_ranks_as_the_whole_list_sent_as_one)),
+        ("items found alike in a list of more than ten thousand rank in the list's order", Items_found_alike_in_a_list_of_more_than_ten_thousand_rank_in_the_lists_order));
+
+    /// <summary>A key costs what it matched, not the list: it scores only what the last key matched, passes over what lacks
+    /// a letter typed, and allocates the same however long the list.</summary>
+    [Fact]
+    public void A_key_costs_what_the_last_key_matched_not_the_lists_length() => Cases.All(
+        ("a key that lengthens the name scores only the items the last key matched", A_key_that_lengthens_the_name_scores_only_the_items_the_last_key_matched),
+        ("ranking a key allocates the same for fifty thousand items as for five hundred", Ranking_a_key_allocates_the_same_for_fifty_thousand_items_as_for_five_hundred));
+
     /// <summary>The letters names are made of: words' capitals, runs of them, separators, digits, and characters that match
     /// an ASCII letter ignoring case (the Kelvin sign, the dotless i, the long s, the dotted capital I).</summary>
     private const string Letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.Kıſİé";
@@ -20,16 +36,7 @@ public class CompletionRankingTests
         "_field", "count", "Kelvin", "Kelvin", "ıtem", "ſize", "İndex", "S", "s", "url", "URL", "Xml", "HTML",
     ];
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
-    [InlineData(5)]
-    [InlineData(6)]
-    [InlineData(7)]
-    [InlineData(8)]
-    public void Narrowing_key_by_key_shows_the_rows_in_the_order_scoring_the_whole_list_afresh_shows(int seed)
+    private static void Narrowing_key_by_key_shows_the_rows_in_the_order_scoring_the_whole_list_afresh_shows(int seed)
     {
         Random random = new(seed);
         for (int list = 0; list < 12; list++)
@@ -53,29 +60,40 @@ public class CompletionRankingTests
         }
     }
 
-    [Fact]
-    public void Of_the_names_the_letters_begin_the_one_that_fits_goes_first_after_the_name_typed_whole()
+    /// <summary>A list filtered to some of its items (members of one kind), the filter changed between keys as a person
+    /// turns one on and off: the rows are those the whole list shows, less those the filter leaves out, in its order.</summary>
+    private static void Filtered_key_by_key_the_rows_are_the_whole_lists_less_those_the_filter_leaves_out(int seed)
     {
-        CompletionRanking.Entry[] entries =
-        [
-            Entry("abc"), Entry("ab"), Entry("aef", 600), Entry("Aim", 600), Entry("await"), Entry("aefLonger", 400), Entry("xa", 600),
-            Entry("aDeprioritized", int.MinValue / 2), Entry("aPreselected", int.MaxValue / 2),
-        ];
-        CompletionRanking ranking = new(entries);
-        string[] Shown(string typed) => [.. ranking.Shown(typed, typed, 1, MostShown).Select(i => entries[i].Matched)];
-        Assert.Equal(["aPreselected", "aef", "aefLonger", "ab", "abc", "await", "aDeprioritized", "Aim"], Shown("a"));
-        Assert.Equal(["ab", "abc"], Shown("ab"));
-        Assert.Equal(["aPreselected", "Aim", "aef", "xa", "aefLonger", "ab", "abc", "await", "aDeprioritized"], Shown(""));
-
-        CompletionRanking.Entry[] unsaid = [Entry("abc"), Entry("ab"), Entry("aef"), Entry("await")];
-        CompletionRanking plain = new(unsaid);
-        Assert.Equal(["ab", "abc", "aef", "await"], plain.Shown("a", "a", 1, MostShown).Select(i => unsaid[i].Matched));
+        Random random = new(seed);
+        for (int list = 0; list < 8; list++)
+        {
+            CompletionRanking.Entry[] entries = RandomList(random, random.Next(200, 2000), prioritized: random.Next(3) == 0);
+            int[] kindOf = [.. entries.Select(_ => random.Next(4))];
+            CompletionRanking ranking = new(entries);
+            int kept = 0;
+            string typed = string.Empty;
+            for (int key = 0; key < 40; key++)
+            {
+                if (random.Next(3) == 0)
+                {
+                    kept = random.Next(16);
+                }
+                else
+                {
+                    typed = NextTyped(random, entries, typed, string.Empty);
+                }
+                int[] expected = [.. Reference(entries, typed, typed, 1, int.MaxValue).Where(i => kept == 0 || (kept & (1 << kindOf[i])) != 0).Take(MostShown)];
+                int[] shown = ranking.Shown(typed, typed, 1, MostShown, kept == 0 ? null : i => (kept & (1 << kindOf[i])) != 0);
+                Assert.True(expected.SequenceEqual(shown),
+                    $"Seed {seed}, list {list}, key {key}: '{typed}' kept by {kept} showed [{string.Join(", ", shown.Take(8).Select(i => entries[i].Matched))}…] where "
+                    + $"the whole list less what the filter leaves out shows [{string.Join(", ", expected.Take(8).Select(i => entries[i].Matched))}…]: a filter would hide or reorder what it keeps");
+            }
+        }
     }
 
     /// <summary>A list of more than 10,000 items as Passenger's extension sends a C# list, each sort text its place widened:
     /// the items the name finds alike rank in the list's order, those past its 10,000th after those before them.</summary>
-    [Fact]
-    public void Items_found_alike_in_a_list_of_more_than_ten_thousand_rank_in_the_lists_order()
+    private static void Items_found_alike_in_a_list_of_more_than_ten_thousand_rank_in_the_lists_order()
     {
         string[] labels = [.. Enumerable.Range(0, 3_000).Select(i => $"Other{i:0000}"), .. Enumerable.Range(0, 12_000).Select(i => $"Lot{i:00000}")];
         string[] written = [.. labels.Select((label, i) => i.ToString("D4", System.Globalization.CultureInfo.InvariantCulture) + label)];
@@ -91,12 +109,7 @@ public class CompletionRankingTests
     /// <summary>A C# list asked in parts: what is in scope first, ranked alone, then the items of namespaces not imported
     /// added after it, each part's sort texts as Passenger's extension sends them, with the live and postfix templates last
     /// as completion lists them. Each key shows the rows the whole list, sent as one, shows.</summary>
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
-    public void A_list_whose_later_part_is_added_as_it_comes_ranks_as_the_whole_list_sent_as_one(int seed)
+    private static void A_list_whose_later_part_is_added_as_it_comes_ranks_as_the_whole_list_sent_as_one(int seed)
     {
         Random random = new(seed);
         for (int list = 0; list < 6; list++)
@@ -139,8 +152,7 @@ public class CompletionRankingTests
         return Passenger.Roslyn.Extension.CompletionOrder.Widened(written, laterPart) ?? written;
     }
 
-    [Fact]
-    public void A_key_that_lengthens_the_name_scores_only_the_items_the_last_key_matched()
+    private static void A_key_that_lengthens_the_name_scores_only_the_items_the_last_key_matched()
     {
         Random random = new(1560);
         CompletionRanking.Entry[] entries = RandomList(random, 5000);
@@ -157,19 +169,7 @@ public class CompletionRankingTests
         Assert.True(ranking.Scored - before > 0, "A key that is no lengthening of the name scored nothing: its rows would be the last key's");
     }
 
-    [Fact]
-    public void An_item_lacking_a_letter_typed_is_passed_over_unscored()
-    {
-        CompletionRanking.Entry[] entries = [.. Enumerable.Range(0, 1000).Select(i => Entry($"Item{i}")), Entry("Zebra")];
-        CompletionRanking ranking = new(entries);
-        long before = ranking.Scored;
-        int[] shown = ranking.Shown("Zeb", "Zeb", 1, MostShown);
-        Assert.Equal([1000], shown);
-        Assert.True(ranking.Scored - before == 1, $"Typing 'Zeb' scored {ranking.Scored - before} items where one holds its letters: every item would be scored on every key");
-    }
-
-    [Fact]
-    public void Ranking_a_key_allocates_the_same_for_fifty_thousand_items_as_for_five_hundred()
+    private static void Ranking_a_key_allocates_the_same_for_fifty_thousand_items_as_for_five_hundred()
     {
         Random random = new(11);
         long small = KeyBytes(RandomList(random, 500, prefix: "Str"));

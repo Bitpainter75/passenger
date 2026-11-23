@@ -21,7 +21,7 @@ public sealed class SqlTableDialog : IdeWindow
     private readonly Func<IReadOnlyList<string>, Task<string?>> apply;
     private readonly TextBox name = new();
     private readonly StackPanel rows = new() { Spacing = Gaps.Tight };
-    private readonly SelectableTextBlock script = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap };
+    private readonly SelectableWords script = new() { Classes = { StyleClasses.Code }, TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock problem = new() { Classes = { StyleClasses.Error }, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button ok;
     private IReadOnlyList<string> statements = [];
@@ -36,7 +36,7 @@ public sealed class SqlTableDialog : IdeWindow
         this.apply = apply;
         FormRows.Scope(this);
         Title = before is null ? "New Table" : $"Design {before.Name}";
-        Width = 760;
+        Width = DialogWidths.Wide;
         Height = 560;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ok = DialogFooter.Default(before is null ? "Create" : "Apply");
@@ -59,18 +59,18 @@ public sealed class SqlTableDialog : IdeWindow
         foreach ((string title, int at) in new[] { "Column", "Type", "Null", "Key", "Identity", "Default" }.Select((t, i) => (t, i)))
         {
             TextBlock header = MutedText.Of(title);
-            header.FontSize = 12;
+            header.Classes.Add(StyleClasses.Caption);
             header.MinWidth = at is 2 or 3 or 4 ? 54 : 0;
             Grid.SetColumn(header, at);
             titles.Children.Add(header);
         }
         titles.Children.Add(new Border { Width = 28, [Grid.ColumnProperty] = 6 });
-        Border scripted = new() { Classes = { StyleClasses.Code }, Height = 150, Child = new ScrollViewer { Content = script.InCodeFont() }, [DockPanel.DockProperty] = Dock.Bottom, Margin = new Thickness(0, Gaps.Normal, 0, 0) };
+        Border scripted = new() { Classes = { StyleClasses.Code }, Height = 150, Child = new ScrollViewer { Content = script }, [DockPanel.DockProperty] = Dock.Bottom, Margin = new Thickness(0, Gaps.Normal, 0, 0) };
         DockPanel page = new()
         {
             Children =
             {
-                new StackPanel { [DockPanel.DockProperty] = Dock.Top, Spacing = Gaps.Wide, Children = { FormRows.Of("Table:", name), titles } },
+                new StackPanel { [DockPanel.DockProperty] = Dock.Top, Spacing = Gaps.Wide, Children = { FormRows.Of("Table", name), titles } },
                 scripted,
                 new Border { [DockPanel.DockProperty] = Dock.Bottom, Margin = new Thickness(0, Gaps.Normal, 0, 0), Child = add },
                 new ScrollViewer { Content = rows, Margin = new Thickness(0, Gaps.Tight, 0, 0) },

@@ -17,8 +17,7 @@ public sealed class XamlPreviewPane : DockPanel
 {
     private readonly XamlPreview preview;
     private readonly TextBlock status;
-    private readonly TextBlock error;
-    private readonly Border errorBar;
+    private readonly Banner errorBar = Banner.Wrapping(error: true);
     private readonly Image image;
     private readonly Canvas marks;
     private readonly Border outline;
@@ -60,14 +59,17 @@ public sealed class XamlPreviewPane : DockPanel
     private double fit = 1;
     private Rect? outlined;
 
-    public XamlPreviewPane(XamlPreview preview)
+    /// <summary>The title of an action the pane's words offer (<see cref="XamlPreview.Offers"/>), by its id.</summary>
+    private readonly Func<string, string> titleOf;
+
+    public XamlPreviewPane(XamlPreview preview, Func<string, string> titleOf)
     {
         this.preview = preview;
-        status = new TextBlock { Classes = { StyleClasses.Muted }, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
-        sizes = new ComboBox
+        this.titleOf = titleOf;
+        status = new TextBlock { Classes = { StyleClasses.Muted, StyleClasses.Caption }, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        sizes = new ToolDropDown
         {
             [DockProperty] = Dock.Right,
-            Classes = { StyleClasses.Compact },
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(Gaps.Wide, 0, 0, 0),
             IsVisible = false,
@@ -87,7 +89,7 @@ public sealed class XamlPreviewPane : DockPanel
             Margin = new Thickness(ListRow.TextStart, 0),
             Children =
             {
-                new TextBlock { Text = "Preview", FontWeight = FontWeight.SemiBold, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Gaps.Normal, 0) },
+                new TextBlock { Classes = { StyleClasses.PaneTitle }, Text = "Preview", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Gaps.Normal, 0) },
                 sizes,
                 status,
             },
@@ -95,10 +97,6 @@ public sealed class XamlPreviewPane : DockPanel
         // A bar of their own under the header, so in a narrow pane they wrap to rows rather than crowd the header out.
         looks = ToolWindows.ToolBars.OverEditor(new ToolWindows.ToolFlow { Margin = new Thickness(ListRow.TextStart, Gaps.Hair), Spacing = Gaps.Small, Children = { screens, platforms, themes } });
         looks.IsVisible = false;
-        error = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap };
-        error.Classes.Add(StyleClasses.Error);
-        errorBar = new Border { [DockProperty] = Dock.Top, Padding = new Thickness(Gaps.Wide, Gaps.Small), IsVisible = false, Child = error };
-        errorBar.Bind(Border.BackgroundProperty, errorBar.GetResourceObservable(TokenKeys.Banner));
         image = new Image { Stretch = Stretch.Fill };
         // The element at the caret, drawn over the frame in the frame's own units, so it shrinks with it.
         outline = new Border { BorderThickness = new Thickness(OutlineWidth), IsVisible = false, IsHitTestVisible = false };
@@ -119,13 +117,12 @@ public sealed class XamlPreviewPane : DockPanel
             preview.Scaling = windowScale * fit;
             return Task.CompletedTask;
         });
-        propertiesTitle = new TextBlock { FontWeight = FontWeight.SemiBold, FontSize = 12 };
+        propertiesTitle = new TextBlock { Classes = { StyleClasses.PaneTitle } };
         propertyRows = new StackPanel();
         TextBlock unknown = new()
         {
             Text = "What a style, theme or template gives it, what it inherits and its defaults show in the Live Visual Tree once its app runs.",
-            Classes = { StyleClasses.Muted },
-            FontSize = 11,
+            Classes = { StyleClasses.Muted, StyleClasses.Caption },
             TextWrapping = TextWrapping.Wrap,
         };
         properties = new Border
@@ -177,7 +174,7 @@ public sealed class XamlPreviewPane : DockPanel
     /// <summary>A MAUI page's screen, platform or theme was chosen; raised on the UI thread with what the preview now draws.</summary>
     public event EventHandler<MauiLook>? LookChosen;
 
-    /// <summary>The action the pane's words offer was asked for (Build for XAML Preview), by its id.</summary>
+    /// <summary>The action the pane's words offer was asked for (Build for XAML Preview, Rebuild Solution), by its id.</summary>
     public event EventHandler<string>? ActionRequested;
 
     /// <summary>An element of the file was clicked in the frame; raised on the UI thread.</summary>
@@ -215,7 +212,7 @@ public sealed class XamlPreviewPane : DockPanel
     public const double OutlineWidth = 2;
 
     /// <summary>The error shown over the frame; null while there is none.</summary>
-    public string? ErrorShown => errorBar.IsVisible ? error.Text : null;
+    public string? ErrorShown => errorBar.Said;
 
     /// <summary>The element whose own values show under the frame, and each value as its row shows it (property, value,
     /// where it comes from); none while they are hidden.</summary>
@@ -239,15 +236,15 @@ public sealed class XamlPreviewPane : DockPanel
                 Height = ListRow.Height,
                 Children =
                 {
-                    new TextBlock { [DockProperty] = Dock.Right, Text = from, Classes = { StyleClasses.Muted }, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Normal, 0, 0, 0) },
-                    new TextBlock { [DockProperty] = Dock.Left, Text = property, Width = 130, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis },
-                    new TextBlock { Text = value, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis }.InCodeFont(),
+                    new TextBlock { [DockProperty] = Dock.Right, Text = from, Classes = { StyleClasses.Muted, StyleClasses.Caption }, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Normal, 0, 0, 0) },
+                    new TextBlock { Classes = { StyleClasses.Caption }, [DockProperty] = Dock.Left, Text = property, Width = 130, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis },
+                    new TextBlock { Classes = { StyleClasses.Code }, Text = value, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis },
                 },
             });
         }
         if (values.Count == 0)
         {
-            propertyRows.Children.Add(new TextBlock { Text = "Its XAML sets nothing itself.", Classes = { StyleClasses.Muted }, FontSize = 12 });
+            propertyRows.Children.Add(new TextBlock { Text = "Its XAML sets nothing itself.", Classes = { StyleClasses.Muted, StyleClasses.Caption } });
         }
     }
 
@@ -272,9 +269,8 @@ public sealed class XamlPreviewPane : DockPanel
     /// <summary>A chooser of what a MAUI page is drawn as.</summary>
     private static ComboBox Chooser(string[] items, string tip)
     {
-        ComboBox chooser = new()
+        ComboBox chooser = new ToolDropDown
         {
-            Classes = { StyleClasses.Compact },
             VerticalAlignment = VerticalAlignment.Center,
             ItemsSource = items,
         };
@@ -368,10 +364,9 @@ public sealed class XamlPreviewPane : DockPanel
         marks.Height = preview.FrameSize.Height;
         edge.IsVisible = preview.Frame is not null;
         waiting.Text = preview.Status;
-        waiting.Offer(preview.WantsBuild ? AppActions.BuildForPreview : null, preview.WantsBuild ? BuildForPreviewTitle : null);
+        waiting.Offer(preview.Offers, preview.Offers is { } offered ? titleOf(offered) : null);
         waiting.IsVisible = preview.Frame is null;
-        error.Text = preview.Error;
-        errorBar.IsVisible = preview.Error is not null;
+        errorBar.Say(preview.Error);
         if (preview.Frame is null)
         {
             outline.IsVisible = false;

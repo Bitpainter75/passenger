@@ -108,22 +108,27 @@ public sealed class NuGetSourcesView : Panel
         }
     }
 
+    /// <summary>Why a machine-wide file's feeds are shown but never changed.</summary>
+    public const string MachineWide = "A machine-wide file: NuGet reads it and never writes it";
+
+    private const string DoesNotRead = "The file does not read";
+
     private void DrawFile(ConfigFile file)
     {
         Button add = ToolButtons.Of(IconKeys.Add, "Add Feed", () => IdeErrors.Observe(AddAsync(file)));
-        add.IsEnabled = !file.ReadOnly && file.Problem is null;
+        ToolButtons.Grey(add, file.ReadOnly ? MachineWide : file.Problem is null ? null : DoesNotRead);
         add.Name = "AddFeed";
         DockPanel header = new() { Children = { add, Title("Feeds", default) } };
         DockPanel.SetDock(add, Dock.Right);
         details.Children.Add(header);
         if (file.Problem is { } broken)
         {
-            details.Children.Add(Error($"The file does not read: {broken}"));
+            details.Children.Add(Error($"{DoesNotRead}: {broken}"));
             return;
         }
         if (file.ReadOnly)
         {
-            details.Children.Add(MutedText.Wrapped("A machine-wide file: NuGet reads it and never writes it"));
+            details.Children.Add(MutedText.Wrapped(MachineWide));
         }
         if (file.Feeds.Count == 0)
         {
@@ -150,11 +155,11 @@ public sealed class NuGetSourcesView : Panel
         bool enabled = effective?.Enabled ?? !feed.DisabledHere;
         CheckBox toggle = CheckRows.Box();
         toggle.IsChecked = enabled;
-        toggle.IsEnabled = !file.ReadOnly;
         toggle.Margin = new Thickness(0, 0, Gaps.Tight, 0);
-        ToolTip.SetTip(toggle, "Enabled");
+        // A box with no words of its own: named, so its tip says what it is before why it is greyed.
+        ToolButtons.Grey(ToolButtons.Tip(toggle, "Enabled"), file.ReadOnly ? MachineWide : null);
         toggle.IsCheckedChanged += (_, _) => IdeErrors.Observe(SetEnabledAsync(file, feed.Name, toggle.IsChecked == true));
-        TextBlock name = new() { Text = feed.Name, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        TextBlock name = new() { Classes = { StyleClasses.Strong }, Text = feed.Name, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
         TextBlock url = new() { Classes = { StyleClasses.Muted }, Text = feed.Value, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(Gaps.Normal, 0) };
         ToolTip.SetTip(url, feed.Value);
         Grid row = new() { ColumnDefinitions = new ColumnDefinitions("Auto,150,*,Auto,Auto,Auto"), Height = ListRow.Height, Tag = feed.Name };
@@ -170,12 +175,13 @@ public sealed class NuGetSourcesView : Panel
         }
         Button edit = ToolButtons.Of(IconKeys.Edit, "Edit", () => IdeErrors.Observe(EditAsync(file, feed)));
         Button delete = ToolButtons.Of(IconKeys.Clear, "Delete Feed", () => IdeErrors.Observe(DeleteAsync(file, feed)));
-        edit.IsEnabled = delete.IsEnabled = !file.ReadOnly;
+        ToolButtons.Grey(edit, file.ReadOnly ? MachineWide : null);
+        ToolButtons.Grey(delete, file.ReadOnly ? MachineWide : null);
         Add(row, edit, 4);
         Add(row, delete, 5);
         if (effective is null)
         {
-            row.Opacity = 0.55;
+            ListRow.Dim(row, true);
             ToolTip.SetTip(row, "Not used: a nuget.config before this one clears packageSources, or names a feed of this name itself");
         }
         return row;
@@ -184,7 +190,8 @@ public sealed class NuGetSourcesView : Panel
     private Control SummaryRow(FeedSource feed)
     {
         string from = feed.DefinedIn is { } file ? RecentRow.Home(file) : "the environment";
-        Grid line = new() { ColumnDefinitions = new ColumnDefinitions("170,*,Auto"), Opacity = feed.Enabled ? 1 : 0.55 };
+        Grid line = new() { ColumnDefinitions = new ColumnDefinitions("170,*,Auto") };
+        ListRow.Dim(line, !feed.Enabled);
         Add(line, new TextBlock { Text = feed.Name, TextTrimming = TextTrimming.CharacterEllipsis }, 0);
         Add(line, new TextBlock { Classes = { StyleClasses.Muted }, Text = feed.Source, TextTrimming = TextTrimming.PathSegmentEllipsis }, 1);
         Add(line, new TextBlock { Classes = { StyleClasses.Muted }, Text = feed.Enabled ? string.Empty : "disabled", Margin = new Thickness(Gaps.Wide, 0, 0, 0) }, 2);
@@ -282,12 +289,12 @@ public sealed class NuGetSourcesView : Panel
     /// applies (the solution, the folder, the user or the machine), its path in its tip.</summary>
     private static Control FileRow()
     {
-        RowIcon icon = new() { Width = 14, Height = 14, Margin = new Thickness(Gaps.Small, 0, Gaps.Small, 0) };
+        RowIcon icon = new() { Margin = new Thickness(Gaps.Small, 0, Gaps.Small, 0) };
         icon.DataKey = IconKeys.DocumentText;
-        TextBlock place = new() { Classes = { StyleClasses.Muted }, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Normal, 0, Gaps.Normal, 0) };
+        TextBlock place = new() { Classes = { StyleClasses.Muted, StyleClasses.Caption }, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Normal, 0, Gaps.Normal, 0) };
         // Its name, then its folder, which gives way first in a narrow pane so the name stays whole.
         TextBlock name = new() { VerticalAlignment = VerticalAlignment.Center };
-        TextBlock folder = new() { Classes = { StyleClasses.Muted }, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Small, 0, 0, 0) };
+        TextBlock folder = new() { Classes = { StyleClasses.Muted, StyleClasses.Caption }, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(Gaps.Small, 0, 0, 0) };
         ShrinkingRow path = new() { Children = { name, folder } };
         Grid line = new() { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Height = ListRow.Height };
         Add(line, icon, 0);

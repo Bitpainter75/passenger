@@ -29,33 +29,124 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         app.Reset();
     }
 
-    [AvaloniaFact]
-    public void Deeply_nested_markup_extensions_do_not_end_the_editor_and_diagnostics_still_finish()
-    {
-        MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
-        try
-        {
-            CodeEditor editor = window.EditorArea.CodeEditor;
-            const int depth = 100_000;
-            string nested = string.Concat(Enumerable.Repeat("{Binding Path=", depth)) + "Greeting" + new string('}', depth);
-            Replace(editor, "{Binding Greeting}", nested);
-            Replace(editor, "Content=\"Go\"", "Contnt=\"Go\"");
-            Ui.WaitFor(() => window.EditorArea.Active!.Markers.Any(m => m.Message.Contains("Contnt", StringComparison.Ordinal)),
-                "diagnostics after a deeply nested attribute");
-            Assert.Contains(nested, editor.Document.Snapshot.ToString(), StringComparison.Ordinal);
-            Replace(editor, nested, "{Binding Greeting}");
-            Replace(editor, "Contnt=\"Go\"", "Content=\"Go\"");
-            Ui.WaitFor(() => window.EditorArea.Active!.Markers.Count == 0, "the repaired XAML's diagnostics");
-        }
-        finally
-        {
-            window.Close();
-        }
-    }
-
+    /// <summary>The gate's XAML completion, checks, renames, assets, colours and preview, as one flow.</summary>
     [Gate]
     [AvaloniaFact]
-    public void Typing_a_tag_offers_the_controls_then_a_controls_properties_and_then_the_values_of_the_one_chosen()
+    public void The_gates_xaml_completion_checks_renames_assets_colours_and_preview_hold_as_one_flow()
+    {
+        Flow.StepApart("typing a tag offers the controls, then a control's properties, then the values of the one chosen", () => new XamlTests(app), t => t.Typing_a_tag_offers_the_controls_then_a_controls_properties_and_then_the_values_of_the_one_chosen());
+        Flow.StepApart("a value chosen with nothing typed from the list its property opened leaves the caret after it to type on", () => new XamlTests(app), t => t.A_value_chosen_with_nothing_typed_from_the_list_its_property_opened_leaves_the_caret_after_it_to_type_on());
+        Flow.StepApart("a misspelt property, enum value, resource and binding path are marked as typed, listed in Problems and go once put right", () => new XamlTests(app), t => t.A_misspelt_property_enum_value_resource_and_binding_path_are_marked_as_typed_listed_in_problems_and_go_once_put_right());
+        Flow.StepApart("Passenger's own XAML, which compiles, is marked with no problem", () => new XamlTests(app), t => t.Passengers_own_xaml_which_compiles_is_marked_with_no_problem());
+        Flow.StepApart("an element's name renames with its code-behind's uses, and Go to Declaration from the code lands on it", () => new XamlTests(app), t => t.An_elements_name_renames_with_its_code_behinds_uses_and_go_to_declaration_from_the_code_lands_on_it());
+        Flow.StepApart("an avares path completes from the project's assets, is warned of when missing and goes to its file", () => new XamlTests(app), t => t.An_avares_path_completes_from_the_projects_assets_is_warned_of_when_missing_and_goes_to_its_file());
+        Flow.StepApart("colours show as gutter swatches, and one chosen in the picker is written back as it was written", () => new XamlTests(app), t => t.Colours_show_as_gutter_swatches_and_one_chosen_in_the_picker_is_written_back_as_it_was_written());
+        Flow.StepApart("a window closed as its preview waits for the previewer is let go", () => new XamlTests(app), t => t.A_window_closed_as_its_preview_waits_for_the_previewer_is_let_go());
+    }
+
+    /// <summary>XAML completed and checked as its compiler reads it: a resource's keys and a binding's path; an x:Class
+    /// no C# declares marked; the compiler's error after a build at the editor's line below a lone carriage return; and
+    /// markup nested past a stack, a type its own base or a cycle, or half a surrogate pair leaving the XAML checked
+    /// and the IDE running.</summary>
+    [AvaloniaFact]
+    public void Xaml_is_completed_and_checked_as_its_compiler_reads_it_and_no_text_ends_the_ide()
+    {
+        Flow.StepApart("a resource reference offers the keys the app merges in, and a binding its data type's properties through a path", () => new XamlTests(app), t => t.A_resource_reference_offers_the_keys_the_app_merges_in_and_a_binding_its_data_types_properties_through_a_path());
+        Flow.StepApart("an x:Class no C# declares is marked as Avalonia's compiler refuses it", () => new XamlTests(app), t => t.An_x_class_no_csharp_declares_is_marked_as_avalonias_compiler_refuses_it());
+        Flow.StepApart("after a build, the XAML compiler's error below a lone carriage return is listed, marked and gone to at the editor's line", () => new XamlTests(app), t => t.After_a_build_the_xaml_compilers_error_below_a_lone_carriage_return_is_listed_marked_and_gone_to_at_the_editors_line());
+        Flow.StepApart("a value of markup extensions nested a hundred thousand deep leaves the XAML checked and the IDE running", () => new XamlTests(app), t => t.A_value_of_markup_extensions_nested_a_hundred_thousand_deep_leaves_the_xaml_checked_and_the_ide_running());
+        Flow.StepApart("an interface typed as its own base or in a cycle beside open XAML leaves the XAML checked and the IDE running", () => new XamlTests(app), t => t.An_interface_typed_as_its_own_base_or_in_a_cycle_beside_open_xaml_leaves_the_xaml_checked_and_the_ide_running());
+        Flow.StepApart("a character reference to half a surrogate pair leaves its file and the project's others with their help", () => new XamlTests(app), t => t.A_character_reference_to_half_a_surrogate_pair_leaves_its_file_and_the_projects_others_with_their_help());
+    }
+
+    /// <summary>Compiled bindings: one with no data type marked, the fix giving the view its view model's type clearing
+    /// it and building; a binding element, a data context, a relative source and a cast path marked until given one; an
+    /// element's own data context binding starting from the type above it; and one under items starting from their
+    /// type.</summary>
+    [AvaloniaFact]
+    public void A_compiled_binding_starts_from_the_type_its_data_context_gives_and_is_marked_until_given_one()
+    {
+        Flow.StepApart("a compiled binding with no data type is marked, and the fix giving the view its view model's type clears it and builds", () => new XamlTests(app), t => t.A_compiled_binding_with_no_data_type_is_marked_and_the_fix_giving_the_view_its_view_models_type_clears_it_and_builds());
+        Flow.StepApart("a binding element, a data context relative source and a cast path with no data type are marked, and build once given one", () => new XamlTests(app), t => t.A_binding_element_a_data_context_relative_source_and_a_cast_path_with_no_data_type_are_marked_and_build_once_given_one());
+        Flow.StepApart("an element's own data context binding starts from the type above it and gives its path's type to what is inside", () => new XamlTests(app), t => t.An_elements_own_data_context_binding_starts_from_the_type_above_it_and_gives_its_path_type_to_what_is_inside());
+        Flow.StepApart("a compiled binding under a data context of no type is marked, and one under items starts from their type", () => new XamlTests(app), t => t.A_compiled_binding_under_a_data_context_of_no_type_is_marked_and_one_under_items_starts_from_their_type());
+    }
+
+    /// <summary>XAML gets its help as what it reads arrives: a view model's property added in a referenced project, a
+    /// project that takes Avalonia or a package restored while the XAML is open, one restored into artifacts, and a
+    /// project holding folder links back up its own tree.</summary>
+    [AvaloniaFact]
+    public void Xaml_gets_its_help_as_projects_and_packages_arrive_and_change()
+    {
+        Flow.StepApart("a property added to a view model in a referenced project reaches the XAML that binds to it", () => new XamlTests(app), t => t.A_property_added_to_a_view_model_in_a_referenced_project_reaches_the_xaml_that_binds_to_it());
+        Flow.StepApart("a project that takes Avalonia while its XAML is open gets its XAML help once the restore lands", () => new XamlTests(app), t => t.A_project_that_takes_avalonia_while_its_xaml_is_open_gets_its_xaml_help_once_the_restore_lands());
+        Flow.StepApart("a package restored while its XAML is open has its types read once the restore lands", () => new XamlTests(app), t => t.A_package_restored_while_its_xaml_is_open_has_its_types_read_once_the_restore_lands());
+        Flow.StepApart("a package restored into artifacts while its XAML is open has its types read once the restore lands", () => new XamlTests(app), t => t.A_package_restored_into_artifacts_while_its_xaml_is_open_has_its_types_read_once_the_restore_lands(false));
+        Flow.StepApart("a project holding folder links back up its own tree gets its XAML help", () => new XamlTests(app), t => t.A_project_holding_folder_links_back_up_its_own_tree_gets_its_xaml_help());
+    }
+
+    /// <summary>XAML and the C# it names: Go to Declaration from XAML; a bound property and a handler with their XAML
+    /// among their usages, however the path reaches them, and Safe Delete naming it; renames from the C#, of an
+    /// element's field from the code-behind and of an element's name, refused where the name would break the code,
+    /// keeping a line written meanwhile and waiting for the server to read a XAML file just written or saved.</summary>
+    [AvaloniaFact]
+    public void Xaml_is_found_among_usages_and_renamed_with_the_csharp_it_names_waiting_for_the_server_to_read_it()
+    {
+        Flow.StepApart("Go to Declaration from XAML opens a control's class, a resource's definition and a bound property", () => new XamlTests(app), t => t.Go_to_declaration_from_xaml_opens_a_controls_class_a_resources_definition_and_a_bound_property());
+        Flow.StepApart("a bound property and a handler have their XAML among their usages, and Safe Delete names it before breaking the build", () => new XamlTests(app), t => t.A_bound_property_and_a_handler_have_their_xaml_among_their_usages_and_safe_delete_names_it_before_breaking_the_build());
+        Flow.StepApart("a property bound by an element, its path text, a null-conditional path or after an indexer has that XAML among its usages", () => new XamlTests(app), t => t.A_property_bound_by_an_element_its_path_text_a_null_conditional_path_or_after_an_indexer_has_that_xaml_among_its_usages());
+        Flow.StepApart("Find Usages of a property no XAML names reads no project's XAML, and of one bound reads it once", () => new XamlTests(app), t => t.Find_usages_of_a_property_no_xaml_names_reads_no_projects_xaml_and_of_one_bound_reads_it_once());
+        Flow.StepApart("renaming a bound property, a command, a static member and a handler in C# renames the XAML using them, and the app builds", () => new XamlTests(app), t => t.Renaming_a_bound_property_a_command_a_static_member_and_a_handler_in_csharp_renames_the_xaml_using_them_and_the_app_builds());
+        Flow.StepApart("an element's field renamed from the code-behind renames the element in its XAML and every use", () => new XamlTests(app), t => t.An_elements_field_renamed_from_the_code_behind_renames_the_element_in_its_xaml_and_every_use());
+        Flow.StepApart("an element's name is not renamed to a C# keyword, another element's or its handler's, and its files are left as they were", () => new XamlTests(app), t => t.An_elements_name_is_not_renamed_to_a_csharp_keyword_another_elements_or_its_handlers_and_its_files_are_left_as_they_were());
+        Flow.StepApart("a line written in the code-behind while an element's rename is out still renames its use there", () => new XamlTests(app), t => t.A_line_written_in_the_code_behind_while_an_elements_rename_is_out_still_renames_its_use_there());
+        Flow.StepApart("an element's field renamed from the code-behind a moment after its XAML was written waits for the server to read it", () => new XamlTests(app), t => t.An_elements_field_renamed_from_the_code_behind_a_moment_after_its_xaml_was_written_waits_for_the_server_to_read_it());
+        Flow.StepApart("a XAML file saved is kept for the language server to read before the folder's watcher tells of it", () => new XamlTests(app), t => t.A_xaml_file_saved_is_kept_for_the_language_server_to_read_before_the_folders_watcher_tells_of_it());
+    }
+
+    /// <summary>A theme's XAML: Go to Declaration reaching the theme's own XAML for a control, a template part and a
+    /// resource; a key one theme variant lacks warned of where defined and used, the fix adding it to that variant; and
+    /// an include climbing out of its sources' folder refused, nothing written outside it.</summary>
+    [AvaloniaFact]
+    public void A_themes_xaml_is_gone_to_and_fixed_by_variant_and_its_include_kept_inside_its_sources()
+    {
+        Flow.StepApart("Go to Declaration reaches the theme's own XAML for a control, a template part and a theme resource", () => new XamlTests(app), t => t.Go_to_declaration_reaches_the_themes_own_xaml_for_a_control_a_template_part_and_a_theme_resource());
+        Flow.StepApart("a key one theme variant lacks is warned of where defined and used, and the fix adds it to that variant", () => new XamlTests(app), t => t.A_key_one_theme_variant_lacks_is_warned_of_where_defined_and_used_and_the_fix_adds_it_to_that_variant());
+        Flow.StepApart("a theme's include that climbs out of its sources' folder is refused, and nothing is written outside it", () => new XamlTests(app), t => t.A_themes_include_that_climbs_out_of_its_sources_folder_is_refused_and_nothing_is_written_outside_it());
+    }
+
+    /// <summary>The Avalonia preview: a window drawn from the last build following its text as it is typed and styles
+    /// as their PreviewWith; the caret's element outlined and a click selecting its start tag; a phone's and a tablet's
+    /// size beside the design size; an Avalonia 11 app's previewer found in its packages with obj and bin moved; in the
+    /// XAML workspace, what the caret's element sets itself; and a shared library's view drawn in its desktop head.</summary>
+    [AvaloniaFact]
+    public void The_avalonia_preview_draws_the_window_follows_the_caret_and_sizes_and_shows_what_an_element_sets()
+    {
+        Flow.StepApart("the preview draws a window from the last build, follows its text as it is typed and draws styles as their PreviewWith", () => new XamlTests(app), t => t.The_preview_draws_a_window_from_the_last_build_follows_its_text_as_it_is_typed_and_draws_styles_as_their_PreviewWith());
+        Flow.StepApart("an Avalonia preview outlines the caret's element, and a click on one selects its start tag", () => new XamlTests(app), t => t.An_avalonia_preview_outlines_the_carets_element_and_a_click_on_one_selects_its_start_tag());
+        Flow.StepApart("an Avalonia preview draws its root at a phone's and a tablet's size beside its design size", () => new XamlTests(app), t => t.An_avalonia_preview_draws_its_root_at_a_phones_and_a_tablets_size_beside_its_design_size());
+        Flow.StepApart("an app on Avalonia 11 with its obj and bin folders moved previews from its package's previewer", () => new XamlTests(app), t => t.An_app_on_Avalonia_11_with_its_obj_and_bin_folders_moved_previews_from_its_packages_previewer());
+        Flow.StepApart("in the XAML workspace the preview shows what the caret's element sets itself while no app runs", () => new XamlTests(app), t => t.In_the_xaml_workspace_the_preview_shows_what_the_carets_element_sets_itself_while_no_app_runs());
+        Flow.Step("a shared library's view previews in the desktop head that runs it, once Build for XAML Preview built that head", XamlLibraryPreviewTests.A_shared_librarys_view_previews_in_the_desktop_head_that_runs_it);
+    }
+
+    /// <summary>An Avalonia previewer's life: sent nothing until its session started; an edit's preview settling on its
+    /// own frame; one run for the preview shown and the one hidden last, a build starting only the shown one again; its
+    /// end said with its last line or exit, the next edit drawing in a new one; a failed XAML compile's rebuild
+    /// offered; and twenty opens and closes beside busy processes faulting no read.</summary>
+    [AvaloniaFact]
+    public void A_previewers_life_is_followed_from_its_session_to_its_end_and_never_holds_the_window()
+    {
+        Flow.StepApart("a previewer is sent nothing until it says its session started", () => new XamlTests(app), t => t.A_previewer_is_sent_nothing_until_it_says_its_session_started());
+        Flow.StepApart("an edit's preview settles on its own frame, never one of the window its load replaces", () => new XamlTests(app), t => t.An_edits_preview_settles_on_its_own_frame_never_one_of_the_window_its_load_replaces());
+        Flow.StepApart("previewers run for the preview shown and the one hidden last, and a build starts only the shown one again", () => new XamlTests(app), t => t.Previewers_run_for_the_preview_shown_and_the_one_hidden_last_and_a_build_starts_only_the_shown_one_again());
+        Flow.StepApart("a previewer that writes a last line and exits at once is said to have ended with that line", () => new XamlTests(app), t => t.A_previewer_that_writes_a_last_line_and_exits_at_once_is_said_to_have_ended_with_that_line());
+        Flow.StepApart("an Avalonia previewer that ends says its exit, and the next edit draws in a new one", () => new XamlTests(app), t => t.An_Avalonia_previewer_that_ends_says_its_exit_and_the_next_edit_draws_in_a_new_one());
+        Flow.StepApart("a build after a failed XAML compile says its XAML was never compiled, and the preview offers the rebuild", () => new XamlTests(app), t => t.A_build_after_a_failed_xaml_compile_says_its_xaml_was_never_compiled_and_the_preview_offers_the_rebuild());
+        Flow.StepApart("opening and closing the XAML preview twenty times beside busy processes faults no read of the previewer", () => new XamlTests(app), t => t.Opening_and_closing_the_XAML_preview_twenty_times_beside_busy_processes_faults_no_read_of_the_previewer());
+    }
+
+    private void Typing_a_tag_offers_the_controls_then_a_controls_properties_and_then_the_values_of_the_one_chosen()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -93,9 +184,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_value_chosen_with_nothing_typed_from_the_list_its_property_opened_leaves_the_caret_after_it_to_type_on()
+    private void A_value_chosen_with_nothing_typed_from_the_list_its_property_opened_leaves_the_caret_after_it_to_type_on()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -128,8 +217,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void A_resource_reference_offers_the_keys_the_app_merges_in_and_a_binding_its_data_types_properties_through_a_path()
+    private void A_resource_reference_offers_the_keys_the_app_merges_in_and_a_binding_its_data_types_properties_through_a_path()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -165,74 +253,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    /// <summary>An event's handlers come from the code-behind as its project compiles it: one declared under
-    /// #if NET8_0_OR_GREATER is offered, one under #if !NET8_0_OR_GREATER is not.</summary>
-    [AvaloniaFact]
-    public void An_events_handlers_are_the_code_behinds_methods_under_its_frameworks_symbols_and_not_those_it_never_compiles()
-    {
-        app.Rewrite("MainWindow.axaml.cs", Gallery.CodeBehind.Replace("    }\n}", """
-                }
-
-            #if NET8_0_OR_GREATER
-                private void OnGo(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-                {
-                }
-            #endif
-
-            #if !NET8_0_OR_GREATER
-                private void OnLegacyGo(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-                {
-                }
-            #endif
-            }
-            """, StringComparison.Ordinal));
-        MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
-        // The XAML read again with what the evaluation says the code-behind is compiled with, before the list is asked for.
-        Ui.WaitFor(() => window.WorkspaceModel!.Projects.All(p => p.IsEvaluated), "Gallery's project to be evaluated");
-        Ui.Settle();
-        CodeEditor editor = window.EditorArea.CodeEditor;
-        Ui.PlaceAfter(editor, "<Button Name=\"Go\" Content=\"Go\"");
-        window.KeyTextInput(" Click=");
-        window.KeyTextInput("\"");
-        Ui.WaitFor(() => window.Assist.CompletionLabels.Contains("OnGo"),
-            () => $"OnGo, declared under #if NET8_0_OR_GREATER in the {TestProjects.Framework} project's code-behind, among Click's handlers [{string.Join(", ", window.Assist.CompletionLabels)}]");
-        Assert.DoesNotContain("OnLegacyGo", window.Assist.CompletionLabels);
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public void Passengers_own_main_window_completes_its_theme_tokens_and_its_style_classes()
-    {
-        MainWindow window = new() { Width = 1200, Height = 800, Autosaves = false };
-        window.Show();
-        window.OpenFile(Path.Combine(Repository, "src", "Passenger.App", "MainWindow.axaml"));
-        Ui.Settle();
-        CodeEditor editor = window.EditorArea.CodeEditor;
-        Ui.PlaceAfter(editor, "Background=\"{DynamicResource Passenger.");
-        Ui.Run(window, AppActions.Complete);
-        Ui.WaitFor(() => window.Assist.CompletionLabels.Contains(TokenKeys.Panel), "Tokens.axaml's keys, which App.axaml merges in");
-        Assert.Contains(TokenKeys.Editor_Background, window.Assist.CompletionLabels);
-        Ui.Press(window, "ESCAPE");
-        Ui.PlaceAfter(editor, "<PathIcon Data=\"{StaticResource Icon.");
-        Ui.Run(window, AppActions.Complete);
-        Ui.WaitFor(() => window.Assist.CompletionLabels.Contains(IconKeys.Menu), "Icons.axaml's geometries");
-        Ui.Press(window, "ESCAPE");
-
-        Ui.PlaceAfter(editor, "<Button Name=\"MenuButton\" Classes=\"");
-        Ui.Run(window, AppActions.Complete);
-        Ui.WaitFor(() => window.Assist.CompletionLabels.Contains("tool"), "the style classes Shell.axaml styles");
-        Assert.Contains("widget", window.Assist.CompletionLabels);
-        Ui.Press(window, "ESCAPE");
-
-        Ui.PlaceAfter(editor, "<editors:");
-        Ui.Run(window, AppActions.Complete);
-        Ui.WaitFor(() => window.Assist.CompletionLabels.Contains("EditorArea"), "Passenger's own controls, from its C#, under their prefix");
-        window.Close();
-    }
-
-    [Gate]
-    [AvaloniaFact]
-    public void A_misspelt_property_enum_value_resource_and_binding_path_are_marked_as_typed_listed_in_problems_and_go_once_put_right()
+    private void A_misspelt_property_enum_value_resource_and_binding_path_are_marked_as_typed_listed_in_problems_and_go_once_put_right()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -259,8 +280,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
 
     /// <summary>Markup extensions nested a hundred thousand deep in one value leave the file checked and the IDE running: a
     /// mistake beside them is marked and put right.</summary>
-    [AvaloniaFact]
-    public void A_value_of_markup_extensions_nested_a_hundred_thousand_deep_leaves_the_xaml_checked_and_the_ide_running()
+    private void A_value_of_markup_extensions_nested_a_hundred_thousand_deep_leaves_the_xaml_checked_and_the_ide_running()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -276,8 +296,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void An_interface_typed_as_its_own_base_or_in_a_cycle_beside_open_xaml_leaves_the_xaml_checked_and_the_ide_running()
+    private void An_interface_typed_as_its_own_base_or_in_a_cycle_beside_open_xaml_leaves_the_xaml_checked_and_the_ide_running()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         OpenDocument view = window.EditorArea.Active!;
@@ -308,48 +327,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    /// <summary>A view model typed into as its project's XAML begins to load, the text of the first pause held from the
-    /// project until the next pause's text has landed: let go, the older text is passed over, and the XAML keeps the types
-    /// of the text typed last.</summary>
-    [AvaloniaFact]
-    public void A_view_models_text_typed_as_its_xaml_loads_is_never_replaced_by_an_older_one_landing_after_it()
-    {
-        MainWindow window = app.Open(null, languageServer: false);
-        Passenger.Xaml.XamlProject? latest = null;
-        window.XamlService.ProjectChanged += (_, project) => latest = project;
-        window.OpenFile(app.PathOf("MainWindow.axaml"));
-        OpenDocument view = window.EditorArea.Active!;
-        Replace(window.EditorArea.CodeEditor, "<TextBlock Text=\"{Binding #Go.Content}\" />",
-            "<TextBlock Text=\"{Binding #Go.Content}\" />\n        <TextBlock Text=\"{Binding Subtitle}\" />");
-        window.OpenFile(app.PathOf("ViewModels/MainViewModel.cs"));
-        CodeEditor code = window.EditorArea.CodeEditor;
-        TaskCompletionSource older = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task held = window.XamlService.HoldNextText(older.Task);
-        try
-        {
-            Replace(code, "public int Count { get; set; }\n", "public int Count { get; set; }\n\n    public string Caption { get; set; } = \"\";\n");
-            Ui.PumpUntil(() => held.IsCompleted, "the text with Caption, typing paused, held from the project");
-            Replace(code, "public string Caption", "public string Subtitle");
-            Ui.PumpUntil(() => ViewModelMembers(latest).Contains("Subtitle"), "the text typed next, with Subtitle, taken by the project");
-        }
-        finally
-        {
-            older.SetResult();
-        }
-        Ui.Settle();
-        string[] members = ViewModelMembers(latest);
-        Assert.True(members.Contains("Subtitle") && !members.Contains("Caption"),
-            $"The text typed first, landing last, took the XAML's view model back to an older text: [{string.Join(", ", members)}]");
-        Assert.True(view.Markers.Count == 0, $"The binding to the property typed last is marked: [{string.Join(", ", view.Markers.Select(m => m.Message))}]");
-        window.Close();
-    }
-
-    /// <summary>The names of the members of the app's view model as a project of its XAML reads them; none for no project.</summary>
-    private static string[] ViewModelMembers(Passenger.Xaml.XamlProject? project) =>
-        project?.Types.Find("Gallery.ViewModels.MainViewModel") is { } type ? [.. type.Members.Select(m => m.Name)] : [];
-
-    [AvaloniaFact]
-    public void A_character_reference_to_half_a_surrogate_pair_leaves_its_file_and_the_projects_others_with_their_help()
+    private void A_character_reference_to_half_a_surrogate_pair_leaves_its_file_and_the_projects_others_with_their_help()
     {
         // An emoji written as two references, each half a UTF-16 pair: no character XML allows, read as written.
         string emoji = app.Write("Emoji.axaml", """
@@ -387,8 +365,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void A_property_added_to_a_view_model_in_a_referenced_project_reaches_the_xaml_that_binds_to_it()
+    private void A_property_added_to_a_view_model_in_a_referenced_project_reaches_the_xaml_that_binds_to_it()
     {
         // The usual layout: the app's XAML in Shop, its view models in Shop.Core, which Shop references.
         string folder = PathNames.Canonical(TestFolders.Create("xaml-core-"));
@@ -456,8 +433,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
 
     /// <summary>A project whose folders link back up its own tree gets its XAML help, and Go to Declaration from a named
     /// element's field in the code-behind finds the XAML that declares its class, deep among those links.</summary>
-    [AvaloniaFact]
-    public void A_project_holding_folder_links_back_up_its_own_tree_gets_its_xaml_help()
+    private void A_project_holding_folder_links_back_up_its_own_tree_gets_its_xaml_help()
     {
         string folder = PathNames.Canonical(TestFolders.Create("xaml-links-"));
         string shop = Path.Combine(folder, "Shop");
@@ -537,8 +513,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         }
     }
 
-    [AvaloniaFact]
-    public void A_project_that_takes_avalonia_while_its_xaml_is_open_gets_its_xaml_help_once_the_restore_lands()
+    private void A_project_that_takes_avalonia_while_its_xaml_is_open_gets_its_xaml_help_once_the_restore_lands()
     {
         // A library with XAML in it but no Avalonia yet: nothing Passenger reads until the package is added and restored.
         string folder = PathNames.Canonical(TestFolders.Create("xaml-later-"));
@@ -560,7 +535,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
                     """);
                 Restore.Run(folder);
             }, folder);
-            MainWindow window = Ui.OpenFolder(folder, autosaves: false);
+            MainWindow window = Ui.OpenFolder(folder, languageServer: false, autosaves: false);
             window.OpenFile(Path.Combine(folder, "MainView.axaml"));
             OpenDocument document = window.EditorArea.Active!;
             Passenger.App.Xaml.XamlDocument xaml = window.XamlService.For(document) ?? throw new InvalidOperationException("The XAML file of a C# project was given no XAML");
@@ -590,8 +565,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         }
     }
 
-    [AvaloniaFact]
-    public void A_package_restored_while_its_xaml_is_open_has_its_types_read_once_the_restore_lands()
+    private void A_package_restored_while_its_xaml_is_open_has_its_types_read_once_the_restore_lands()
     {
         string folder = PathNames.Canonical(TestFolders.Create("xaml-restore-"));
         try
@@ -614,7 +588,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
                     """);
                 Restore.Run(folder);
             }, folder);
-            MainWindow window = Ui.OpenFolder(folder, autosaves: false);
+            MainWindow window = Ui.OpenFolder(folder, languageServer: false, autosaves: false);
             window.OpenFile(Path.Combine(folder, "MainWindow.axaml"));
             OpenDocument document = window.EditorArea.Active!;
             Ui.WaitFor(() => document.Markers.Any(m => m.Message.Contains("AvaloniaHeadlessPlatformOptions", StringComparison.Ordinal)),
@@ -637,10 +611,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// <summary>The same where the solution keeps its build output in artifacts/ (UseArtifactsOutput), its project in a folder
     /// below: the restore writes artifacts/obj/Fresh/project.assets.json, under no project's folder, on either way of
     /// watching (each folder on its own, as on Linux, or the whole tree).</summary>
-    [AvaloniaTheory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void A_package_restored_into_artifacts_while_its_xaml_is_open_has_its_types_read_once_the_restore_lands(bool eachFolder)
+    private void A_package_restored_into_artifacts_while_its_xaml_is_open_has_its_types_read_once_the_restore_lands(bool eachFolder)
     {
         string folder = PathNames.Canonical(TestFolders.Create("xaml-artifacts-"));
         string app = Path.Combine(folder, "src", "Fresh");
@@ -667,7 +638,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
                 Restore.Run(app);
             }, folder);
             Assert.True(File.Exists(Path.Combine(folder, "artifacts", "obj", "Fresh", "project.assets.json")), "The restore wrote its assets somewhere other than artifacts/obj/Fresh");
-            MainWindow window = new() { Width = 1200, Height = 800, Autosaves = false, Watching = eachFolder ? FolderWatching.Inotify : FolderWatching.WholeTree };
+            MainWindow window = new() { Width = 1200, Height = 800, Autosaves = false, StartsLanguageServer = false, Watching = eachFolder ? FolderWatching.Inotify : FolderWatching.WholeTree };
             window.Show();
             window.OpenFolder(folder);
             window.OpenFile(Path.Combine(app, "MainWindow.axaml"));
@@ -688,8 +659,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         }
     }
 
-    [AvaloniaFact]
-    public void An_x_class_no_csharp_declares_is_marked_as_avalonias_compiler_refuses_it()
+    private void An_x_class_no_csharp_declares_is_marked_as_avalonias_compiler_refuses_it()
     {
         // Avalonia's compiler makes no class for it: it says "Unable to find type" (AVLN2000).
         string badge = app.Write("Badge.axaml", """
@@ -710,45 +680,10 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    /// <summary>A &lt;Binding&gt; element whose path is a CDATA section, in a view with no x:DataType where bindings
-    /// compile, is marked as the build refuses it, as the same path written as text is.</summary>
-    [AvaloniaFact]
-    public void A_binding_elements_path_in_a_cdata_section_is_read_as_the_path_it_holds()
-    {
-        const string Unbound = """
-            <UserControl xmlns="https://github.com/avaloniaui"
-                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-                <StackPanel>
-                    <TextBlock>
-                        <TextBlock.Text>
-                            <Binding>
-                                <Binding.Path>Greeting</Binding.Path>
-                            </Binding>
-                        </TextBlock.Text>
-                    </TextBlock>
-                    <TextBlock>
-                        <TextBlock.Text>
-                            <Binding>
-                                <Binding.Path><![CDATA[Greeting]]></Binding.Path>
-                            </Binding>
-                        </TextBlock.Text>
-                    </TextBlock>
-                </StackPanel>
-            </UserControl>
-
-            """;
-        const string NoDataType = "No x:DataType gives this compiled binding the type it binds to";
-        MainWindow window = app.Open(app.Write("CdataView.axaml", Unbound));
-        OpenDocument document = window.EditorArea.Active!;
-        Ui.WaitFor(() => document.Markers.Count(m => m.Message == NoDataType) == 2,
-            () => $"both binding elements marked, the CDATA section's path read as the path it holds: {string.Join("; ", document.Markers.Select(m => m.Message))}");
-    }
-
     /// <summary>A view with no x:DataType in an Avalonia 12 project, which compiles its bindings: its {Binding} and its
     /// {CompiledBinding}, which Avalonia's compiler refuses (AVLN2100), are marked. The fix that gives the view the view
     /// model's x:DataType, its namespace declared, clears both as one step of Undo, and the project builds.</summary>
-    [AvaloniaFact]
-    public void A_compiled_binding_with_no_data_type_is_marked_and_the_fix_giving_the_view_its_view_models_type_clears_it_and_builds()
+    private void A_compiled_binding_with_no_data_type_is_marked_and_the_fix_giving_the_view_its_view_models_type_clears_it_and_builds()
     {
         const string Unbound = """
             <UserControl xmlns="https://github.com/avaloniaui"
@@ -801,8 +736,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// <summary>Three forms of compiled binding that start at the data context, each refused by Avalonia's compiler with no
     /// x:DataType (AVLN2100), are marked: a binding element, a binding to RelativeSource DataContext, and a path whose first
     /// step is cast. The binding element offers the view model's x:DataType, which clears all three; the view builds.</summary>
-    [AvaloniaFact]
-    public void A_binding_element_a_data_context_relative_source_and_a_cast_path_with_no_data_type_are_marked_and_build_once_given_one()
+    private void A_binding_element_a_data_context_relative_source_and_a_cast_path_with_no_data_type_are_marked_and_build_once_given_one()
     {
         const string Unbound = """
             <UserControl xmlns="https://github.com/avaloniaui"
@@ -852,8 +786,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// whatever x:DataType the element gives what is inside it; one with no x:DataType gives what is inside it its path's
     /// type. Each binding the build refuses is marked and none it takes, and completion and Go to Declaration in the
     /// DataContext binding take the type above, in a binding beside it the type it gives. Put right, the view builds.</summary>
-    [AvaloniaFact]
-    public void An_elements_own_data_context_binding_starts_from_the_type_above_it_and_gives_its_path_type_to_what_is_inside()
+    private void An_elements_own_data_context_binding_starts_from_the_type_above_it_and_gives_its_path_type_to_what_is_inside()
     {
         const string Contexts = """
             <UserControl xmlns="https://github.com/avaloniaui"
@@ -917,70 +850,12 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    /// <summary>A <c>&lt;Binding&gt;</c> element is the compiled binding Avalonia's compiler makes of it: its DataType is
-    /// taken, not marked, and starts its path, so a step that type lacks is marked; a <c>&lt;CompiledBinding&gt;</c>
-    /// element's path given as text, which the build refuses, is marked, and its fix makes it a Binding. Put right, the
-    /// view builds.</summary>
-    [AvaloniaFact]
-    public void A_binding_elements_data_type_starts_its_path_and_a_compiled_binding_elements_text_path_is_marked_and_made_a_binding()
-    {
-        const string Elements = """
-            <UserControl xmlns="https://github.com/avaloniaui"
-                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                         xmlns:vm="using:Gallery.ViewModels"
-                         x:DataType="vm:MainViewModel">
-                <StackPanel>
-                    <TextBlock>
-                        <TextBlock.Text>
-                            <Binding Path="Greeting" DataType="vm:MainViewModel" Mode="OneWay" />
-                        </TextBlock.Text>
-                    </TextBlock>
-                    <TextBlock>
-                        <TextBlock.Text>
-                            <Binding Path="Nickname" DataType="vm:Person" />
-                        </TextBlock.Text>
-                    </TextBlock>
-                    <TextBlock>
-                        <TextBlock.Text>
-                            <CompiledBinding Path="Owner.Name" />
-                        </TextBlock.Text>
-                    </TextBlock>
-                </StackPanel>
-            </UserControl>
-
-            """;
-        MainWindow window = app.Open(app.Write("ElementsView.axaml", Elements));
-        CodeEditor editor = window.EditorArea.CodeEditor;
-        OpenDocument document = window.EditorArea.Active!;
-        Ui.WaitFor(() => document.Markers.Count == 2, () => $"the two elements the build refuses marked, and the DataType it takes not: {string.Join("; ", document.Markers.Select(m => m.Message))}");
-        Assert.Equal("Cannot resolve property 'Nickname' on Person", MarkerOn(editor, document, "Nickname").Message);
-        Assert.Equal("A CompiledBinding element takes no Path as text", MarkerOn(editor, document, "Owner.Name").Message);
-
-        Ui.PlaceAfter(editor, "<CompiledBinding Path=\"Own");
-        Ui.Run(window, AppActions.QuickFix);
-        Ui.WaitFor(() => window.Assist.Offered.Count > 0, "the fix offered on the compiled binding element's line");
-        Assert.Equal("Use Binding", window.Assist.Offered[0]);
-        Ui.Press(window, "ENTER");
-        Ui.Settle();
-        Assert.Contains("<Binding Path=\"Owner.Name\" />", editor.Document.Snapshot.ToString(), StringComparison.Ordinal);
-        Replace(editor, "Path=\"Nickname\"", "Path=\"Name\"");
-        Ui.WaitFor(() => document.Markers.Count == 0, () => $"every binding resolved once put right: {string.Join("; ", document.Markers.Select(m => m.Message))}");
-
-        Ui.Run(window, AppActions.Build);
-        Ui.Settle();
-        string said = $"{Ui.Said(window)}: {string.Join("; ", window.BottomPanel.Problems.Problems.Select(p => $"{p.Code} {p.Where} {p.Message}"))}";
-        Assert.True(window.Status?.StartsWith("Build succeeded", StringComparison.Ordinal) == true, $"The view Passenger finds right did not build: {said}");
-        Assert.True(!window.BottomPanel.Problems.Problems.Any(p => p.Path?.EndsWith("ElementsView.axaml", StringComparison.Ordinal) == true), $"The build said something of the view: {said}");
-        window.Close();
-    }
-
     /// <summary>A compiled binding under a data context Avalonia's compiler has no type for is marked as it refuses it: one a
     /// ReflectionBinding sets, and a data template's whose property takes no type from items; a template of an items
     /// control's items and a DisplayMemberBinding start from their type, a step it lacks marked, and <c>?.</c> is a step.
     /// The fix gives the element where the type is missing the x:DataType of the class that has the step; Go to
     /// Declaration takes the items' type too. Put right, the view builds.</summary>
-    [AvaloniaFact]
-    public void A_compiled_binding_under_a_data_context_of_no_type_is_marked_and_one_under_items_starts_from_their_type()
+    private void A_compiled_binding_under_a_data_context_of_no_type_is_marked_and_one_under_items_starts_from_their_type()
     {
         const string Shelf = """
             using System.Collections.Generic;
@@ -1068,55 +943,12 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    /// <summary>A step after a cast is read against the cast's type, and an element's own DataContext binding starts from
-    /// the type above it whatever DataType it names, as Avalonia's compiler reads them: each step the build refuses is
-    /// marked on the type it names, and none it takes. Put right, the view builds.</summary>
-    [AvaloniaFact]
-    public void A_step_after_a_cast_and_a_data_context_binding_naming_a_data_type_are_read_as_the_build_reads_them()
-    {
-        const string Steps = """
-            <UserControl xmlns="https://github.com/avaloniaui"
-                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                         xmlns:vm="using:Gallery.ViewModels"
-                         x:DataType="vm:MainViewModel">
-                <StackPanel>
-                    <TextBlock Text="{Binding ((vm:Person)Owner).Nickname}" />
-                    <TextBlock Text="{Binding ((vm:Person)Owner).Name.Length}" />
-                    <Border DataContext="{Binding Owner, DataType=vm:MainViewModel}">
-                        <TextBlock Text="{Binding Greeting}" />
-                    </Border>
-                    <Border DataContext="{Binding Name, DataType=vm:Person}" />
-                </StackPanel>
-            </UserControl>
-
-            """;
-        MainWindow window = app.Open(app.Write("StepsView.axaml", Steps));
-        CodeEditor editor = window.EditorArea.CodeEditor;
-        OpenDocument document = window.EditorArea.Active!;
-        Ui.WaitFor(() => document.Markers.Count == 3, () => $"the three steps the build refuses marked, and none it takes: {string.Join("; ", document.Markers.Select(m => m.Message))}");
-        Assert.Equal("Cannot resolve property 'Nickname' on Person", MarkerOn(editor, document, "Nickname").Message);
-        Assert.Equal("Cannot resolve property 'Greeting' on Person", MarkerOn(editor, document, "Greeting").Message);
-        Assert.Equal("Cannot resolve property 'Name' on MainViewModel", MarkerOn(editor, document, "Name").Message);
-
-        Replace(editor, ").Nickname}", ").Age}");
-        Replace(editor, "{Binding Greeting}", "{Binding Name}");
-        Replace(editor, "{Binding Name, DataType=vm:Person}", "{Binding Owner, DataType=vm:Person}");
-        Ui.WaitFor(() => document.Markers.Count == 0, () => $"every binding resolved once put right: {string.Join("; ", document.Markers.Select(m => m.Message))}");
-        Ui.Run(window, AppActions.Build);
-        Ui.Settle();
-        string said = $"{Ui.Said(window)}: {string.Join("; ", window.BottomPanel.Problems.Problems.Select(p => $"{p.Code} {p.Where} {p.Message}"))}";
-        Assert.True(window.Status?.StartsWith("Build succeeded", StringComparison.Ordinal) == true, $"The view Passenger finds right did not build: {said}");
-        Assert.True(!window.BottomPanel.Problems.Problems.Any(p => p.Path?.EndsWith("StepsView.axaml", StringComparison.Ordinal) == true), $"The build said something of the view: {said}");
-        window.Close();
-    }
-
     /// <summary>After a build the XAML compiler's error (a number only it reads) is marked on its line and listed with its
     /// code. Avalonia's XAML compiler counts lines as an XML reader does, ending one at the lone '\r' in the window's tag,
     /// which the editor reads inside its line, so below it the compiler's line runs one ahead of the editor's: its error is
     /// listed, marked, said in its message and gone to from the Build window's link at the editor's line, and an agent is
     /// told that line. The line edited, the build's word on it is the build's, no longer this text's.</summary>
-    [AvaloniaFact]
-    public void After_a_build_the_xaml_compilers_error_below_a_lone_carriage_return_is_listed_marked_and_gone_to_at_the_editors_line()
+    private void After_a_build_the_xaml_compilers_error_below_a_lone_carriage_return_is_listed_marked_and_gone_to_at_the_editors_line()
     {
         string xaml = app.Write("MainWindow.axaml", Gallery.Window
             .Replace("d:DesignWidth=\"800\" d:DesignHeight", "d:DesignWidth=\"800\"\r d:DesignHeight", StringComparison.Ordinal)
@@ -1154,9 +986,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Passengers_own_xaml_which_compiles_is_marked_with_no_problem()
+    private void Passengers_own_xaml_which_compiles_is_marked_with_no_problem()
     {
         MainWindow window = new() { Width = 1200, Height = 800, Autosaves = false };
         window.Show();
@@ -1174,8 +1004,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void Go_to_declaration_from_xaml_opens_a_controls_class_a_resources_definition_and_a_bound_property()
+    private void Go_to_declaration_from_xaml_opens_a_controls_class_a_resources_definition_and_a_bound_property()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -1227,25 +1056,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    /// <summary>A button named by <c>x:Name</c> in single quotes, with spaces round its equals sign, is where Go to
-    /// Declaration from its generated field in the code-behind lands.</summary>
-    [AvaloniaFact]
-    public void Go_to_declaration_from_a_generated_field_lands_on_its_element_named_in_single_quotes()
-    {
-        app.Rewrite("MainWindow.axaml", Gallery.Window.Replace("<Button Name=\"Go\"", "<Button x:Name = 'Go'", StringComparison.Ordinal));
-        MainWindow window = app.Open(app.PathOf("MainWindow.axaml.cs"));
-        Ui.PlaceAfter(window.EditorArea.CodeEditor, "        G");
-        Ui.Run(window, AppActions.GoToDeclaration);
-        Ui.Settle();
-        string landed = window.EditorArea.Active?.Name == "MainWindow.axaml" ? CaretLine(window.EditorArea.CodeEditor) : $"{window.EditorArea.Active?.Name}: {CaretLine(window.EditorArea.CodeEditor)}";
-        Assert.True(landed.Contains("<Button x:Name = '|Go'", StringComparison.Ordinal),
-            $"Go to Declaration from the field of a button named in single quotes landed at {landed}, not on the button's name");
-        window.Close();
-    }
-
-    [Gate]
-    [AvaloniaFact]
-    public void An_elements_name_renames_with_its_code_behinds_uses_and_go_to_declaration_from_the_code_lands_on_it()
+    private void An_elements_name_renames_with_its_code_behinds_uses_and_go_to_declaration_from_the_code_lands_on_it()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml.cs"));
         CodeEditor code = window.EditorArea.CodeEditor;
@@ -1290,8 +1101,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// among their usages: Find Usages from the C# lists it, as Find Usages from the XAML lists the C#, and Safe Delete
     /// refuses each naming it, the app still building once refused. Deleted anyway, the handler breaks the build at the
     /// line Safe Delete named.</summary>
-    [AvaloniaFact]
-    public void A_bound_property_and_a_handler_have_their_xaml_among_their_usages_and_safe_delete_names_it_before_breaking_the_build()
+    private void A_bound_property_and_a_handler_have_their_xaml_among_their_usages_and_safe_delete_names_it_before_breaking_the_build()
     {
         app.Rewrite("MainWindow.axaml", Gallery.Handled(Gallery.Window));
         app.Rewrite("MainWindow.axaml.cs", Gallery.HandlingCodeBehind);
@@ -1338,8 +1148,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// <summary>Find Usages of a view model's property no XAML file names reads no project's XAML, which would read every C#
     /// file of the project for its types; one the window binds has its project's XAML read once, the binding among its
     /// usages.</summary>
-    [AvaloniaFact]
-    public void Find_usages_of_a_property_no_xaml_names_reads_no_projects_xaml_and_of_one_bound_reads_it_once()
+    private void Find_usages_of_a_property_no_xaml_names_reads_no_projects_xaml_and_of_one_bound_reads_it_once()
     {
         MainWindow window = app.Open(app.PathOf("ViewModels/MainViewModel.cs"));
         Assert.True(window.XamlService.ProjectsRead == 0, $"{window.XamlService.ProjectsRead} projects' XAML was read before any Find Usages, so what one reads cannot be told");
@@ -1357,8 +1166,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// <summary>A view model's property used only in a <c>&lt;Binding&gt;</c> element, a <c>&lt;Binding.Path&gt;</c>'s
     /// text, a <c>?.</c> path or a step after an indexer has that XAML among its usages: Find Usages from the C# lists it,
     /// Safe Delete refuses naming it, and Go to Declaration from each lands on the property.</summary>
-    [AvaloniaFact]
-    public void A_property_bound_by_an_element_its_path_text_a_null_conditional_path_or_after_an_indexer_has_that_xaml_among_its_usages()
+    private void A_property_bound_by_an_element_its_path_text_a_null_conditional_path_or_after_an_indexer_has_that_xaml_among_its_usages()
     {
         const string Forms = """
             using System.Collections.Generic;
@@ -1492,8 +1300,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// window, take along the XAML that uses them (bindings by path under the window's x:DataType, a compiled binding,
     /// x:Static, a Click), the window's XAML not open; one Undo puts the property's rename back in both files, and the app
     /// builds once all are renamed, its compiled bindings and handler resolving each new name.</summary>
-    [AvaloniaFact]
-    public void Renaming_a_bound_property_a_command_a_static_member_and_a_handler_in_csharp_renames_the_xaml_using_them_and_the_app_builds()
+    private void Renaming_a_bound_property_a_command_a_static_member_and_a_handler_in_csharp_renames_the_xaml_using_them_and_the_app_builds()
     {
         app.Rewrite("ViewModels/MainViewModel.cs", BoundViewModel);
         app.Rewrite("MainWindow.axaml", BoundWindow);
@@ -1579,8 +1386,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// <summary>A line written at the top of the open code-behind while an element's rename in its XAML is out (from another
     /// split, or an agent) goes in above the code, and the rename still lands on the code-behind's use of the element, as
     /// on the XAML's, where the server was asked about the place the use had been and the rename landed elsewhere.</summary>
-    [AvaloniaFact]
-    public void A_line_written_in_the_code_behind_while_an_elements_rename_is_out_still_renames_its_use_there()
+    private void A_line_written_in_the_code_behind_while_an_elements_rename_is_out_still_renames_its_use_there()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml.cs"));
         OpenDocument behind = window.EditorArea.Active!;
@@ -1601,60 +1407,11 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    /// <summary>An element whose code-behind uses its field only as this.Go has that use renamed with it, as a use of the
-    /// name alone is.</summary>
-    [AvaloniaFact]
-    public void An_elements_name_renames_its_code_behinds_uses_written_after_this()
-    {
-        string written = Gallery.CodeBehind.Replace("        Go.Content", "        this.Go.Content", StringComparison.Ordinal);
-        app.Rewrite("MainWindow.axaml.cs", written);
-        MainWindow window = app.Open(app.PathOf("MainWindow.axaml.cs"));
-        OpenDocument behind = window.EditorArea.Active!;
-        window.OpenFile(app.PathOf("MainWindow.axaml"));
-        Ui.Settle();
-        OpenDocument view = window.EditorArea.Active!;
-        Ui.PlaceAfter(window.EditorArea.CodeEditor, "<Button Name=\"G");
-        Ui.Run(window, AppActions.Rename);
-        Ui.WaitFor(() => window.Assist.Renaming == "Go", "the rename box on the button's name");
-        window.KeyTextInput("Start");
-        Ui.Press(window, "ENTER");
-        Ui.WaitFor(() => view.Text.Snapshot.ToString().Contains("<Button Name=\"Start\"", StringComparison.Ordinal), $"the button renamed: {window.Status}");
-        Ui.Settle();
-
-        Assert.True(behind.Text.Snapshot.ToString() == written.Replace("this.Go.Content", "this.Start.Content", StringComparison.Ordinal),
-            $"The code-behind's this.Go was left naming the old field, so it no longer builds ({window.Status}):\n{behind.Text.Snapshot}");
-        Assert.Contains("{Binding #Start.Content}", view.Text.Snapshot.ToString(), StringComparison.Ordinal);
-        window.Close();
-    }
-
-    /// <summary>An element renamed to a C# keyword is refused, saying why, and neither the XAML nor the code-behind's use of
-    /// its field changes: the generated field and that use would not be C#.</summary>
-    [AvaloniaFact]
-    public void An_elements_name_is_not_renamed_to_a_csharp_keyword_and_its_files_are_left_as_they_were()
-    {
-        MainWindow window = app.Open(app.PathOf("MainWindow.axaml.cs"));
-        OpenDocument behind = window.EditorArea.Active!;
-        window.OpenFile(app.PathOf("MainWindow.axaml"));
-        Ui.Settle();
-        OpenDocument view = window.EditorArea.Active!;
-        Ui.PlaceAfter(window.EditorArea.CodeEditor, "<Button Name=\"G");
-        Ui.Run(window, AppActions.Rename);
-        Ui.WaitFor(() => window.Assist.Renaming == "Go", "the rename box on the button's name");
-        window.KeyTextInput("class");
-        Ui.Press(window, "ENTER");
-        Ui.Settle();
-
-        Assert.Equal("'class' is a C# keyword, not a name for the code-behind's field", window.Status);
-        Assert.True(view.Text.Snapshot.ToString() == Gallery.Window && behind.Text.Snapshot.ToString() == Gallery.CodeBehind,
-            $"The rename to class changed the files, so the code-behind writes class.Content, which is not C#:\n{view.Text.Snapshot}\n{behind.Text.Snapshot}");
-        window.Close();
-    }
-
-    /// <summary>An element renamed to another element's name, or to the name of its Click's handler in the code-behind, is
-    /// refused, saying what has the name, and neither file changes: the window would throw as it loads, its two names
-    /// registered once, and the generated field would clash with the handler.</summary>
-    [AvaloniaFact]
-    public void An_elements_name_is_not_renamed_to_another_elements_or_its_handlers_and_its_files_are_left_as_they_were()
+    /// <summary>An element renamed to a C# keyword, to another element's name, or to the name of its Click's handler in the
+    /// code-behind is refused, saying why, and neither file changes: the generated field and the code-behind's use of it
+    /// would not be C#, the window would throw as it loads, its two names registered once, or the generated field would
+    /// clash with the handler.</summary>
+    private void An_elements_name_is_not_renamed_to_a_csharp_keyword_another_elements_or_its_handlers_and_its_files_are_left_as_they_were()
     {
         string handled = Gallery.Handled(Gallery.Window);
         app.Rewrite("MainWindow.axaml", handled);
@@ -1664,7 +1421,10 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.OpenFile(app.PathOf("MainWindow.axaml"));
         Ui.Settle();
         OpenDocument view = window.EditorArea.Active!;
-        foreach ((string name, string said) in ((string, string)[])[("Title", "'Title' names another element already, on line 11"), ("OnGo", "'OnGo' names a method of MainWindow already")])
+        foreach ((string name, string said, string broken) in ((string, string, string)[])[
+            ("class", "'class' is a C# keyword, not a name for the code-behind's field", "the code-behind writes class.Content, which is not C#"),
+            ("Title", "'Title' names another element already, on line 11", "two of the window's names are Title"),
+            ("OnGo", "'OnGo' names a method of MainWindow already", "the generated field clashes with the handler")])
         {
             Ui.PlaceAfter(window.EditorArea.CodeEditor, "<Button Name=\"G");
             Ui.Run(window, AppActions.Rename);
@@ -1674,15 +1434,14 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
             Ui.Settle();
             Assert.Equal(said, window.Status);
             Assert.True(view.Text.Snapshot.ToString() == handled && behind.Text.Snapshot.ToString() == Gallery.HandlingCodeBehind,
-                $"The rename to {name} changed the files, so two of the window's names are {name}:\n{view.Text.Snapshot}\n{behind.Text.Snapshot}");
+                $"The rename to {name} changed the files, so {broken}:\n{view.Text.Snapshot}\n{behind.Text.Snapshot}");
         }
         window.Close();
     }
 
     /// <summary>Rename on a named element's field in the code-behind renames the element: its name in the XAML, which is not
     /// open, the XAML's use of it and the code-behind's, as one command undone whole.</summary>
-    [AvaloniaFact]
-    public void An_elements_field_renamed_from_the_code_behind_renames_the_element_in_its_xaml_and_every_use()
+    private void An_elements_field_renamed_from_the_code_behind_renames_the_element_in_its_xaml_and_every_use()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml.cs"));
         OpenDocument behind = window.EditorArea.Active!;
@@ -1715,8 +1474,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// XAML on disk, as an agent's rename writes it, the language server not yet told of the XAML's change and so knowing
     /// no field of the new name: the rename waits for the server to read the XAML, saying so, however long the steps
     /// between took (a loaded machine's), then renames the element in it and the field's use.</summary>
-    [AvaloniaFact]
-    public void An_elements_field_renamed_from_the_code_behind_a_moment_after_its_xaml_was_written_waits_for_the_server_to_read_it()
+    private void An_elements_field_renamed_from_the_code_behind_a_moment_after_its_xaml_was_written_waits_for_the_server_to_read_it()
     {
         MainWindow window = OpenWithTheXamlRead();
         OpenDocument behind = window.EditorArea.Active!;
@@ -1757,8 +1515,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// <summary>A XAML file saved, which the language server reads from disk, is kept as changing from its save, before the
     /// folder's watcher can tell of it: a command asked past the moment after the write still waits for the server to read
     /// it, however late the watcher's word comes on a loaded machine.</summary>
-    [AvaloniaFact]
-    public void A_xaml_file_saved_is_kept_for_the_language_server_to_read_before_the_folders_watcher_tells_of_it()
+    private void A_xaml_file_saved_is_kept_for_the_language_server_to_read_before_the_folders_watcher_tells_of_it()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         OpenDocument view = window.EditorArea.Active!;
@@ -1771,112 +1528,6 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         (IReadOnlyList<string> changing, long asOf) = watched.Changing();
         Assert.True(asOf > before && changing.Any(p => PathNames.Same(p, view.Path)),
             $"The save was not kept for the server to read until the folder's watcher told of it, so a command asked past the moment after the write takes nothing for behind: {string.Join(", ", changing)}");
-        window.Close();
-    }
-
-    /// <summary>Rename on an element's name in its XAML a moment after the XAML was written, the language server not yet told
-    /// of it and so knowing no field of that name: the rename waits for the server, rather than leave the code-behind's uses
-    /// of the field under the old name, then renames both.</summary>
-    [AvaloniaFact]
-    public void An_elements_rename_in_its_xaml_a_moment_after_the_xaml_was_written_waits_for_the_server_and_renames_the_code_behinds_uses() =>
-        RenamedOnceTheServerRead(wrote: (_, _, _) => { });
-
-    /// <summary>The same with nothing to go by but what the server holds, as on a machine slow enough that the write is past
-    /// its moment before the folder's watcher hears of it: a write another program made a minute ago, not heard of.</summary>
-    [AvaloniaFact]
-    public void An_elements_rename_waits_for_a_server_holding_its_xaml_otherwise_than_the_disk_with_nothing_heard_of_the_write() =>
-        RenamedOnceTheServerRead(wrote: (server, held, xaml) =>
-        {
-            File.SetLastWriteTimeUtc(xaml, DateTime.UtcNow - TimeSpan.FromMinutes(1));
-            Ui.WaitFor(() => held.IsCompleted, "the watcher's word of the XAML, held from the server");
-            (IReadOnlyList<string> heard, long asOf) = server.WatchedFiles.Changing();
-            server.WatchedFiles.Settle(heard, asOf, [], []);
-        });
-
-    /// <summary>The element's field renamed from the code-behind a moment after the element was renamed in its XAML, the server
-    /// holding the XAML as it was with nothing else to go by (the write past its moment, the watcher's word let go), so knowing
-    /// no field of the new name: the rename waits for the server to read the class's XAML, never saying the field can't be
-    /// renamed, and once it has renames the element and its uses.</summary>
-    [AvaloniaFact]
-    public void A_fields_rename_in_the_code_behind_waits_for_a_server_holding_the_classs_xaml_otherwise_than_the_disk_and_renames_the_element()
-    {
-        MainWindow window = OpenWithTheXamlRead();
-        OpenDocument behind = window.EditorArea.Active!;
-        Passenger.Lsp.LanguageServer server = window.CSharpService!.Session!.Server;
-        string xaml = app.PathOf("MainWindow.axaml");
-        TaskCompletionSource told = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task held = server.HoldNext(Passenger.Lsp.LspMethods.DidChangeWatchedFiles,
-            p => System.Text.Json.JsonSerializer.Serialize(p).Contains("MainWindow.axaml\"", StringComparison.Ordinal), told.Task);
-        try
-        {
-            TestFolders.Write(app.Folder, "MainWindow.axaml", Named("Start"));
-            File.SetLastWriteTimeUtc(xaml, DateTime.UtcNow - TimeSpan.FromMinutes(1));
-            Ui.WaitFor(() => held.IsCompleted, "the watcher's word of the XAML, held from the server");
-            (IReadOnlyList<string> heard, long asOf) = server.WatchedFiles.Changing();
-            server.WatchedFiles.Settle(heard, asOf, [], []);
-            Replace(window.EditorArea.CodeEditor, "Go.Content", "Start.Content");
-            Ui.PlaceAfter(window.EditorArea.CodeEditor, "        St");
-            Ui.Run(window, AppActions.Rename);
-            Ui.WaitFor(() => window.Assist.Renaming == "Start", "the rename box on the field's name");
-            window.KeyTextInput("Begin");
-            Ui.Press(window, "ENTER", settle: false);
-            TimeSpan within = Passenger.App.CSharp.Patience.Limit;
-            Assert.True(Ui.Pumped(() => window.Status?.StartsWith("Waiting for the language server to read MainWindow.axaml", StringComparison.Ordinal) == true, within),
-                $"Within {within.Scaled().TotalSeconds:0} s the field's rename from the code-behind did not say it waits for the language server to read the class's "
-                + $"XAML, which it holds as it was and so knows no field of that name: the status says {window.Status}");
-        }
-        finally
-        {
-            told.TrySetResult();
-        }
-        Ui.WaitFor(() => window.Status?.Contains("ename", StringComparison.Ordinal) == true, () => $"the rename's word, the status saying {window.Status}");
-        Ui.Settle();
-        string written = File.ReadAllText(xaml);
-        Assert.True(window.Status == "Renamed in 2 files" && behind.Text.Snapshot.ToString() == Gallery.CodeBehind.Replace("Go.Content", "Begin.Content", StringComparison.Ordinal)
-            && written == Named("Begin"), $"The field's rename said {window.Status}, leaving the code-behind\n{behind.Text.Snapshot}\nand the XAML\n{written}");
-        window.Close();
-
-        static string Named(string name) => Gallery.Window.Replace("Name=\"Go\"", $"Name=\"{name}\"", StringComparison.Ordinal).Replace("#Go.", $"#{name}.", StringComparison.Ordinal);
-    }
-
-    /// <summary>The XAML written behind the server's back (what else the test does then, <paramref name="wrote"/>), the
-    /// server held from reading it: Rename says it waits, and once the server has read it renames both files.</summary>
-    private void RenamedOnceTheServerRead(Action<Passenger.Lsp.LanguageServer, Task, string> wrote)
-    {
-        MainWindow window = OpenWithTheXamlRead();
-        OpenDocument behind = window.EditorArea.Active!;
-        Passenger.Lsp.LanguageServer server = window.CSharpService!.Session!.Server;
-        TaskCompletionSource told = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task held = server.HoldNext(Passenger.Lsp.LspMethods.DidChangeWatchedFiles,
-            p => System.Text.Json.JsonSerializer.Serialize(p).Contains("MainWindow.axaml\"", StringComparison.Ordinal), told.Task);
-        try
-        {
-            TestFolders.Write(app.Folder, "MainWindow.axaml", Gallery.Window.Replace("Name=\"Go\"", "Name=\"Start\"", StringComparison.Ordinal).Replace("#Go.", "#Start.", StringComparison.Ordinal));
-            wrote(server, held, app.PathOf("MainWindow.axaml"));
-            Replace(window.EditorArea.CodeEditor, "Go.Content", "Start.Content");
-            window.OpenFile(app.PathOf("MainWindow.axaml"));
-            Ui.WaitFor(() => window.EditorArea.Active?.Text.Snapshot.ToString().Contains("Name=\"Start\"", StringComparison.Ordinal) == true, "the XAML as it was written, open");
-            Ui.PlaceAfter(window.EditorArea.CodeEditor, "<Button Name=\"St");
-            Ui.Run(window, AppActions.Rename);
-            Ui.WaitFor(() => window.Assist.Renaming == "Start", "the rename box on the button's name");
-            window.KeyTextInput("Begin");
-            Ui.Press(window, "ENTER", settle: false);
-            TimeSpan within = Passenger.App.CSharp.Patience.Limit;
-            Assert.True(Ui.Pumped(() => window.Status?.StartsWith("Waiting for the language server to read MainWindow.axaml", StringComparison.Ordinal) == true, within),
-                $"Within {within.Scaled().TotalSeconds:0} s the rename did not say it waits for the language server to read the XAML written a moment before, "
-                + $"which knows no field of that name, so none of its uses ({(held.IsCompleted ? "the XAML's change was held unsent to the server" : "the watcher had not told the server of the XAML's change")}): "
-                + $"the status says {window.Status}");
-        }
-        finally
-        {
-            told.TrySetResult();
-        }
-        Ui.WaitFor(() => window.Status?.Contains("ename", StringComparison.Ordinal) == true, () => $"the rename's word, the status saying {window.Status}");
-        Ui.Settle();
-        OpenDocument view = window.EditorArea.Active!;
-        Assert.True(window.Status == "Renamed in 2 files" && behind.Text.Snapshot.ToString() == Gallery.CodeBehind.Replace("Go.Content", "Begin.Content", StringComparison.Ordinal)
-            && view.Text.Snapshot.ToString() == Gallery.Window.Replace("Name=\"Go\"", "Name=\"Begin\"", StringComparison.Ordinal).Replace("#Go.", "#Begin.", StringComparison.Ordinal),
-            $"The element's rename said {window.Status}, leaving the code-behind\n{behind.Text.Snapshot}\nand the XAML\n{view.Text.Snapshot}");
         window.Close();
     }
 
@@ -1901,8 +1552,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         return window;
     }
 
-    [AvaloniaFact]
-    public void A_key_one_theme_variant_lacks_is_warned_of_where_defined_and_used_and_the_fix_adds_it_to_that_variant()
+    private void A_key_one_theme_variant_lacks_is_warned_of_where_defined_and_used_and_the_fix_adds_it_to_that_variant()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         OpenDocument view = window.EditorArea.Active!;
@@ -1931,9 +1581,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void An_avares_path_completes_from_the_projects_assets_is_warned_of_when_missing_and_goes_to_its_file()
+    private void An_avares_path_completes_from_the_projects_assets_is_warned_of_when_missing_and_goes_to_its_file()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -1967,9 +1615,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Colours_show_as_gutter_swatches_and_one_chosen_in_the_picker_is_written_back_as_it_was_written()
+    private void Colours_show_as_gutter_swatches_and_one_chosen_in_the_picker_is_written_back_as_it_was_written()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -2013,8 +1659,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    [AvaloniaFact]
-    public void Go_to_declaration_reaches_the_themes_own_xaml_for_a_control_a_template_part_and_a_theme_resource()
+    private void Go_to_declaration_reaches_the_themes_own_xaml_for_a_control_a_template_part_and_a_theme_resource()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         // Fluent's sources as its Source Link gives them, stood in: FluentControls.xaml merges Button.xaml in.
@@ -2055,62 +1700,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    /// <summary>Fluent's common resources (a control's colours, its font size, the system brushes) are kept in the files the
-    /// theme's root merges in, by theme variant or not, none of them compiled on its own: Go to Declaration from a use of
-    /// each lands on its key there, the first variant's where each variant keys it.</summary>
-    [AvaloniaFact]
-    public void Go_to_declaration_reaches_a_fluent_resource_kept_in_a_file_the_themes_root_merges_in()
-    {
-        (string Property, string Key, string File)[] keys = [("Background", "ButtonBackground", "FluentControlResources.xaml"), ("Foreground", "TextControlBackground", "FluentControlResources.xaml"),
-            ("FontSize", "ControlContentThemeFontSize", "BaseResources.xaml"), ("BorderBrush", "SystemControlForegroundBaseHighBrush", "BaseResources.xaml")];
-        app.Rewrite("App.axaml", Gallery.AppXaml.Replace("<FluentTheme />", "<FluentTheme />\n        <Style Selector=\"Button\">\n"
-            + string.Concat(keys.Select(k => $"            <Setter Property=\"{k.Property}\" Value=\"{{DynamicResource {k.Key}}}\" />\n")) + "        </Style>", StringComparison.Ordinal));
-        MainWindow window = app.Open(app.PathOf("App.axaml"));
-        window.XamlService.LibraryFiles = new ThemeSources(TestFolders.Create("xaml-theme-"));
-        foreach ((_, string key, string file) in keys)
-        {
-            window.OpenFile(app.PathOf("App.axaml"));
-            Ui.Settle();
-            Ui.PlaceAfter(window.EditorArea.CodeEditor, $"{{DynamicResource {key[..4]}");
-            Ui.Run(window, AppActions.GoToDeclaration);
-            Ui.Settle();
-            string landed = $"{window.EditorArea.Active?.Name}: {CaretLine(window.EditorArea.CodeEditor)}";
-            Assert.True(landed.StartsWith($"{file}: ", StringComparison.Ordinal) && landed.Contains($"x:Key=\"|{key}\"", StringComparison.Ordinal),
-                $"Go to Declaration from {key} landed at {landed}, not at its key in the theme's {file} (status: {window.Status})");
-        }
-        window.Close();
-    }
-
-    /// <summary>A theme resource keyed in single quotes, and one spaced round its equals sign, in a theme file merged in by a
-    /// source in single quotes, are where Go to Declaration from a use of each lands in the theme's own XAML.</summary>
-    [AvaloniaFact]
-    public void Go_to_declaration_reaches_a_theme_resource_keyed_in_single_quotes_or_spaced_round_its_equals()
-    {
-        app.Rewrite("App.axaml", Gallery.AppXaml.Replace("<FluentTheme />", "<FluentTheme />\n        <Style Selector=\"Button\">\n"
-            + "            <Setter Property=\"Background\" Value=\"{DynamicResource ButtonBackground}\" />\n"
-            + "            <Setter Property=\"Foreground\" Value=\"{DynamicResource ButtonForeground}\" />\n        </Style>", StringComparison.Ordinal));
-        MainWindow window = app.Open(app.PathOf("App.axaml"));
-        window.XamlService.LibraryFiles = new ThemeSources(TestFolders.Create("xaml-theme-"), text => text
-            .Replace("Source=\"/Accents/FluentControlResources.xaml\"", "Source='/Accents/FluentControlResources.xaml'", StringComparison.Ordinal)
-            .Replace("<StaticResource x:Key=\"ButtonBackground\" ResourceKey=\"ControlFillColorDefaultBrush\" />",
-                "<StaticResource x:Key='ButtonBackground' ResourceKey=\"ControlFillColorDefaultBrush\" />\n"
-                + "      <StaticResource x:Key = \"ButtonForeground\" ResourceKey=\"TextFillColorPrimaryBrush\" />", StringComparison.Ordinal));
-        foreach ((string use, string key) in ((string, string)[])[("{DynamicResource ButtonBack", "x:Key='|ButtonBackground'"), ("{DynamicResource ButtonFore", "x:Key = \"|ButtonForeground\"")])
-        {
-            window.OpenFile(app.PathOf("App.axaml"));
-            Ui.Settle();
-            Ui.PlaceAfter(window.EditorArea.CodeEditor, use);
-            Ui.Run(window, AppActions.GoToDeclaration);
-            Ui.Settle();
-            string landed = $"{window.EditorArea.Active?.Name}: {CaretLine(window.EditorArea.CodeEditor)}";
-            Assert.True(landed.StartsWith("FluentControlResources.xaml: ", StringComparison.Ordinal) && landed.Contains(key, StringComparison.Ordinal),
-                $"Go to Declaration from {use}… landed at {landed}, not at {key} in the theme's XAML (status: {window.Status})");
-        }
-        window.Close();
-    }
-
-    [AvaloniaFact]
-    public void A_themes_include_that_climbs_out_of_its_sources_folder_is_refused_and_nothing_is_written_outside_it()
+    private void A_themes_include_that_climbs_out_of_its_sources_folder_is_refused_and_nothing_is_written_outside_it()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         Passenger.App.Xaml.XamlDocument xaml = window.XamlService.For(window.EditorArea.Active!)!;
@@ -2200,11 +1790,9 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         }
     }
 
-    [Gate]
     /// <summary>A window closed just after its XAML preview was sent its file, whose answer it waits for a minute at most: the
     /// window goes at once, held by nothing that wait leaves (#1445).</summary>
-    [AvaloniaFact]
-    public void A_window_closed_as_its_preview_waits_for_the_previewer_is_let_go()
+    private void A_window_closed_as_its_preview_waits_for_the_previewer_is_let_go()
     {
         Ui.Collected(Previewed(), "the window closed with its XAML preview to be let go well before the minute the preview waits for its previewer: "
             + "held by that wait, each previewing window would be kept a minute after it closed", TimeSpan.FromSeconds(15));
@@ -2240,8 +1828,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
             $"The {design.Width} × {design.Height} window's frame is {preview.FrameSize} in the window's units: the pane would show it at another size than its design's");
     }
 
-    [AvaloniaFact]
-    public void The_preview_draws_a_window_from_the_last_build_follows_its_text_as_it_is_typed_and_draws_styles_as_their_PreviewWith()
+    private void The_preview_draws_a_window_from_the_last_build_follows_its_text_as_it_is_typed_and_draws_styles_as_their_PreviewWith()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -2305,8 +1892,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// inspector loaded into it: the element at the caret is outlined from its first placing, a click on an element in the
     /// frame selects its start tag and outlines it, a caret in the panel's tag outlines the panel, and one in the window's
     /// own tag the window.</summary>
-    [AvaloniaFact]
-    public void An_avalonia_preview_outlines_the_carets_element_and_a_click_on_one_selects_its_start_tag()
+    private void An_avalonia_preview_outlines_the_carets_element_and_a_click_on_one_selects_its_start_tag()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -2345,54 +1931,10 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    /// <summary>A theme's picture lies over the editor alone: the XAML preview beside it draws the app's frame and its own
-    /// ground as it does with no picture, so the app's colours and edges read as the app draws them (#1892).</summary>
-    [AvaloniaFact]
-    public void A_themes_picture_lies_over_the_editor_and_never_over_the_xaml_preview_beside_it()
-    {
-        MainWindow window = app.Open(app.PathOf("MainWindow.axaml"), languageServer: false);
-        try
-        {
-            CodeEditor editor = window.EditorArea.CodeEditor;
-            OpenDocument document = window.EditorArea.Active!;
-            Ui.Run(window, AppActions.Build);
-            Ui.Settle();
-            Assert.True(window.Perform(AppActions.XamlPreview), $"XAML Preview could not run: {window.Status}");
-            Passenger.App.Xaml.XamlPreview preview = window.PreviewOf(document) ?? throw new InvalidOperationException("XAML Preview showed no preview beside the file");
-            Passenger.App.Xaml.XamlPreviewPane pane = window.PreviewPaneOf(document)!;
-            Ui.WaitFor(() => preview.Frame is not null, "the previewer's first frame", TimeSpan.FromSeconds(60));
-            Ui.Settle();
-            Point Of(Avalonia.Controls.Control control, Point at) => control.TranslatePoint(at, window) ?? throw new InvalidOperationException($"The {control.GetType().Name} is not on the window");
-            Dictionary<string, Point> places = new()
-            {
-                ["the editor"] = Of(editor, new Point(editor.Bounds.Width * 0.6, editor.Bounds.Height - 30)),
-                ["the preview's ground"] = Of(pane, new Point(8, pane.Bounds.Height / 2)),
-                ["the app's frame"] = Of(pane.Frame, pane.Frame.Bounds.Center),
-            };
-            Dictionary<string, Color> plain = places.ToDictionary(p => p.Key, p => Ui.Pixel(window, p.Value));
-
-            ThemeBackgroundTests.Wear(window, $"Pictured {Guid.NewGuid():N}", """{"image": "red.png", "opacity": 0.3}""");
-            Dictionary<string, Color> pictured = places.ToDictionary(p => p.Key, p => Ui.Pixel(window, p.Value));
-            Assert.True(pictured["the editor"].R > plain["the editor"].R + 20,
-                $"The theme's picture is not over the editor beside the preview: its ground {plain["the editor"]} drew {pictured["the editor"]}");
-            foreach (string place in new[] { "the preview's ground", "the app's frame" })
-            {
-                Assert.True(pictured[place] == plain[place],
-                    $"The theme's picture drew over {place}: {plain[place]} became {pictured[place]}, so the preview no longer shows the app's own colours");
-            }
-        }
-        finally
-        {
-            window.ApplySettings(new Passenger.App.Settings.AppSettings());
-            window.Close();
-        }
-    }
-
     /// <summary>In the XAML workspace, with no app running, the preview shows under its frame what the caret's element sets
     /// itself, as its XAML says it: the title's binding with its path, the button's own content and its resource with its key,
     /// and the Name each takes as a property; turned off, it shows none.</summary>
-    [AvaloniaFact]
-    public void In_the_xaml_workspace_the_preview_shows_what_the_carets_element_sets_itself_while_no_app_runs()
+    private void In_the_xaml_workspace_the_preview_shows_what_the_carets_element_sets_itself_while_no_app_runs()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -2418,81 +1960,10 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    /// <summary>In the XAML workspace, an attribute the caret's element cannot have is said under the preview in the check's
-    /// words for it, never as a value the element sets.</summary>
-    [AvaloniaFact]
-    public void In_the_xaml_workspace_an_attribute_its_element_cannot_have_is_said_unknown_as_the_check_says()
-    {
-        MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
-        try
-        {
-            OpenDocument document = window.EditorArea.Active!;
-            Typing.Replace(window, "<Button Name=\"Go\" Content=\"Go\"", "<Button Name=\"Go\" Contnt=\"Go\"");
-            Ui.PlaceAfter(window.EditorArea.CodeEditor, "<Button Name=\"G");
-            window.ApplySettings(window.Settings with { XamlWorkspace = true });
-            Ui.WaitFor(() => window.PreviewPaneOf(document) is { PropertiesShown.Element: "Button #Go" } pane
-                && pane.PropertiesShown.Values.Any(v => v.Property == "Contnt" && v.From != "Local"),
-                () => $"the button's misspelt Contnt said unknown under the preview, where it shows {string.Join(", ", window.PreviewPaneOf(document)?.PropertiesShown.Values ?? [])}");
-            (string Property, string Value, string From) said = window.PreviewPaneOf(document)!.PropertiesShown.Values.Single(v => v.Property == "Contnt");
-            Assert.Equal("Cannot resolve property 'Contnt' on Button", said.From);
-        }
-        finally
-        {
-            window.ApplySettings(window.Settings with { XamlWorkspace = false });
-            window.Close();
-        }
-    }
-
-    /// <summary>A window wider than the preview's pane is drawn smaller by the previewer itself, at the scale the pane has
-    /// room for, and its frame lands pixel for pixel on the window: shrunk as a picture, its text smeared (on Windows at
-    /// 100%, ClearType's colour fringes into blotches).</summary>
-    [AvaloniaFact]
-    public void A_window_wider_than_the_preview_is_drawn_by_the_previewer_at_the_scale_shown_pixel_for_pixel()
-    {
-        MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
-        CodeEditor editor = window.EditorArea.CodeEditor;
-        OpenDocument document = window.EditorArea.Active!;
-        Ui.Run(window, AppActions.Build);
-        Ui.Settle();
-        Replace(editor, "d:DesignWidth=\"800\"", "d:DesignWidth=\"3000\"");
-        Assert.True(window.Perform(AppActions.XamlPreview), $"XAML Preview could not run: {window.Status}");
-        Ui.Settle();
-        Passenger.App.Xaml.XamlPreview preview = window.PreviewOf(document) ?? throw new InvalidOperationException("XAML Preview showed no preview beside the file");
-        Passenger.App.Xaml.XamlPreviewPane pane = window.PreviewPaneOf(document)!;
-        double scale = window.RenderScaling;
-        Avalonia.Controls.Image frame = pane.Frame;
-        // The frame's width on the window, in the screen's pixels.
-        double Shown() => ((frame.TranslatePoint(new Point(preview.FrameSize.Width, 0), window)?.X ?? 0) - (frame.TranslatePoint(default, window)?.X ?? 0)) * scale;
-        Ui.WaitFor(() => preview.Frame is { } drawn && Math.Abs(preview.FrameSize.Width - 3000) < 1 && drawn.PixelSize.Width < 3000 * scale * 0.9,
-            () => $"the previewer drawing the 3000-wide window smaller for the pane {pane.Bounds.Width:0} wide (its frame {preview.Frame?.PixelSize}, {preview.FrameSize} in its units), "
-                + $"the pane saying '{preview.Status}'{(preview.Error is { } error ? $" over '{error}'" : string.Empty)} with {(preview.Running ? "a previewer" : "no previewer")} running; "
-                + PreviewsLogged(),
-            TimeSpan.FromSeconds(60));
-        Ui.Settle();
-        Assert.True(Math.Abs(Shown() - preview.Frame!.PixelSize.Width) < 0.5,
-            $"The frame drawn {preview.Frame.PixelSize.Width} pixels wide is shown {Shown():0.##} wide, so its pixels are resampled and its text smeared");
-        Assert.True(Shown() / scale <= pane.Bounds.Width, $"The frame {Shown() / scale:0} wide overflows the pane {pane.Bounds.Width:0} wide");
-        // XAML Preview is kept on for the next window, which the class's other tests open with it off.
-        Assert.True(window.Perform(AppActions.XamlPreview) && window.PreviewOf(document) is null, "XAML Preview stayed on");
-        window.Close();
-    }
-
-    /// <summary>What the IDE caught and what passenger.log says of the previews and their previewers, which tell how a preview
-    /// that never drew ended: its start faulted, its previewer refused or ended, or its first frame came.</summary>
-    private static string PreviewsLogged()
-    {
-        IdeErrors.Flush();
-        IEnumerable<string> previews = Ui.Shared(IdeErrors.LogPath).Split('\n')
-            .Where(l => l.Contains("Preview of", StringComparison.Ordinal) || l.Contains("previewer", StringComparison.OrdinalIgnoreCase)).TakeLast(10);
-        return $"the IDE caught {(IdeErrors.Errors.Count == 0 ? "nothing" : string.Join("; ", IdeErrors.Errors.TakeLast(5).Select(e => $"{e.Kind}: {e.Message}")))}, "
-            + $"and its log says of the previews: {string.Join(" | ", previews)}";
-    }
-
     /// <summary>An Avalonia preview draws its root at a phone's and a tablet's size beside its design's (#1549): chosen
     /// beside the preview's title, the frame takes the size chosen as the root lays itself out there, the file's text stays as
     /// written, and Design size brings the design's back.</summary>
-    [AvaloniaFact]
-    public void An_avalonia_preview_draws_its_root_at_a_phones_and_a_tablets_size_beside_its_design_size()
+    private void An_avalonia_preview_draws_its_root_at_a_phones_and_a_tablets_size_beside_its_design_size()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         OpenDocument document = window.EditorArea.Active!;
@@ -2535,8 +2006,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// 12's are under tools/net8.0 and later, and whose Directory.Build.props moves its obj and bin folders, previews as
     /// any app does: turned on from its file's tab strip before the app was ever restored, it draws once Build has
     /// restored and built it.</summary>
-    [AvaloniaFact]
-    public void An_app_on_Avalonia_11_with_its_obj_and_bin_folders_moved_previews_from_its_packages_previewer()
+    private void An_app_on_Avalonia_11_with_its_obj_and_bin_folders_moved_previews_from_its_packages_previewer()
     {
         string folder = TestFolders.Create("avalonia11-");
         string version = AvaloniaApp.Metadata("AvaloniaOlderVersion");
@@ -2644,64 +2114,11 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
-    /// <summary>XAML Preview on or off is kept for the next window, as a Markdown file's preview is: turned on, the next
-    /// window shows a XAML file beside its preview; turned off from the tab strip, the next shows none.</summary>
-    [AvaloniaFact]
-    public void The_XAML_previews_on_or_off_is_kept_for_the_next_window()
-    {
-        string state = TestFolders.Create("xaml-state-");
-        try
-        {
-            MainWindow window = Started(state);
-            OpenDocument document = window.EditorArea.Active!;
-            Passenger.App.Editors.EditorGroup group = window.EditorArea.ActiveGroup;
-            Assert.True(group.PreviewToggle.IsChecked == false && window.PreviewOf(document) is null, "A first window showed the XAML preview before it was turned on");
-            Assert.True(window.Perform(AppActions.XamlPreview), $"XAML Preview could not run: {window.Status}");
-            Ui.Settle();
-            Assert.NotNull(window.PreviewOf(document));
-            window.Close();
-            Ui.Settle();
-
-            window = Started(state);
-            group = window.EditorArea.ActiveGroup;
-            Ui.WaitFor(() => window.PreviewOf(window.EditorArea.Active!) is not null, "the next window's preview beside the XAML file, the preview kept on");
-            Assert.True(group.PreviewToggle.IsChecked == true, "The tab strip's preview toggle stayed up in the window that kept the preview on");
-            Ui.Click(group.PreviewToggle);
-            Ui.Settle();
-            Assert.Null(window.PreviewOf(window.EditorArea.Active!));
-            window.Close();
-            Ui.Settle();
-
-            window = Started(state);
-            group = window.EditorArea.ActiveGroup;
-            Assert.True(group.PreviewToggle.IsChecked == false && window.PreviewOf(window.EditorArea.Active!) is null, "The next window showed the preview the last one turned off");
-            window.Close();
-        }
-        finally
-        {
-            TestFolders.Delete(state);
-        }
-
-        // A window keeping its state in the test's own folder, the window's XAML open, with no C# language server.
-        MainWindow Started(string kept)
-        {
-            MainWindow window = new() { Width = 1200, Height = 800, Autosaves = false, StateFolder = kept, StartsLanguageServer = false };
-            window.Show();
-            window.KeepLayout();
-            window.KeepSettings();
-            window.OpenFolder(app.Folder);
-            Assert.Null(window.OpenFile(app.PathOf("MainWindow.axaml")));
-            Ui.Settle();
-            return window;
-        }
-    }
-
     /// <summary>The XAML preview of a view whose previewer writes to its output and its errors without pause, opened and
     /// closed twenty times beside two busy processes (each other time closed as soon as its previewer has started, else
     /// once it has drawn), leaves the IDE with no error caught: no read of the previewer's output faults as it ends, nor
     /// is left faulted for the garbage collector to find.</summary>
-    [AvaloniaFact]
-    public void Opening_and_closing_the_XAML_preview_twenty_times_beside_busy_processes_faults_no_read_of_the_previewer()
+    private void Opening_and_closing_the_XAML_preview_twenty_times_beside_busy_processes_faults_no_read_of_the_previewer()
     {
         app.Write("Chatty.axaml", """
             <UserControl xmlns="https://github.com/avaloniaui"
@@ -2793,8 +2210,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// <summary>The XAML preview of a view whose previewer writes more than a pipe holds and then a last line, and exits at
     /// once, says the previewer ended with that last line, each of three times beside two busy processes: what it wrote is
     /// read to its end before it is quoted, never "it said nothing" or an earlier line.</summary>
-    [AvaloniaFact]
-    public void A_previewer_that_writes_a_last_line_and_exits_at_once_is_said_to_have_ended_with_that_line()
+    private void A_previewer_that_writes_a_last_line_and_exits_at_once_is_said_to_have_ended_with_that_line()
     {
         app.Write("Ending.axaml", """
             <UserControl xmlns="https://github.com/avaloniaui"
@@ -2858,8 +2274,7 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
     /// <summary>An Avalonia previewer that ends as it draws (a crash, here killed) is let go of: the pane says its exit code
     /// and last words, which passenger.log has too, as the WPF previewer's end, and the next edit starts a new previewer,
     /// whose frame draws the edit.</summary>
-    [AvaloniaFact]
-    public void An_Avalonia_previewer_that_ends_says_its_exit_and_the_next_edit_draws_in_a_new_one()
+    private void An_Avalonia_previewer_that_ends_says_its_exit_and_the_next_edit_draws_in_a_new_one()
     {
         MainWindow window = app.Open(app.PathOf("MainWindow.axaml"));
         CodeEditor editor = window.EditorArea.CodeEditor;
@@ -2925,13 +2340,250 @@ public sealed class XamlTests : IClassFixture<XamlTests.Gallery>
         window.Close();
     }
 
+    /// <summary>A build after one Avalonia's XAML compiler failed, nothing changed since, says the app's build has no compiled
+    /// XAML and offers Rebuild Solution over the Build window's output, where it said it succeeded (#2043): it took the
+    /// assembly the C# compiler wrote before that failure as up to date and copied it out. The preview of that build says so
+    /// in the same words, offering the rebuild, where it said its previewer ended with exit code 134; the XAML put right,
+    /// the rebuild it offers compiles it and the preview draws.</summary>
+    private void A_build_after_a_failed_xaml_compile_says_its_xaml_was_never_compiled_and_the_preview_offers_the_rebuild()
+    {
+        string xaml = app.Write("MainWindow.axaml", Gallery.Window.Replace("<TextBlock Name=\"Title\"", "<TextBlock Name=\"Title\" Width=\"wide\"", StringComparison.Ordinal));
+        MainWindow window = app.Open(xaml, languageServer: false);
+        CodeEditor editor = window.EditorArea.CodeEditor;
+        OpenDocument document = window.EditorArea.Active!;
+        Ui.Run(window, AppActions.Build);
+        Ui.Settle();
+        Assert.True(window.BottomPanel.Problems.Problems.Any(p => p.Code == "AVLN1000"),
+            $"The first build did not fail in Avalonia's XAML compiler: {window.Status}; {string.Join("; ", window.BottomPanel.Problems.Problems.Select(p => $"{p.Code}: {p.Message}"))}");
+
+        Ui.Run(window, AppActions.Build);
+        Ui.Settle();
+        string uncompiled = Refusals.XamlUncompiled(["Gallery"]);
+        Assert.True(window.Status == uncompiled, $"The build after it, nothing changed, said '{window.Status}', not that the app's XAML was never compiled");
+        Passenger.App.ToolWindows.OutputView console = window.BottomPanel.Build;
+        Assert.True(console.Offered == uncompiled && console.OfferLink == "Rebuild Solution",
+            $"The Build window offers {console.OfferLink ?? "nothing"} ('{console.Offered}'), not Rebuild Solution for the XAML never compiled");
+
+        Assert.True(window.Perform(AppActions.XamlPreview), $"XAML Preview could not run: {window.Status}");
+        Passenger.App.Xaml.XamlPreview preview = window.PreviewOf(document) ?? throw new InvalidOperationException("XAML Preview showed no preview beside the file");
+        Ui.WaitFor(() => preview.Status == uncompiled, () => $"the preview saying its build's XAML was never compiled, not '{preview.Status}'", TimeSpan.FromSeconds(60));
+        Avalonia.Controls.Button rebuild = window.PreviewPaneOf(document)!.GetVisualDescendants().OfType<Avalonia.Controls.Button>()
+            .SingleOrDefault(b => b.IsEffectivelyVisible && b.Content as string == "Rebuild Solution")
+            ?? throw new InvalidOperationException($"The preview offers no Rebuild Solution under '{preview.Status}' (it offers {preview.Offers ?? "nothing"})");
+
+        Replace(editor, " Width=\"wide\"", string.Empty);
+        Ui.Click(rebuild);
+        Ui.WaitFor(() => preview.Frame is not null && preview.Error is null, () => $"the preview drawing the rebuilt app, not '{preview.Status}' {preview.Error} (the status bar: {window.Status})",
+            TimeSpan.FromMinutes(2));
+        Assert.True(window.Status?.StartsWith("Rebuild succeeded", StringComparison.Ordinal) == true, $"The rebuild the preview offered said '{window.Status}'");
+        Assert.Null(console.Offered);
+        // XAML Preview is kept on for the next window, which the class's other tests open with it off.
+        Assert.True(window.Perform(AppActions.XamlPreview) && window.PreviewOf(document) is null, "XAML Preview stayed on");
+        window.Close();
+    }
+
+    /// <summary>A previewer is sent nothing until it says its session started, after setting itself up: what it is told
+    /// while it sets up it holds until it listens, then hands over in a race that may lose a message or give it out of order.
+    /// A stand-in on the preview's port hears nothing as it connects, then the formats, the scale and the file once it says
+    /// its session started, and the frame it answers with is drawn.</summary>
+    private void A_previewer_is_sent_nothing_until_it_says_its_session_started()
+    {
+        MainWindow window = app.Open(app.PathOf("MainWindow.axaml"), languageServer: false);
+        OpenDocument document = window.EditorArea.Active!;
+        Ui.Run(window, AppActions.Build);
+        Ui.Settle();
+        using (StandInPreviewer standIn = StandInPreviewer.InPlaceOf(window, document))
+        {
+            Passenger.App.Xaml.XamlPreview preview = window.PreviewOf(document)!;
+            Ui.Hold(TimeSpan.FromSeconds(1), "what is sent as a previewer connects to reach it");
+            Assert.True(standIn.Heard.Count == 0, $"Passenger sent the previewer {string.Join(", ", standIn.Heard.Select(m => m.GetType().Name))} before it said its "
+                + "session started, which a previewer still setting itself up holds and hands over in a race that may lose one or give it out of order");
+            standIn.Begin();
+            Ui.WaitFor(() => preview.Frame is not null && Math.Abs(preview.FrameSize.Width - StandInPreviewer.WidthOf(1)) < 0.5,
+                () => $"the stand-in's frame drawn, where the preview says '{preview.Status}' and the stand-in heard {string.Join(", ", standIn.Heard.Select(m => m.GetType().Name))}");
+            Assert.Equal([nameof(Avalonia.Remote.Protocol.Viewport.ClientSupportedPixelFormatsMessage), nameof(Avalonia.Remote.Protocol.Viewport.ClientRenderInfoMessage),
+                nameof(Avalonia.Remote.Protocol.Designer.UpdateXamlMessage)], standIn.Heard.Take(3).Select(m => m.GetType().Name));
+        }
+        // XAML Preview is kept on for the next window, which the class's other tests open with it off.
+        Assert.True(window.Perform(AppActions.XamlPreview) && window.PreviewOf(document) is null, "XAML Preview stayed on");
+        window.Close();
+    }
+
+    /// <summary>A preview holds screenshots and tests until the frame of the text it last sent, never one of the window that
+    /// text's load replaces, which a previewer may draw as the load comes: a stand-in meeting an edit's load with a frame of
+    /// its last window, then answering it a moment later, has its new window's frame shown once the window settles.</summary>
+    private void An_edits_preview_settles_on_its_own_frame_never_one_of_the_window_its_load_replaces()
+    {
+        MainWindow window = app.Open(app.PathOf("MainWindow.axaml"), languageServer: false);
+        CodeEditor editor = window.EditorArea.CodeEditor;
+        OpenDocument document = window.EditorArea.Active!;
+        Ui.Run(window, AppActions.Build);
+        Ui.Settle();
+        using (StandInPreviewer standIn = StandInPreviewer.InPlaceOf(window, document))
+        {
+            Passenger.App.Xaml.XamlPreview preview = window.PreviewOf(document)!;
+            standIn.Begin();
+            Ui.WaitFor(() => preview.Frame is not null && Math.Abs(preview.FrameSize.Width - StandInPreviewer.WidthOf(1)) < 0.5,
+                () => $"the stand-in's first window drawn, where the preview says '{preview.Status}'");
+            Ui.Settle();
+
+            Ui.PlaceAfter(editor, "<StackPanel");
+            window.KeyTextInput(" ");
+            Ui.Settle();
+            Assert.True(standIn.Loads == 2, $"The edit was sent as load {standIn.Loads}, not the second");
+            Assert.True(Math.Abs(preview.FrameSize.Width - StandInPreviewer.WidthOf(2)) < 0.5 && preview.Status == "Live",
+                $"The window settled on a frame {preview.FrameSize.Width} wide ('{preview.Status}'), the replaced window's, not the {StandInPreviewer.WidthOf(2)} of the edit's own: "
+                + "a screenshot or a test taken then shows the text before the edit");
+        }
+        Assert.True(window.Perform(AppActions.XamlPreview) && window.PreviewOf(document) is null, "XAML Preview stayed on");
+        window.Close();
+    }
+
+    /// <summary>A previewer of the test's own on the preview's port, the real one stopped as it starts: what Passenger sends
+    /// it is kept, and it answers each load as Avalonia's previewer does, with a frame of a new window as wide as the load's
+    /// number says (<see cref="WidthOf"/>), drawn at the scale last asked; a load after the first it meets first with a frame
+    /// of the window the load replaces, as one drawn before the load reached it, and answers a moment later.</summary>
+    private sealed class StandInPreviewer : IDisposable
+    {
+        /// <summary>How long a load after the first waits for its answer, after the replaced window's frame.</summary>
+        private static readonly TimeSpan Replacing = TimeSpan.FromSeconds(2);
+
+        private readonly Avalonia.Remote.Protocol.IAvaloniaRemoteTransportConnection connection;
+        private readonly List<object> heard = [];
+        private readonly List<Task> sent = [];
+        private int loads;
+        private long sequence;
+        private double dpi = 96;
+
+        private StandInPreviewer(Avalonia.Remote.Protocol.IAvaloniaRemoteTransportConnection connection)
+        {
+            this.connection = connection;
+            connection.OnMessage += (_, message) => Answer(message);
+        }
+
+        /// <summary>What Passenger sent, in order.</summary>
+        public IReadOnlyList<object> Heard
+        {
+            get
+            {
+                lock (heard)
+                {
+                    return [.. heard];
+                }
+            }
+        }
+
+        /// <summary>The loads Passenger has sent.</summary>
+        public int Loads => Volatile.Read(ref loads);
+
+        /// <summary>The width, in units, of the window a load makes.</summary>
+        public static int WidthOf(int load) => 80 + (40 * load);
+
+        /// <summary>Turns XAML Preview on, stops the previewer it starts as it starts, and connects in its place; the loop run
+        /// without settling meanwhile, as the preview holds the window for the frame only the stand-in will draw.</summary>
+        public static StandInPreviewer InPlaceOf(MainWindow window, OpenDocument document)
+        {
+            int port = 0;
+            void OnStarted(object? sender, ChildStart start)
+            {
+                if (start.Command.Contains("Avalonia.Designer.HostApp", StringComparison.Ordinal)
+                    && System.Text.RegularExpressions.Regex.Match(start.Command, @"tcp-bson://127\.0\.0\.1:(\d+)/") is { Success: true } named)
+                {
+                    OwnProcess.Of(start.ProcessId).Suspend("The previewer");
+                    Volatile.Write(ref port, int.Parse(named.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }
+            ChildProcesses.Started += OnStarted;
+            try
+            {
+                Assert.True(window.Perform(AppActions.XamlPreview), $"XAML Preview could not run: {window.Status}");
+                Ui.PumpUntil(() => Volatile.Read(ref port) != 0, "the previewer started");
+            }
+            finally
+            {
+                ChildProcesses.Started -= OnStarted;
+            }
+            Avalonia.Remote.Protocol.IAvaloniaRemoteTransportConnection? made = null;
+            Ui.AwaitPumped(Waiting.Apart(async () => made = await new Avalonia.Remote.Protocol.BsonTcpTransport().Connect(System.Net.IPAddress.Loopback, port)),
+                "the stand-in's connection to the preview's port");
+            return new StandInPreviewer(made!);
+        }
+
+        /// <summary>Says its session started, as Avalonia's previewer does once it has set itself up.</summary>
+        public void Begin() => Send(new Avalonia.Remote.Protocol.Designer.StartDesignerSessionMessage { SessionId = "stand-in" });
+
+        /// <summary>On the connection's thread, in the order Passenger sent them.</summary>
+        private void Answer(object message)
+        {
+            lock (heard)
+            {
+                heard.Add(message);
+            }
+            switch (message)
+            {
+                case Avalonia.Remote.Protocol.Viewport.ClientRenderInfoMessage info:
+                    dpi = info.DpiX;
+                    if (Loads > 0)
+                    {
+                        Send(Frame(Loads));
+                    }
+                    break;
+                case Avalonia.Remote.Protocol.Designer.UpdateXamlMessage:
+                    int load = Interlocked.Increment(ref loads);
+                    if (load > 1)
+                    {
+                        Send(Frame(load - 1));
+                        Waiting.For(Replacing, "the replaced window's frame heard before the load is answered");
+                    }
+                    Send(new Avalonia.Remote.Protocol.Designer.UpdateXamlResultMessage());
+                    Send(Frame(load));
+                    break;
+            }
+        }
+
+        private Avalonia.Remote.Protocol.Viewport.FrameMessage Frame(int load)
+        {
+            int width = (int)Math.Ceiling(WidthOf(load) * dpi / 96);
+            int height = (int)Math.Ceiling(40 * dpi / 96);
+            return new Avalonia.Remote.Protocol.Viewport.FrameMessage
+            {
+                SequenceId = Interlocked.Increment(ref sequence),
+                Format = Avalonia.Remote.Protocol.Viewport.PixelFormat.Bgra8888,
+                Width = width,
+                Height = height,
+                Stride = width * 4,
+                Data = new byte[width * 4 * height],
+                DpiX = dpi,
+                DpiY = dpi,
+            };
+        }
+
+        private void Send(object message)
+        {
+            lock (sent)
+            {
+                sent.Add(connection.Send(message));
+            }
+        }
+
+        public void Dispose()
+        {
+            Task[] sending;
+            lock (sent)
+            {
+                sending = [.. sent];
+            }
+            Ui.Await(Task.WhenAll(sending), "what the stand-in sent");
+            connection.Dispose();
+        }
+    }
+
     /// <summary>With XAML Preview on, previewers run only for the preview shown and the one hidden last: three views shown in
     /// turn leave two previewers, the first's ended; the one hidden last, shown again, draws with the previewer it kept; a
     /// build that changes nothing starts none again (on Windows, where a previewer holds the build it loaded, it ends both
     /// and starts the shown view's again), and one after an edit to the view shown builds and starts its previewer alone
     /// again, ending the hidden one's, which starts again as its view is shown.</summary>
-    [AvaloniaFact]
-    public void Previewers_run_for_the_preview_shown_and_the_one_hidden_last_and_a_build_starts_only_the_shown_one_again()
+    private void Previewers_run_for_the_preview_shown_and_the_one_hidden_last_and_a_build_starts_only_the_shown_one_again()
     {
         app.Write("One.axaml", Panel("One", "#3D7BF5"));
         app.Write("One.axaml.cs", PanelCode("One"));

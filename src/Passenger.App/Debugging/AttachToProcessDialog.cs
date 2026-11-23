@@ -6,6 +6,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Passenger.App.ToolWindows;
 using Passenger.Core;
 
 namespace Passenger.App.Debugging;
@@ -74,7 +75,7 @@ public sealed class AttachToProcessDialog : IdeWindow
     private readonly Func<Task<IReadOnlyList<DotnetProcess>>> list;
     private readonly Func<DotnetProcess, bool> recent;
     private readonly ListBox rows;
-    private readonly TextBlock empty;
+    private readonly EmptyState empty;
     private readonly Button attach;
     private IReadOnlyList<DotnetProcess>? listed;
     private AttachScope scope;
@@ -88,13 +89,14 @@ public sealed class AttachToProcessDialog : IdeWindow
         this.scope = scope ?? AttachScope.Anywhere;
         Purpose = purpose;
         Title = purpose == AttachPurpose.Profiler ? "Attach Profiler" : "Attach to Process";
-        Width = 900;
+        Width = DialogWidths.Workspace;
         Height = 520;
         MinWidth = 560;
         MinHeight = 300;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
-        Search = new TextBox { Classes = { StyleClasses.Search }, Text = search, PlaceholderText = "Search by name, process ID, user, command line or container" };
+        Search = SearchBox.Of("Search processes", "Search processes by name, ID, user, command line or container");
+        Search.Text = search;
         Search.TextChanged += (_, _) => ShowRows();
         Search.AddHandler(KeyDownEvent, OnKey, RoutingStrategies.Tunnel);
         Button refresh = ToolButtons.Of(IconKeys.Rerun, "Refresh", () => IdeErrors.Observe(RefreshAsync()));
@@ -110,11 +112,10 @@ public sealed class AttachToProcessDialog : IdeWindow
 
         rows = new ListBox { Classes = { StyleClasses.Tree } };
         ReusedRows.Use(rows, Row);
-        // A heading is never chosen; a container shows a heading and a program in turn as the list is filled again.
-        rows.ContainerPrepared += (_, e) => e.Container.IsEnabled = e.Container.DataContext is not AttachRow { Process: null };
+        ListRow.Headings(rows, item => item is AttachRow { Process: null });
         ListKeys.Act(rows, new ListActs { Open = Attach, Keys = e => ListKeys.Move(rows, e, i => Rows[i].Process is not null) });
         rows.SelectionChanged += (_, _) => attach!.IsEnabled = Chosen is { WhyNot: null };
-        empty = new TextBlock { Classes = { StyleClasses.EmptyText }, Text = "Looking for .NET processes…" };
+        empty = new EmptyState { Text = "Looking for .NET processes…" };
         Border table = new()
         {
             Classes = { StyleClasses.Framed },
@@ -297,10 +298,7 @@ public sealed class AttachToProcessDialog : IdeWindow
     /// and in its tip).</summary>
     private static Control Row()
     {
-        TextBlock heading = new()
-        {
-            Classes = { StyleClasses.Muted }, FontSize = 11, FontWeight = FontWeight.SemiBold, Margin = new Thickness(Gaps.Tight, Gaps.Small, 0, Gaps.Hair), TextWrapping = TextWrapping.Wrap,
-        };
+        TextBlock heading = ListRow.Heading();
         TextBlock name = Cell(0, muted: false);
         TextBlock id = Cell(1, muted: false);
         TextBlock user = Cell(2, muted: true);

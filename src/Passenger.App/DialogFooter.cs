@@ -103,7 +103,7 @@ public static class DialogFooter
         StackPanel header = new()
         {
             Spacing = Gaps.Tight,
-            Children = { new TextBlock { Text = title, FontWeight = FontWeight.SemiBold }, about },
+            Children = { new TextBlock { Classes = { StyleClasses.DialogTitle }, Text = title }, about },
         };
         BySides(header, Layoutable.MarginProperty, null, Gaps.Wide);
         Border top = new() { BorderThickness = Hairlines.Below, Child = header };
@@ -114,9 +114,6 @@ public static class DialogFooter
         return content;
     }
 
-    /// <summary>How wide a question is (<see cref="Question"/>).</summary>
-    public const double QuestionWidth = 520;
-
     /// <summary>A question's whole window, laid out one way: its title in bold over its paragraphs (words from
     /// <see cref="Paragraph"/>, or what it is about, as a list), each wrapping, at one width and as tall as they are; its
     /// answers in the footer's bar, and what goes beside them (Don't ask again) at the bar's left. Its words are the
@@ -126,12 +123,12 @@ public static class DialogFooter
         Control[] said = [.. paragraphs];
         AutomationProperties.SetHelpText(dialog, string.Join(" ", said.OfType<TextBlock>().Select(words => words.Text)));
         dialog.Title = title;
-        dialog.Width = QuestionWidth;
+        dialog.Width = DialogWidths.Question;
         dialog.SizeToContent = SizeToContent.Height;
         dialog.CanResize = false;
         dialog.WindowStartupLocation = WindowStartupLocation.CenterOwner;
         StackPanel page = new() { [InsetProperty] = true, Spacing = Gaps.Wide };
-        page.Children.Add(new TextBlock { Text = title, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap });
+        page.Children.Add(new TextBlock { Classes = { StyleClasses.DialogTitle }, Text = title, TextWrapping = TextWrapping.Wrap });
         page.Children.AddRange(said);
         // On a screen too short for its words, they scroll above the answers, which stay in reach.
         dialog.Content = Page(new ScrollViewer { Content = page }, Bar(answers, left));

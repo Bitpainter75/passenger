@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Passenger.App.ToolWindows;
 using Passenger.Core;
 
 namespace Passenger.App.Containers;
@@ -47,7 +48,7 @@ public sealed class ContainerStatsPane : DockPanel
     private readonly StackPanel table = new() { Margin = new Thickness(Gaps.Normal, Gaps.Small) };
     private readonly Sparkline cpu = new(Kept, fromZero: true, fromRight: false, TokenKeys.Link);
     private readonly Sparkline memory = new(Kept, fromZero: true, fromRight: false, TokenKeys.Test_Passed);
-    private readonly TextBlock waiting = new() { Classes = { StyleClasses.EmptyText }, Text = "Waiting for the engine's first reading…" };
+    private readonly EmptyState waiting = new("Waiting for the engine's first reading…");
     private readonly Dictionary<string, ContainerStatsSample> latest = new(StringComparer.Ordinal);
     private Process? streaming;
 
@@ -304,7 +305,7 @@ public sealed class ContainerStatsPane : DockPanel
             TextBlock cell = new() { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, [Grid.ColumnProperty] = i, Margin = new Thickness(0, 0, Gaps.Normal, 0) };
             if (heading)
             {
-                cell.FontWeight = FontWeight.SemiBold;
+                cell.Classes.Add(StyleClasses.Strong);
             }
             cells[i] = cell;
             line.Children.Add(cell);
@@ -314,7 +315,7 @@ public sealed class ContainerStatsPane : DockPanel
 
     private static Control Chart(string title, Sparkline line, int column)
     {
-        TextBlock name = new() { Text = title, FontSize = 11, [DockProperty] = Dock.Top };
+        TextBlock name = new() { Classes = { StyleClasses.Caption }, Text = title, [DockProperty] = Dock.Top };
         name.Classes.Add(StyleClasses.Muted);
         Border frame = new() { Classes = { StyleClasses.Framed }, Child = line };
         return new DockPanel { [Grid.ColumnProperty] = column, Margin = new Thickness(column == 0 ? 0 : Gaps.Tight, 0, column == 0 ? Gaps.Tight : 0, 0), Children = { name, frame } };

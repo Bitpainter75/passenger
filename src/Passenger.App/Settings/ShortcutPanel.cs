@@ -83,7 +83,6 @@ public sealed class StrokeField : TextBox
     {
         this.passesDialogKeys = passesDialogKeys;
         IsReadOnly = true;
-        Classes.Add(StyleClasses.Search);
         if (passesDialogKeys)
         {
             InnerRightContent = SpecialKeys();
@@ -97,7 +96,7 @@ public sealed class StrokeField : TextBox
         set
         {
             stroke = value;
-            Text = value is { IsModifierAlone: true } alone ? new Shortcut(alone, alone).Display() : value?.Display() ?? string.Empty;
+            Text = value is { IsModifierAlone: true } alone ? KeyWords.Of(new Shortcut(alone, alone)) : value is { } pressed ? KeyWords.Of(pressed) : string.Empty;
             CaretIndex = Text.Length;
             StrokeChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -169,20 +168,18 @@ public sealed class StrokeField : TextBox
     private Button SpecialKeys()
     {
         Keystroke[] keys = [new(Key.Enter, KeyModifiers.None), new(Key.Escape, KeyModifiers.None), new(Key.Tab, KeyModifiers.None), new(Key.Tab, KeyModifiers.Shift)];
-        PathIcon plus = new() { Width = 12, Height = 12 };
-        plus.Bind(PathIcon.DataProperty, plus.GetResourceObservable(IconKeys.Add));
-        Button set = new() { Classes = { StyleClasses.TabPin }, Content = plus, Focusable = false, Margin = new Thickness(0, 0, Gaps.Small, 0) };
-        ToolButtons.Tip(set, $"Set shortcuts with {string.Join(", ", keys.Where(k => k.Modifiers == KeyModifiers.None).Select(k => k.Display()))} keys");
+        Button set = ToolButtons.Small(IconKeys.Add, $"Set shortcuts with {string.Join(", ", keys.Where(k => k.Modifiers == KeyModifiers.None).Select(KeyWords.Of))} keys");
+        // The field takes every key, so its + never takes them from it.
+        set.Focusable = false;
+        set.Margin = new Thickness(0, 0, Gaps.Small, 0);
         List<MenuItem> items = [];
         foreach (Keystroke key in keys)
         {
-            MenuItem item = new() { Header = $"Set {key.Display()}" };
-            item.Click += (_, _) =>
+            items.Add(ToolWindows.ListMenus.Item($"Set {KeyWords.Of(key)}", () =>
             {
                 Stroke = key;
                 Focus();
-            };
-            items.Add(item);
+            }));
         }
         ContextMenu menu = new() { ItemsSource = items };
         set.Click += (_, _) => menu.Open(set);

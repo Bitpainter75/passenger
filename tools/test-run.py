@@ -2,16 +2,15 @@
 """The suite, or one lane of it, as several test processes at once, then what must run alone (`just test`).
 
 1. Every class outside the Alone collection, dealt to N processes, since one runs its window tests one at a time: by its
-   seconds (the most any system took in TestTimes.json, else a guess; its share for one partly in the lane), the
-   heaviest first, each to the lightest process so far. The classes run beside the window tests (the unit tests too) are
-   dealt apart, their heaviest hand to the lightest window hand; the container engine's go to one process together
-   (TOGETHER). Limits are scaled by SIDE_BY_SIDE_SCALE.
+   seconds (the most any system took for its tests in the lane in TestTimes.json, else a guess; its share of them for
+   one the filter chose in part), the heaviest first, each to the lightest process so far. The classes run beside the
+   window tests (the unit tests too) are dealt apart, their heaviest hand to the lightest window hand; the container
+   engine's go to one process together (test-shards.py's TOGETHER). Limits are scaled by SIDE_BY_SIDE_SCALE.
 2. The Alone classes in one process once the first phase has ended, so nothing runs beside them. Results go to
    artifacts/test-results/local/ (each process's .trx and console log); the failures are listed at the end.
 """
 import argparse
 import ctypes
-import glob
 import importlib.util
 import os
 import platform
@@ -40,95 +39,27 @@ TIME_SCALE = "PASSENGER_TEST_TIME_SCALE"
 # The first phase's limits, its processes sharing the machine: a test's limits are written for a machine that runs it
 # alone, and this lengthens only how long a test may wait, never how long it does.
 SIDE_BY_SIDE_SCALE = "1.5"
-# A hung test is stopped and named after this, rather than holding the run.
-HANG = "10m"
 # MSBuild's handshake salt, which every build the run starts carries as its start (RUN_SALT), each test process's IDE adding
 # its own after it: what is left under it once the run ends is the run's (end_builds).
 SALT = "MSBUILDNODEHANDSHAKESALT"
 RUN_SALT = f"testrun{os.getpid()}-"
 # What names a run's own temporary folder, as the test processes name theirs (TestRun.Temporary).
 TEMPORARY_PREFIX = "prun-"
-# Classes that share something of the machine beyond the run's own folder, run in one process together in the first phase:
-# the container engine (its virtual machine's processors, image builds, Compose), by what a class's source calls.
-TOGETHER = {
-    "the container engine": re.compile(r"\bDocker\.(?:WhyNot|Run|Ask|Said|ComposeUp|Container|State|VolumeExists|Stopped"
-                                       r"|TakenDown|NoneLeft|Images?)\b|\bContainerPrograms\b|\bStandInEngine\b"
-                                       r"|\bContainerEngine\.Shared\b"),
-}
 # The unit tests, run beside the window tests in one process of the first phase.
 UNIT_TESTS = "[the unit tests]"
-# The collections that run beside the window tests' own in a process (Collections.cs).
-BESIDE = ("Collection(DebugSession.Collection)", "Collection(Beside.Name)")
-DECLARATION = re.compile(r"^(?P<attributes>(?:\[[^\n]*\][ \t]*\r?\n)*)(?:(?:public|internal|sealed|static|partial|abstract"
-                         r"|file)\s+)*class\s+(?P<name>\w+)(?P<rest>[^\n{]*)", re.M)
-NAMESPACE = re.compile(r"^namespace\s+(?P<name>[\w.]+)\s*;", re.M)
 # A test's result as the console logger writes it, never a line of a test's message ("Failed to restore …").
 RESULT = re.compile(r"^  (?P<outcome>Passed|Failed|Skipped) (?:" + re.escape(trx.PREFIX) + "|"
                     + re.escape(shards.UNIT_PREFIX) + r")\S+")
 
 
-def sources():
-    """Each top-level class the test projects declare, by its name as a listing's tests give it (owner): whether its
-    declaration says it is Alone or runs beside the window tests (a unit test always does), its bases' simple names, and
-    the TOGETHER groups its source names."""
-    declared = {}
-    unit = os.path.join(shards.UNIT_PROJECT, "")
-    for path in glob.glob(os.path.join(PROJECT, "**", "*.cs"), recursive=True) + \
-            glob.glob(os.path.join(shards.UNIT_PROJECT, "**", "*.cs"), recursive=True):
-        if os.sep + "obj" + os.sep in path or os.sep + "bin" + os.sep in path:
-            continue
-        with open(path, encoding="utf-8-sig") as file:
-            text = file.read()
-        namespace = NAMESPACE.search(text)
-        within = namespace["name"] + "." if namespace else ""
-        found = list(DECLARATION.finditer(text))
-        for index, declaration in enumerate(found):
-            body = text[declaration.start():found[index + 1].start() if index + 1 < len(found) else len(text)]
-            whole = within + declaration["name"]
-            name = whole[len(trx.PREFIX):] if whole.startswith(trx.PREFIX) else whole
-            rest = declaration["rest"]
-            bases = re.findall(r"\b([A-Z]\w*)", rest.split(":", 1)[1]) if ":" in rest else []
-            declared[name] = {
-                "alone": "Collection(Alone.Name)" in declaration["attributes"],
-                "beside": path.startswith(unit) or any(collection in declaration["attributes"] for collection in BESIDE),
-                "bases": bases,
-                "together": [group for group, pattern in TOGETHER.items() if pattern.search(body)],
-            }
-    return declared
+def weight(name, times, share, lane):
+    """A class's seconds for dealing here: the most any system's runs took for its tests in the lane (all its tests, for
+    all or where TestTimes.json has none in the lane), else a guess, times its share of them."""
+    def took(system):
+        own = shards.lane_seconds(times, system, name, lane) if lane != "all" else None
+        return own if own is not None else shards.class_seconds(times, system, name)
 
-
-def declares(name, declared, key, unknown):
-    """Whether a class's declaration, or a base class's, says what key names; unknown for one the sources do not show."""
-    by_simple = {full.rsplit(".", 1)[-1]: value for full, value in declared.items()}
-    seen = set()
-    entry = declared.get(name)
-    if entry is None:
-        return unknown
-    while entry is not None:
-        if entry[key]:
-            return True
-        base = next((b for b in entry["bases"] if b in by_simple and b not in seen), None)
-        if base is None:
-            return False
-        seen.add(base)
-        entry = by_simple[base]
-    return False
-
-
-def alone(name, declared):
-    """Whether a class runs in the Alone collection: its own declaration says so, or a base class's does. One the sources
-    do not show (a test class nested in another) runs alone, which is never wrong, only slower."""
-    return declares(name, declared, "alone", True)
-
-
-def beside(name, declared):
-    """Whether a class runs beside the window tests in its process (DebugSession.Collection, Beside)."""
-    return declares(name, declared, "beside", False)
-
-
-def weight(name, times, share):
-    """A class's seconds for dealing here: the most any system's runs took for it (else a guess), times its share."""
-    known = [times[system][name] for system in shards.SYSTEMS if name in times.get(system, {})]
+    known = [seconds for system in shards.SYSTEMS if (seconds := took(system)) is not None]
     return (max(known) if known else shards.guess(name)) * share.get(name, 1.0)
 
 
@@ -191,8 +122,7 @@ class Process:
             environment[TIME_SCALE] = scale
         built = [UNIT_ASSEMBLY if project == shards.UNIT_PROJECT else ASSEMBLY for project in shards.hand_projects(classes)]
         command = ["dotnet", "test"] + built + ["--settings", settings_path, "--results-directory", folder,
-                   "--logger", "trx", "--logger", "console;verbosity=normal",
-                   "--blame-hang-timeout", HANG, "--blame-hang-dump-type", "none"]
+                   "--logger", "trx", "--logger", "console;verbosity=normal"] + shards.HANG_ARGUMENTS
         self.started = time.monotonic()
         self.log = open(self.log_path, "w", encoding="utf-8", errors="replace")
         if shown:
@@ -477,14 +407,15 @@ def main():
     if not tests:
         print(f"No test matches the filter {chosen}")
         return 1
-    # A class with tests outside what runs weighs its share of its seconds, by its tests in a listing of them all.
-    whole = Counter(shards.owner(test) for test in (listing("", assemblies("all")) or [])) if chosen else None
+    # A class with tests the filter left out weighs its share of its seconds, by its tests in a listing of the lane.
+    whole = (Counter(shards.owner(test) for test in (listing(shards.lane_filter(lane), assemblies(lane)) or []))
+             if given else None)
     counts = Counter(shards.owner(test) for test in tests)
     share = shards.shares(counts, whole) if whole else {}
     classes = sorted(counts)
-    declared = sources()
+    declared = shards.sources()
     times = shards.load(shards.TIMES, {})
-    last = [name for name in classes if alone(name, declared)]
+    last = [name for name in classes if shards.alone(name, declared)]
     rest = [name for name in classes if name not in last]
 
     units = {}
@@ -493,9 +424,9 @@ def main():
         together = declared.get(name, {}).get("together", [])
         unit = f"[{together[0]}]" if together else UNIT_TESTS if name.startswith(shards.UNIT_PREFIX) else name
         units.setdefault(unit, []).append(name)
-        if not together and beside(name, declared):
+        if not together and shards.beside(name, declared):
             side.add(unit)
-    unit_weights = {unit: sum(weight(name, times, share) for name in members) for unit, members in units.items()}
+    unit_weights = {unit: sum(weight(name, times, share, lane) for name in members) for unit, members in units.items()}
     windowed = {unit: seconds for unit, seconds in unit_weights.items() if unit not in side}
     besides = {unit: seconds for unit, seconds in unit_weights.items() if unit in side}
     count = min(count, max(len(windowed), len(besides)))
@@ -518,10 +449,10 @@ def main():
                 grouped = unit.startswith("[")
                 print(f"  {unit:<44} {unit_weights[unit]:>7.1f}" + (f"  ({', '.join(units[unit])})" if grouped else "")
                       + ("" if grouped else partly(unit)) + ("  (beside)" if unit in side else ""))
-        print(f"\nAlone, after them, about {sum(weight(n, times, share) for n in last) / 60:.1f} minutes by "
+        print(f"\nAlone, after them, about {sum(weight(n, times, share, lane) for n in last) / 60:.1f} minutes by "
               "CI's times:")
         for name in last:
-            print(f"  {name:<44} {weight(name, times, share):>7.1f}" + partly(name)
+            print(f"  {name:<44} {weight(name, times, share, lane):>7.1f}" + partly(name)
                   + ("" if name in declared else "  (not in the sources)"))
         return 0
 

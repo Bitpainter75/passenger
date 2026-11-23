@@ -16,7 +16,13 @@ public sealed class SolutionFilterEditsTests : IDisposable
     public void Dispose() => Directory.Delete(root, recursive: true);
 
     [Fact]
-    public void A_project_moved_or_renamed_is_named_where_it_went_in_the_separator_it_was_written_with()
+    public void A_solution_filter_follows_its_projects_and_its_solution_as_they_move() => Cases.AllApart<SolutionFilterEditsTests>(
+        ("a project moved or renamed is named where it went in the separator it was written with", test => test.A_project_moved_or_renamed_is_named_where_it_went_in_the_separator_it_was_written_with()),
+        ("the filter moved names its solution from where it went and the solution moved names each project from its new folder", test => test.The_filter_moved_names_its_solution_from_where_it_went_and_the_solution_moved_names_each_project_from_its_new_folder()),
+        ("a project removed leaves the list with its line and one the list lacks changes nothing", test => test.A_project_removed_leaves_the_list_with_its_line_and_one_the_list_lacks_changes_nothing()),
+        ("a project added to a copy of a filter outside its solutions folder is named from the solutions folder", test => test.A_project_added_to_a_copy_of_a_filter_outside_its_solutions_folder_is_named_from_the_solutions_folder()));
+
+    private void A_project_moved_or_renamed_is_named_where_it_went_in_the_separator_it_was_written_with()
     {
         string filter = Write("Shop.slnf", Filter);
         Assert.True(SolutionEdits.MoveInFilter(filter, [(At("App"), At("src", "App")), (At("src", "Lib", "Lib.csproj"), At("src", "Lib", "Core.csproj"))]),
@@ -29,8 +35,7 @@ public sealed class SolutionFilterEditsTests : IDisposable
         Assert.Equal(followed, File.ReadAllText(filter));
     }
 
-    [Fact]
-    public void The_filter_moved_names_its_solution_from_where_it_went_and_the_solution_moved_names_each_project_from_its_new_folder()
+    private void The_filter_moved_names_its_solution_from_where_it_went_and_the_solution_moved_names_each_project_from_its_new_folder()
     {
         string filter = Write(Path.Combine("filters", "Shop.slnf"), Filter);
         Assert.True(SolutionEdits.MoveInFilter(filter, [(At("Shop.slnf"), filter)]), "The filter moved still names its solution from where it was");
@@ -46,8 +51,7 @@ public sealed class SolutionFilterEditsTests : IDisposable
             "The filter no longer reads as keeping the projects it kept");
     }
 
-    [Fact]
-    public void A_project_removed_leaves_the_list_with_its_line_and_one_the_list_lacks_changes_nothing()
+    private void A_project_removed_leaves_the_list_with_its_line_and_one_the_list_lacks_changes_nothing()
     {
         string filter = Write("Shop.slnf", Filter);
         Assert.Null(SolutionEdits.RemoveFromFilter(filter, [At("Tools", "Tools.csproj"), At("Docs", "Docs.csproj")]));
@@ -57,8 +61,7 @@ public sealed class SolutionFilterEditsTests : IDisposable
         Assert.Equal(written, File.GetLastWriteTimeUtc(filter));
     }
 
-    [Fact]
-    public void A_project_added_to_a_copy_of_a_filter_outside_its_solutions_folder_is_named_from_the_solutions_folder()
+    private void A_project_added_to_a_copy_of_a_filter_outside_its_solutions_folder_is_named_from_the_solutions_folder()
     {
         string filter = Write(Path.Combine("filters", "Shop.slnf"), Filter.Replace("\"Shop.slnx\"", "\"../src/Shop.slnx\"", StringComparison.Ordinal));
         string copy = Write(Path.Combine("staging", "outside", "0", "Shop.slnf"), File.ReadAllText(filter));

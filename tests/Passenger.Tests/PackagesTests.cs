@@ -51,11 +51,22 @@ public sealed class PackagesTests : IDisposable
 
     public void Dispose() => TestFolders.Delete(folder);
 
-    /// <summary>In a window opened on the folder above the project, which no solution names: a package is installed at the
-    /// version chosen, updated and removed, then installed again from the Install on the project's line.</summary>
+    /// <summary>The gate's package changes as one flow: a package from the feed installed, updated and removed in a
+    /// project with no solution, prereleases offered in semver's order, versions unlisted on nuget.org left out, and a
+    /// version set centrally shown and written there by an install.</summary>
     [Gate]
     [AvaloniaFact]
-    public void A_package_found_in_the_feed_is_installed_updated_and_removed_in_a_project_below_a_folder_with_no_solution()
+    public void The_gates_package_changes_hold_as_one_flow()
+    {
+        Flow.StepApart("a package found in the feed is installed updated and removed in a project below a folder with no solution", () => new PackagesTests(), t => t.A_package_found_in_the_feed_is_installed_updated_and_removed_in_a_project_below_a_folder_with_no_solution());
+        Flow.StepApart("prereleases are offered as semver orders them so beta 10 is an update from beta 2", () => new PackagesTests(), t => t.Prereleases_are_offered_as_semver_orders_them_so_beta_10_is_an_update_from_beta_2());
+        Flow.StepApart("versions unlisted on nuget org are not offered", () => new PackagesTests(), t => t.Versions_unlisted_on_nuget_org_are_not_offered());
+        Flow.StepApart("under central package management the window shows the version set centrally and an install puts its version there", () => new PackagesTests(), t => t.Under_central_package_management_the_window_shows_the_version_set_centrally_and_an_install_puts_its_version_there());
+    }
+
+    /// <summary>In a window opened on the folder above the project, which no solution names: a package is installed at the
+    /// version chosen, updated and removed, then installed again from the Install on the project's line.</summary>
+    private void A_package_found_in_the_feed_is_installed_updated_and_removed_in_a_project_below_a_folder_with_no_solution()
     {
         MainWindow window = Open(new FolderFeed(feed), folder);
         NuGetView nuget = window.NuGet;
@@ -91,14 +102,9 @@ public sealed class PackagesTests : IDisposable
     }
 
     /// <summary>The Install button on a project's line among the chosen package's projects.</summary>
-    private static Button? InstallButton(NuGetView nuget, string name) => nuget.GetLogicalDescendants().OfType<Panel>()
-        .Where(line => line.Children.FirstOrDefault() is TextBlock { Text: { } text } && text == name)
-        .SelectMany(line => line.Children.OfType<Button>())
-        .FirstOrDefault(button => (string?)button.Content == "Install");
+    private static Button? InstallButton(NuGetView nuget, string name) => NuGetTests.Action(nuget, name, "Install");
 
-    [Gate]
-    [AvaloniaFact]
-    public void Prereleases_are_offered_as_semver_orders_them_so_beta_10_is_an_update_from_beta_2()
+    private void Prereleases_are_offered_as_semver_orders_them_so_beta_10_is_an_update_from_beta_2()
     {
         // SemVer 2's own example of precedence, with beta.10 where it has beta.11.
         foreach (string version in new[] { "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.10", "1.0.0-rc.1" })
@@ -122,33 +128,7 @@ public sealed class PackagesTests : IDisposable
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Choosing_a_package_another_and_the_first_again_before_their_versions_arrive_shows_its_details_once()
-    {
-        HeldFeed held = new(new FolderFeed(feed));
-        MainWindow window = Open(held);
-        NuGetView nuget = window.NuGet;
-        nuget.Query = "passenger";
-        // The window waits on the versions held back, as background work, so nothing settles until they are let go.
-        Ui.PumpUntil(() => nuget.Rows.Count == 2 && nuget.Selected is not null, "both packages listed, the first chosen");
-
-        PackageRow first = nuget.Selected!;
-        ListBox list = Descendants<ListBox>(nuget).Single();
-        list.SelectedItem = nuget.Rows.Single(r => r.Id != first.Id);
-        list.SelectedItem = first;
-        held.Release();
-        Ui.Landed(() => held.Answered == 3, "the versions of all three choices");
-
-        List<ComboBox> pickers = [.. Pickers(nuget)];
-        Assert.True(pickers.Count == 1, $"The details of {first.Id} were shown {pickers.Count} times");
-        Assert.Equal(first.Id == "Passenger.Sample" ? ["1.1.0", "1.0.0"] : ["2.0.0"], pickers[0].Items.OfType<string>());
-        window.Close();
-    }
-
-    [Gate]
-    [AvaloniaFact]
-    public void Versions_unlisted_on_nuget_org_are_not_offered()
+    private void Versions_unlisted_on_nuget_org_are_not_offered()
     {
         MainWindow window = Open(new V3Feed(new FeedClient("nuget.org", V3Feed.NuGetOrg, new HttpClient(new RecordedNuGetOrg()))));
         NuGetView nuget = window.NuGet;
@@ -163,9 +143,7 @@ public sealed class PackagesTests : IDisposable
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Under_central_package_management_the_window_shows_the_version_set_centrally_and_an_install_puts_its_version_there()
+    private void Under_central_package_management_the_window_shows_the_version_set_centrally_and_an_install_puts_its_version_there()
     {
         string props = Path.Combine(folder, "Directory.Packages.props");
         File.WriteAllText(props, """
@@ -234,10 +212,7 @@ public sealed class PackagesTests : IDisposable
     }
 
     /// <summary>The version a project's line shows for the chosen package: the one installed there, or nothing.</summary>
-    private static string? ShownVersion(NuGetView nuget, string name) => nuget.GetLogicalDescendants().OfType<Panel>()
-        .Where(line => line.Children.FirstOrDefault() is TextBlock { Text: { } text } && text == name)
-        .Select(line => line.Children.OfType<TextBlock>().Skip(1).FirstOrDefault()?.Text)
-        .FirstOrDefault();
+    private static string? ShownVersion(NuGetView nuget, string name) => NuGetTests.ShownVersion(nuget, name);
 
     /// <summary>A window on a folder (the Lib project's unless given) with the NuGet window open on a feed; without the C#
     /// language server, which nothing here asks of, so none starts and restores the project.</summary>

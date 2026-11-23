@@ -10,6 +10,7 @@ namespace Passenger.Tests;
 /// <summary>Why an action cannot run reads the same wherever it is said, as <see cref="Refusals"/> words it: no string the
 /// IDE's code writes is a refusal's words again, whole, with words added, or as one of Refusals' methods makes them.</summary>
 [Collection(Beside.Name)]
+[SameOnEverySystem]
 public sealed class RefusalsTests
 {
     /// <summary>The words Refusals' methods make, alone or after what the refusal stopped ("Reformat: "), each hole ({})
@@ -28,6 +29,7 @@ public sealed class RefusalsTests
         new(@"(?:^|: )\{\} was not renamed: "),
         new(@"(?:^|: )\{\} changed as it was read$"),
         new(@"(?i:a) (?:file|folder) of the package \{\}, as NuGet restored it"),
+        new(@"(?:\b(?:it was|they were)|\{\} was|,) edited meanwhile(?:$|,)"),
     ];
 
     [Fact]

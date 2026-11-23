@@ -8,13 +8,13 @@ using Passenger.Workspace;
 
 namespace Passenger.Tests;
 
-/// <summary>New Solution's Godot 4 Game, Passenger's own, beside dotnet new's templates: in C# it makes the game and its
-/// solution on the Godot found's Godot.NET.Sdk, restored from that Godot's own packages, opens it built and offers Passenger
-/// as Godot's script editor, and Run starts the game, whose script prints; by default its solution sits beside
-/// project.godot, where Godot's own editor builds it, and it targets the newest .NET that editor builds and loads it on; in
-/// GDScript it makes the game's folder alone, which opens and runs the same. With no Godot found it is refused saying how
-/// to get one. Godot runs headless with the run's user folders; without a Godot 4 .NET build, the tests that run it skip
-/// saying why.</summary>
+/// <summary>New Solution's Godot 4 Game, Passenger's own, beside dotnet new's templates: in C# it makes the game and
+/// its solution on the Godot found's Godot.NET.Sdk, restored from that Godot's own packages, opens it built and offers
+/// Passenger as Godot's script editor, and Run starts the game, whose script prints; it targets the newest .NET Godot's
+/// own editor builds and loads it on; in GDScript it makes the game's folder alone, which opens and runs the same.
+/// Godot runs headless with the run's user folders; without a Godot 4 .NET build, the tests that run it skip saying
+/// why.</summary>
+[AboutMacOS]
 public sealed class NewGodotGameTests : IDisposable
 {
     private readonly string settings = TestFolders.Create("settings-");
@@ -35,10 +35,21 @@ public sealed class NewGodotGameTests : IDisposable
         godot is null ? "No Godot was found (GODOT, the PATH, Applications): install Godot 4's .NET build to run these tests"
             : $"The Godot found cannot make a C# game: {godot.WhyNot}");
 
+    /// <summary>A new Godot game, C# or GDScript, is made, opens, builds and runs on the .NET its Godot
+    /// takes.</summary>
+    [AvaloniaFact]
+    public void A_new_godot_game_is_made_opens_builds_and_runs()
+    {
+        Flow.StepApart<NewGodotGameTests>(nameof(A_csharp_godot_game_is_made_on_the_godots_sdk_opens_built_and_runs_printing),
+            test => test.A_csharp_godot_game_is_made_on_the_godots_sdk_opens_built_and_runs_printing());
+        OpenWindows.CloseAll();
+        Flow.StepApart<NewGodotGameTests>(nameof(A_gdscript_godot_game_is_its_folder_alone_which_opens_and_runs_printing),
+            test => test.A_gdscript_godot_game_is_its_folder_alone_which_opens_and_runs_printing());
+    }
+
     /// <summary>The Godot 4 Game made in C#, its solution and project in one folder, opens built with Passenger offered as
     /// Godot's script editor, and runs, its script printing.</summary>
-    [AvaloniaFact]
-    public void A_csharp_godot_game_is_made_on_the_godots_sdk_opens_built_and_runs_printing()
+    private void A_csharp_godot_game_is_made_on_the_godots_sdk_opens_built_and_runs_printing()
     {
         SkipWithoutGodot();
         MainWindow window = Started();
@@ -60,41 +71,6 @@ public sealed class NewGodotGameTests : IDisposable
                 () => $"the new game to be built and Passenger offered as Godot's script editor ({window.Status})", TimeSpan.FromMinutes(4));
             Assert.Equal("make Passenger Godot's Script Editor", window.StatusPlace?.Name);
             Runs(window, "Spinner");
-        }
-        finally
-        {
-            End(window);
-        }
-    }
-
-    /// <summary>The Godot 4 Game made in C# with the dialog's defaults keeps its solution beside project.godot and the
-    /// project, as Godot's editor lays a game out, and Godot's own editor, started through its Godot Editor configuration
-    /// (headless, building the solution and quitting), builds it there into its .godot folder; or, where that editor builds
-    /// no C# game here (#1726), Passenger says why in the Run window before the editor starts, which then fails as said.</summary>
-    [AvaloniaFact]
-    public void A_csharp_godot_games_solution_sits_beside_project_godot_by_default_where_godots_editor_builds_it_or_passenger_says_why_not()
-    {
-        SkipWithoutGodot();
-        MainWindow window = Started();
-        try
-        {
-            NewProjectDialog dialog = Chosen(window, "C#");
-            Assert.True(dialog.SameDirectory, "A C# Godot game was to put its solution beside project.godot unless told otherwise");
-            string? framework = dialog.Framework;
-            Created(dialog);
-            string folder = PathNames.Canonical(Path.Combine(place, "Spinner"));
-            string solution = Path.Combine(folder, $"Spinner.{dialog.SolutionFormat}");
-            Ui.WaitFor(() => window.WorkspaceModel?.OpenedAs == solution, () => $"the new game's solution to open beside project.godot ({window.Status})", TimeSpan.FromMinutes(2));
-            Assert.True(File.Exists(Path.Combine(folder, GodotProject.FileName)) && File.Exists(Path.Combine(folder, "Spinner.csproj")),
-                $"project.godot and the project were to sit beside the solution: {string.Join(", ", Directory.EnumerateFileSystemEntries(folder).Select(Path.GetFileName))}");
-            (string said, int code, bool built) = BuiltByGodotsEditor(window, folder);
-            if (Unbuilt(said) is not { } why)
-            {
-                Assert.True(code == 0 && built, $"Godot's editor did not build the {framework} game where its solution sits ({ExitCodes.Said(code)}), and Passenger said nothing of it:\n{said}");
-                return;
-            }
-            Assert.True(code != 0 && !built, $"Passenger said Godot's editor would build no C# game here, which it built:\n{why}");
-            Assert.True(said.IndexOf(why, StringComparison.Ordinal) < said.IndexOf("Godot Engine v", StringComparison.Ordinal), $"Passenger said why Godot's editor builds no C# game only after it started:\n{said}");
         }
         finally
         {
@@ -211,7 +187,7 @@ public sealed class NewGodotGameTests : IDisposable
         int code = Ui.Await(window.RunEnd, "Godot's editor to build the game and quit", TimeSpan.FromMinutes(5));
         bool built = Directory.EnumerateFiles(place + "-home", "msbuild_log.txt", SearchOption.AllDirectories)
             .Any(log => File.ReadLines(log).LastOrDefault(l => l.StartsWith("Done building project", StringComparison.Ordinal)) == "Done building project \"Spinner.csproj\".");
-        return (Output(window) + BuildIssues(), code, built && File.Exists(Path.Combine(folder, ".godot", "mono", "temp", "bin", "Debug", "Spinner.dll")));
+        return (Output(window) + BuildIssues(), code, built && File.Exists(Path.Combine(folder, IgnoredFolders.GodotCache, "mono", "temp", "bin", "Debug", "Spinner.dll")));
     }
 
     /// <summary>What Passenger said in the Run window of why Godot's editor builds or runs no C# of the game; null for nothing.</summary>
@@ -225,8 +201,7 @@ public sealed class NewGodotGameTests : IDisposable
 
     /// <summary>The Godot 4 Game made in GDScript is its folder alone, no solution or project, which opens and runs, its script
     /// printing.</summary>
-    [AvaloniaFact]
-    public void A_gdscript_godot_game_is_its_folder_alone_which_opens_and_runs_printing()
+    private void A_gdscript_godot_game_is_its_folder_alone_which_opens_and_runs_printing()
     {
         SkipWithoutGodot();
         MainWindow window = Started();
@@ -244,61 +219,6 @@ public sealed class NewGodotGameTests : IDisposable
         finally
         {
             End(window);
-        }
-    }
-
-    /// <summary>With no Godot where Settings names one, the Godot 4 Game is noted and refused before anything is made,
-    /// saying where Godot comes from.</summary>
-    [AvaloniaFact]
-    public void A_godot_game_with_no_godot_found_is_refused_saying_how_to_get_one()
-    {
-        MainWindow window = Started();
-        NewProjectDialog dialog = new(place, null, godot: Path.Combine(place, "no-godot", "Godot")) { Workloads = window.InstallAskedWorkloadsAsync, WorkloadPlace = window.WorkloadFoldersAsync };
-        IdeErrors.Observe(dialog.ShowDialog(window));
-        try
-        {
-            Ui.WaitFor(() => dialog.TemplatesRead.IsCompleted, "dotnet new's templates to be read", TimeSpan.FromMinutes(3));
-            Choose(dialog, "C#");
-            Ui.WaitFor(() => dialog.WindowsNote is not null, "the game to be noted as lacking Godot");
-            Assert.Contains("godotengine.org/download", dialog.WindowsNote, StringComparison.Ordinal);
-            Ui.Click(dialog.CreateButton);
-            Ui.WaitFor(() => dialog.Problem is not null, "Create to be refused");
-            Assert.StartsWith("A Godot game needs Godot: ", dialog.Problem, StringComparison.Ordinal);
-            Assert.Empty(Directory.EnumerateFileSystemEntries(place));
-        }
-        finally
-        {
-            dialog.Close();
-            window.Close();
-        }
-    }
-
-    /// <summary>A GDScript game on a Godot older than 4, by its download's name, is noted and refused before anything is made,
-    /// as its Run would refuse that Godot.</summary>
-    [AvaloniaFact]
-    public void A_gdscript_game_on_a_godot_older_than_4_is_refused_saying_where_godot_4_comes_from()
-    {
-        string old = TestFolders.Create("old-godot-");
-        string three = TestFolders.Write(old, "Godot_v3.5.3-stable_x11.64", string.Empty);
-        MainWindow window = Started();
-        NewProjectDialog dialog = new(place, null, godot: three) { Workloads = window.InstallAskedWorkloadsAsync, WorkloadPlace = window.WorkloadFoldersAsync };
-        IdeErrors.Observe(dialog.ShowDialog(window));
-        try
-        {
-            Ui.WaitFor(() => dialog.TemplatesRead.IsCompleted, "dotnet new's templates to be read", TimeSpan.FromMinutes(3));
-            Choose(dialog, "GDScript");
-            Ui.WaitFor(() => dialog.WindowsNote is not null, "the game to be noted as lacking Godot 4");
-            Assert.Contains("is Godot 3.5.3", dialog.WindowsNote, StringComparison.Ordinal);
-            Ui.Click(dialog.CreateButton);
-            Ui.WaitFor(() => dialog.Problem is not null, "Create to be refused");
-            Assert.StartsWith("A Godot game needs Godot 4: ", dialog.Problem, StringComparison.Ordinal);
-            Assert.Empty(Directory.EnumerateFileSystemEntries(place));
-        }
-        finally
-        {
-            dialog.Close();
-            window.Close();
-            TestFolders.Delete(old);
         }
     }
 

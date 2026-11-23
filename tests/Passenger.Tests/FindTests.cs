@@ -12,15 +12,44 @@ using Passenger.Text;
 namespace Passenger.Tests;
 
 /// <summary>Find and replace through the window, with the platform's own shortcuts.</summary>
+[AboutMacOS]
 public sealed class FindTests : IDisposable
 {
     private readonly string folder = TestFolders.Create("find-");
 
     public void Dispose() => TestFolders.Delete(folder);
 
+    /// <summary>The find bar, the gate's checks as one flow: a query chooses the nearest match and Enter and
+    /// Shift+Enter walk them, Replace All is one step of Undo, a regex reads a CRLF file's breaks and fills its groups
+    /// where each match stands, whole words take an alternation whole, every line's start is replaced, a regex that
+    /// never ends leaves the window free, and a key costs the same over twenty thousand lines as two hundred.</summary>
     [Gate]
     [AvaloniaFact]
-    public void Typing_a_query_selects_the_nearest_match_and_enter_and_shift_enter_walk_them()
+    public void The_find_bar_finds_walks_and_replaces_as_written_never_holding_the_window()
+    {
+        Flow.StepApart<FindTests>("typing a query selects the nearest match and enter and Shift+Enter walk them", t => t.Typing_a_query_selects_the_nearest_match_and_enter_and_shift_enter_walk_them());
+        Flow.StepApart<FindTests>("Replace All changes every match in one undoable step", t => t.Replace_all_changes_every_match_in_one_undoable_step());
+        Flow.StepApart<FindTests>("a regex sees a CRLF file's line ends and stripping trailing space keeps its breaks", t => t.A_regex_sees_a_crlf_files_line_ends_and_stripping_trailing_space_keeps_its_breaks());
+        Flow.StepApart<FindTests>("a regex replacement fills its groups from the match where it stands lookahead and all", t => t.A_regex_replacement_fills_its_groups_from_the_match_where_it_stands_lookahead_and_all());
+        Flow.StepApart<FindTests>("with words on a regex alternation finds whole words on both sides", t => t.With_words_on_a_regex_alternation_finds_whole_words_on_both_sides());
+        Flow.StepApart<FindTests>("replacing every line's start comments each line and leaves the end after the last break alone", t => t.Replacing_every_lines_start_comments_each_line_and_leaves_the_end_after_the_last_break_alone());
+        Flow.StepApart<FindTests>("a regex that backtracks without end leaves the window free stops saying so and replaces nothing", t => t.A_regex_that_backtracks_without_end_leaves_the_window_free_stops_saying_so_and_replaces_nothing());
+        Flow.StepApart<FindTests>("Replace All taking the whole text or what stands around each match gives what dotnet gives", t => t.Replace_all_taking_the_whole_text_or_what_stands_around_each_match_gives_what_dotnet_gives());
+        Flow.StepApart<FindTests>("typing a query costs a key over twenty thousand lines what it does over two hundred", t => t.Typing_a_query_costs_a_key_over_twenty_thousand_lines_what_it_does_over_two_hundred());
+    }
+
+    /// <summary>Replace All says how many it replaced until the text or the search changes, a screen reader hearing it,
+    /// Shift+Enter puts a line break in the replacement written as the file's own, and a Replace All that would make
+    /// the text too long is refused before any of it is made.</summary>
+    [AvaloniaFact]
+    public void Replace_all_says_what_it_did_and_never_makes_what_it_cannot_hold()
+    {
+        Flow.StepApart<FindTests>("Replace All says how many it replaced until the text or the search changes and a screen reader hears it", t => t.Replace_all_says_how_many_it_replaced_until_the_text_or_the_search_changes_and_a_screen_reader_hears_it());
+        Flow.StepApart<FindTests>("Shift+Enter puts a line break in the replacement and a regex reads backslash n each written as the file's own", t => t.Shift_enter_puts_a_line_break_in_the_replacement_and_a_regex_reads_backslash_n_each_written_as_the_files_own());
+        Flow.StepApart<FindTests>("Replace All that would make the text too long is refused before any of it is made", t => t.Replace_all_that_would_make_the_text_too_long_is_refused_before_any_of_it_is_made());
+    }
+
+    private void Typing_a_query_selects_the_nearest_match_and_enter_and_shift_enter_walk_them()
     {
         (MainWindow window, CodeEditor editor) = Open("alpha beta\nbeta gamma\nbeta");
         Ui.Press(window, Ui.Shortcut(AppActions.Find));
@@ -42,9 +71,7 @@ public sealed class FindTests : IDisposable
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Replace_all_changes_every_match_in_one_undoable_step()
+    private void Replace_all_changes_every_match_in_one_undoable_step()
     {
         (MainWindow window, CodeEditor editor) = Open("total + total * total");
         Ui.Press(window, Ui.Shortcut(AppActions.Replace));
@@ -59,10 +86,42 @@ public sealed class FindTests : IDisposable
         window.Close();
     }
 
+    /// <summary>What Replace All came to stays in the find bar's count once the window settles, through the search its own
+    /// edits bring, and a screen reader hears it; a key typed in the text, or a search changed, puts the count back.</summary>
+    private void Replace_all_says_how_many_it_replaced_until_the_text_or_the_search_changes_and_a_screen_reader_hears_it()
+    {
+        (MainWindow window, CodeEditor editor) = Open("total + total * total");
+        Ui.Press(window, Ui.Shortcut(AppActions.Replace));
+        window.KeyTextInput("total");
+        Ui.Settle();
+        FindBar bar = window.EditorArea.FindBar;
+        bar.FindControl<TextBox>("ReplaceWith")!.Text = "sum";
+        List<(string Words, Avalonia.Automation.AutomationLiveSetting Live)> heard = AccessibilityTests.Listen(window);
+        Ui.Click(bar.FindControl<Button>("ReplaceAllButton")!);
+        Ui.Settle();
+        Assert.True(bar.CountText == "Replaced 3", $"Replace All left the find bar saying '{bar.CountText}' once the window settled, where it says how many it replaced");
+        Assert.True(heard.Any(h => h.Words == "Replaced 3"), $"A screen reader heard {AccessibilityTests.Said(heard)} as Replace All ended, not \"Replaced 3\"");
+
+        editor.Focus();
+        window.KeyTextInput(" ");
+        Ui.Settle();
+        Assert.True(bar.CountText == "0 results", $"A key typed in the text left the find bar saying '{bar.CountText}', where it counts the query's matches again");
+
+        editor.TryExecute(EditorActions.Undo);
+        editor.TryExecute(EditorActions.Undo);
+        Assert.Equal("total + total * total", editor.Document.Snapshot.ToString());
+        Ui.Click(bar.FindControl<Button>("ReplaceAllButton")!);
+        Ui.Settle();
+        Assert.Equal("Replaced 3", bar.CountText);
+        bar.FindControl<TextBox>("Query")!.Text = "sum";
+        Ui.Settle();
+        Assert.True(bar.CountText.EndsWith("/3", StringComparison.Ordinal), $"A query typed after Replace All left the find bar saying '{bar.CountText}', where it counts the new query's 3 matches");
+        window.Close();
+    }
+
     /// <summary>Shift+Enter in the Replace box puts a line break into it, as its tooltip says, where Enter replaces; Replace
     /// All writes it in a "\r\n" file as "\r\n", and with Regex on a \n typed in the box makes one too.</summary>
-    [AvaloniaFact]
-    public void Shift_enter_puts_a_line_break_in_the_replacement_and_a_regex_reads_backslash_n_each_written_as_the_files_own()
+    private void Shift_enter_puts_a_line_break_in_the_replacement_and_a_regex_reads_backslash_n_each_written_as_the_files_own()
     {
         (MainWindow window, CodeEditor editor) = Open("one, two\r\nthree\r\n");
         Ui.Press(window, Ui.Shortcut(AppActions.Replace));
@@ -70,7 +129,7 @@ public sealed class FindTests : IDisposable
         Ui.Settle();
         FindBar bar = window.EditorArea.FindBar;
         TextBox replacing = bar.FindControl<TextBox>("ReplaceWith")!;
-        Assert.Contains("Shift+Enter puts a line break in", ToolTip.GetTip(replacing) as string, StringComparison.Ordinal);
+        Assert.Contains(OperatingSystem.IsMacOS() ? "⇧⏎ puts a line break in" : "Shift+Enter puts a line break in", ToolTip.GetTip(replacing) as string, StringComparison.Ordinal);
         replacing.Focus();
         window.KeyTextInput(",");
         Ui.Press(window, "shift ENTER");
@@ -91,9 +150,7 @@ public sealed class FindTests : IDisposable
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_regex_sees_a_crlf_files_line_ends_and_stripping_trailing_space_keeps_its_breaks()
+    private void A_regex_sees_a_crlf_files_line_ends_and_stripping_trailing_space_keeps_its_breaks()
     {
         (MainWindow window, CodeEditor editor) = Open("int foo  \r\nfoo bar\t\r\nbar foo\r\nend");
         Ui.Press(window, Ui.Shortcut(AppActions.Replace));
@@ -115,9 +172,7 @@ public sealed class FindTests : IDisposable
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_regex_replacement_fills_its_groups_from_the_match_where_it_stands_lookahead_and_all()
+    private void A_regex_replacement_fills_its_groups_from_the_match_where_it_stands_lookahead_and_all()
     {
         (MainWindow window, CodeEditor editor) = Open("foo(1); bar (2); baz(3);");
         Ui.Press(window, Ui.Shortcut(AppActions.Replace));
@@ -139,9 +194,7 @@ public sealed class FindTests : IDisposable
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void With_words_on_a_regex_alternation_finds_whole_words_on_both_sides()
+    private void With_words_on_a_regex_alternation_finds_whole_words_on_both_sides()
     {
         (MainWindow window, CodeEditor editor) = Open("catalog cat hotdog dog");
         Ui.Press(window, Ui.Shortcut(AppActions.Replace));
@@ -163,9 +216,7 @@ public sealed class FindTests : IDisposable
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void Replacing_every_lines_start_comments_each_line_and_leaves_the_end_after_the_last_break_alone()
+    private void Replacing_every_lines_start_comments_each_line_and_leaves_the_end_after_the_last_break_alone()
     {
         (MainWindow window, CodeEditor editor) = Open("one\n\ntwo\n");
         Ui.Press(window, Ui.Shortcut(AppActions.Replace));
@@ -189,9 +240,7 @@ public sealed class FindTests : IDisposable
         window.Close();
     }
 
-    [Gate]
-    [AvaloniaFact]
-    public void A_regex_that_backtracks_without_end_leaves_the_window_free_stops_saying_so_and_replaces_nothing()
+    private void A_regex_that_backtracks_without_end_leaves_the_window_free_stops_saying_so_and_replaces_nothing()
     {
         string text = "ab\n" + new string('a', 3000) + "\n";
         (MainWindow window, CodeEditor editor) = Open(text);
@@ -219,8 +268,7 @@ public sealed class FindTests : IDisposable
     /// it 144 million long, the text again at each of its 12,000 matches: it is refused before any of it is made, saying
     /// how long, the file left as it was and the click allocating a few times the file's size (most of it the list of its
     /// matches), never the replacement's 288 MB.</summary>
-    [AvaloniaFact]
-    public void Replace_all_that_would_make_the_text_too_long_is_refused_before_any_of_it_is_made()
+    private void Replace_all_that_would_make_the_text_too_long_is_refused_before_any_of_it_is_made()
     {
         string text = string.Concat(Enumerable.Repeat("a a a a a a a a a a\n", 600));
         (MainWindow window, CodeEditor editor) = Open(text);
@@ -247,9 +295,7 @@ public sealed class FindTests : IDisposable
     /// <summary>Replace All with a regex whose replacement takes the whole text ($_), what stands before and after each
     /// match ($`, $') and its groups, with '$'s that stand for nothing, gives what .NET's Regex.Replace gives; in a file
     /// of "\r\n" lines, with each break it carries over the file's own.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Replace_all_taking_the_whole_text_or_what_stands_around_each_match_gives_what_dotnet_gives()
+    private void Replace_all_taking_the_whole_text_or_what_stands_around_each_match_gives_what_dotnet_gives()
     {
         const string Text = "ab cd\nef\n";
         (string Pattern, string Replacement)[] cases =
@@ -291,9 +337,7 @@ public sealed class FindTests : IDisposable
     /// <summary>Each key typed into the query over a file of 20,000 lines allocates on the UI thread what it does over one
     /// of 200, plain over "\n" lines and as a regex over "\r\n" ones: the search reads the text where it lies, or reads it
     /// as lines once for the keys typed over it.</summary>
-    [Gate]
-    [AvaloniaFact]
-    public void Typing_a_query_costs_a_key_over_twenty_thousand_lines_what_it_does_over_two_hundred()
+    private void Typing_a_query_costs_a_key_over_twenty_thousand_lines_what_it_does_over_two_hundred()
     {
         List<(string What, long Few, long Many)> measured = [];
         foreach ((bool regex, string end) in new[] { (false, "\n"), (true, "\r\n") })
@@ -347,56 +391,6 @@ public sealed class FindTests : IDisposable
             text.Append(System.Globalization.CultureInfo.InvariantCulture, $"    var x{i} = {i} * {i};{end}");
         }
         return text.Append("// the needle").Append(end).ToString();
-    }
-
-    /// <summary>Find and Replace over an editor too narrow for a field and what follows it side by side (the window at its
-    /// least width, the Explorer beside the editor) keep room to type a few words in each field, the count, arrows and
-    /// Close, and Replace's buttons, taking a row below, nothing past the bar's edge (LayoutFaults); over a wide editor
-    /// each field stands at its width with what follows it beside it.</summary>
-    [AvaloniaFact]
-    public void A_narrow_editors_find_bar_keeps_room_to_type_in_and_puts_what_follows_each_field_on_a_row_below()
-    {
-        (MainWindow window, _) = Open("find the words here\nand the words here again\n");
-        try
-        {
-            Ui.Press(window, Ui.Shortcut(AppActions.Replace));
-            window.KeyTextInput("the words here");
-            Ui.Settle();
-            FindBar bar = window.EditorArea.FindBar;
-            (TextBox Field, Control After, string What)[] rows =
-            [
-                (bar.FindControl<TextBox>("Query")!, bar.FindControl<Control>("CountRow")!, "Find"),
-                (bar.FindControl<TextBox>("ReplaceWith")!, bar.FindControl<Control>("ReplaceButtons")!, "Replace"),
-            ];
-            foreach (double width in (double[])[1400, MainWindow.SmallestWidth])
-            {
-                window.Width = width;
-                Ui.Settle();
-                List<string> wrong = [];
-                foreach ((TextBox field, Control after, string what) in rows)
-                {
-                    double room = field.Bounds.Width - field.Padding.Left - field.Padding.Right;
-                    bool below = Placed(window, after).Top >= Placed(window, field).Bottom - 0.5;
-                    if (room < FindBar.TypingRoom - 0.5)
-                    {
-                        wrong.Add($"At {width} wide {what} leaves {room:0.#} px to type in, where it keeps {FindBar.TypingRoom}, what follows it taking a row below");
-                    }
-                    if (width == MainWindow.SmallestWidth ? !below : below || Math.Abs(field.Bounds.Width - FindBar.FieldWidth) > 0.5)
-                    {
-                        wrong.Add($"At {width} wide {what} is {field.Bounds.Width:0.#} px wide with what follows it {(below ? "below it" : "beside it")}, where a wide editor's "
-                            + $"stands {FindBar.FieldWidth} wide with it beside and a narrow one's keeps its typing room with it below");
-                    }
-                }
-                wrong.AddRange(LayoutFaults.Of(window, bar, $"The find bar over an editor at {width} wide"));
-                Assert.True(wrong.Count == 0, string.Join("\n", wrong));
-            }
-        }
-        finally
-        {
-            window.Close();
-        }
-
-        static Rect Placed(Visual window, Control control) => new(control.TranslatePoint(default, window)!.Value, control.Bounds.Size);
     }
 
     private (MainWindow Window, CodeEditor Editor) Open(string text) => Open(folder, text);

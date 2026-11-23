@@ -93,24 +93,33 @@ public sealed partial class PassengerTools
         }
         if (Session.Web is { } languages && languages.For(document) is { } web)
         {
+            bool waited = web.Lsp is null && !languages.CannotStart(document);
+            if (waited)
+            {
+                AgentCall.Say($"Waiting for the {WebLanguages.Name(web.Kind)} language server to start");
+            }
             // Looked at every 50 ms: a web server's document comes as the server starts, raising nothing.
             await Until(() => web.Lsp is not null || languages.CannotStart(document), ServerLimit, cancel);
-            return web.Lsp is { } server
-                ? new ServerServed(document, LanguageOf(document), server, web)
-                : throw new InvalidOperationException(languages.Unready("Its code help", document));
+            if (waited)
+            {
+                AgentCall.Say(null);
+            }
+            return web.Lsp is { } server ? new ServerServed(document, LanguageOf(document), server, web)
+                : languages.CannotStart(document) ? throw new InvalidOperationException(languages.Unready("Its code help", document))
+                : throw new TimeoutException(Refusals.StillStarting(WebLanguages.Name(web.Kind), ServerLimit));
         }
-        if (Passenger.Workspace.GodotFile.IsText(document.Path) && Session.GodotOf(document.Path) is not null)
+        if (Passenger.Workspace.GodotFileKinds.IsText(document.Path) && Session.GodotOf(document.Path) is not null)
         {
             return new GodotServed(document);
         }
-        if (Godot.GodotShaderMarks.IsShader(document.Path))
+        if (Passenger.Workspace.GodotFileKinds.IsShader(document.Path))
         {
             return new ShaderServed(document);
         }
         if (Bdd.FeatureChecks.IsFeature(document.Path))
         {
             // Its steps are matched once the C# server has read the step definitions.
-            await When(() => Session.CSharp is not { } csharp || csharp.IsReady, ServerLimit, cancel, ServerState());
+            await When(() => Session.CSharp is not { IsReady: false } || ServerDown() is not null, ServerLimit, cancel, ServerState());
             return new FeatureServed(document);
         }
         if (document.Language.Service == Languages.LanguageService.CSharp)
@@ -205,7 +214,7 @@ public sealed partial class PassengerTools
         }
         if (asked.Map(WebAssist.JsonRenameEdits(at.Path, at.Key, lines, newName, WebAssist.IsPackageJson(document))) is not { } placed)
         {
-            throw new InvalidOperationException("Rename was not applied: the property was edited meanwhile");
+            throw new InvalidOperationException(Refusals.PropertyEditedMeanwhile);
         }
         WorkspaceEdits.ApplyTo(Editors, document, placed);
         document.Save();
@@ -246,7 +255,7 @@ public sealed partial class PassengerTools
         }
         if (made.Left.Count > 0)
         {
-            throw new InvalidOperationException($"'{fix.Title}' was not applied: {string.Join(", ", made.Left)} was edited meanwhile");
+            throw new InvalidOperationException(Refusals.NotAppliedEditedMeanwhile($"'{fix.Title}'", made.Left));
         }
         if (web.Document.Text.Version == version)
         {
@@ -287,7 +296,7 @@ public sealed partial class PassengerTools
 
     /// <summary>Waits for the C# server to load the workspace, when one runs: an element's field is found in the code-behind
     /// through it, as a C# symbol's usages are, and before it has loaded none are.</summary>
-    private Task CodeBehindRead(CancellationToken cancel) => When(() => Session.CSharp is not { } csharp || csharp.IsReady, ServerLimit, cancel, ServerState());
+    private Task CodeBehindRead(CancellationToken cancel) => When(() => Session.CSharp is not { IsReady: false } || ServerDown() is not null, ServerLimit, cancel, ServerState());
 
     /// <summary>Waits, for a place in a MAUI page's C# expression, as a question of the page's C# waits (<see cref="Code"/>),
     /// the expression being answered from the code MAUI's generator makes: until the server holds the C# files come under
@@ -518,7 +527,7 @@ public sealed partial class PassengerTools
                 throw new InvalidOperationException($"{what} was not applied: {refused}");
             }
             await SaveLandedAsync(CancellationToken.None);
-            return $"Extracted resource '{key}' to {place.Title}{(value.Uses.Count > 1 ? $", used in {value.Uses.Count} places" : string.Empty)}";
+            return $"Extracted resource '{key}' to {place.Title}{(value.Uses.Count > 1 ? $", used in {Numbers.Said(value.Uses.Count)} places" : string.Empty)}";
         }
         StyleSource source = (StyleSource)chosen.Made;
         ResourcePlace into = PlaceChosen(await BackgroundWork.Run(() => XamlRefactorings.Places(xaml.File, styles: source.ByClass, texts)));
