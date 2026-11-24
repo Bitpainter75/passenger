@@ -35,9 +35,9 @@ public static class TestApp
 
 /// <summary>What the whole run shares, set before anything reads it and never changed: a folder of the run's own in the
 /// system's temporary folder, holding the IDE's state (<c>PASSENGER_SETTINGS</c>: its log, the language servers' logs,
-/// the profiler's snapshots; the agents' sockets go in a folder named for it), every test's folders, the shells' history and
-/// Godot's user folders, and an empty Git configuration in place of the person's and the system's, which every git the tests
-/// and the IDE run inherits. So a run never writes to the person's own state, log, history or Godot (<see cref="PersonsGodot"/>),
+/// the profiler's snapshots; the agents' sockets go in a folder named for it), every test's folders, the shells' history,
+/// Godot's and Biome's user folders, and an empty Git configuration in place of the person's and the system's, which every git
+/// the tests and the IDE run inherits. So a run never writes to the person's own state, log, history, Godot (<see cref="PersonsGodot"/>) or Biome,
 /// an agent of theirs never attaches to a test's window, and a person's commit signing or hooks never reach a test's commit.
 /// The folder goes when the run ends; one a run that was killed left goes when the next begins.</summary>
 public sealed class TestRun : IAsyncDisposable
@@ -77,6 +77,16 @@ public sealed class TestRun : IAsyncDisposable
     /// real path names it.</summary>
     private static IEnumerable<string> TemporaryBases() =>
         OperatingSystem.IsWindows() ? [PersonsTemporary] : [PersonsTemporary, OperatingSystem.IsMacOS() ? "/private/tmp" : "/tmp"];
+
+    /// <summary>Why the daemon of Biome's <paramref name="version"/> cannot listen in the run's Biome home, or null where it
+    /// can: on macOS its socket lies under that home's Library/Caches, whose path may pass the 103 bytes a socket's path
+    /// holds; Linux's cache folder is shorter, and Windows' daemon listens on a pipe.</summary>
+    public static string? BiomeSocketUnfit(string version)
+    {
+        string socket = Path.Combine(Environment.GetEnvironmentVariable(Passenger.App.Web.WebTool.BiomeHomeVariable) ?? string.Empty,
+            "Library", "Caches", "dev.biomejs.biome", "biome-daemon", $"biome-socket-{version}");
+        return OperatingSystem.IsMacOS() && socket.Length > 103 ? $"Biome's daemon socket in the run's folder, {socket}, is longer than the 103 bytes a socket's path holds" : null;
+    }
 
     /// <summary>The IDE's state folder for the whole run.</summary>
     public static string Settings => Path.Combine(Root, "settings");
@@ -161,6 +171,8 @@ public sealed class TestRun : IAsyncDisposable
         // Nor the person's Godot user folders: every Godot a window starts keeps its settings, logs and user:// in the run's.
         PersonsGodot.Begin();
         Environment.SetEnvironmentVariable(Passenger.App.Godot.GodotUserFolders.HomeVariable, Path.Combine(Root, "godot"));
+        // Nor the person's Biome: its daemon's socket, cache and logs, under the run's shortest folder, as its socket's path is long.
+        Environment.SetEnvironmentVariable(Passenger.App.Web.WebTool.BiomeHomeVariable, Temporary != PersonsTemporary ? Temporary : Path.Combine(Root, "biome"));
         string gitConfig = Path.Combine(Root, "gitconfig");
         File.WriteAllText(gitConfig, string.Empty);
         Environment.SetEnvironmentVariable(StateStore.Variable, Settings);
@@ -188,6 +200,7 @@ public sealed class TestRun : IAsyncDisposable
         Environment.SetEnvironmentVariable("ZDOTDIR", Directory.CreateDirectory(Path.Combine(Root, "zsh")).FullName);
         File.WriteAllText(Path.Combine(Root, "zsh", ".zshrc"), string.Empty);
         NuGetHome();
+        RunFiles.Begin();
         // No test reaches GitHub: a Passenger that checks for updates without a stand-in asks where nothing listens.
         Environment.SetEnvironmentVariable(Passenger.App.Updates.ReleaseFeed.Variable, "http://127.0.0.1:9/repos/Zaneris/passenger/releases");
         // Nor any host a browser Passenger starts asks of its own accord (its updates, its services): they go where nothing listens.
@@ -235,9 +248,9 @@ public sealed class TestRun : IAsyncDisposable
             OwnEnvironment.Set(colour, null);
         }
         // Nor the person's application data, where a Testing Platform app writes its first-run sentinel unless opted out.
-        Environment.SetEnvironmentVariable("TESTINGPLATFORM_TELEMETRY_OPTOUT", "1");
+        Environment.SetEnvironmentVariable(TelemetryOptOuts.TestingPlatform, TelemetryOptOuts.On);
         // Nor Avalonia's build telemetry, whose collector a build starts lingers in the project's folder for half a minute.
-        Environment.SetEnvironmentVariable("AVALONIA_TELEMETRY_OPTOUT", "1");
+        Environment.SetEnvironmentVariable(TelemetryOptOuts.Avalonia, TelemetryOptOuts.On);
         // Nor Aspire's: an aspire CLI or AppHost the run starts keeps its settings and first-run sentinel in the run's home.
         Environment.SetEnvironmentVariable("ASPIRE_HOME", Path.Combine(Root, "aspire-home"));
         Environment.SetEnvironmentVariable(AspireVariables.TelemetryOptOut, "1");
@@ -738,11 +751,11 @@ public static class OpenWindows
         };
     }
 
-    /// <summary>Closes every window still open, the last opened first, waits for what each started to end, and what each
-    /// the test closed itself started (its own limit kills what will not), then for their background work to land, which a
-    /// dispatcher that never runs again could not let go. A window left open (one that failed) leaves no warm server for the
-    /// next test: the one it would keep is ended with the rest. Whether it all landed: work that never does, the next window
-    /// test lets go of as it starts.</summary>
+    /// <summary>Closes every window still open, the last opened first, unsaved (a failed step may have taken its folder, where
+    /// a save refused would ask and keep it open into the next test), waits for what each started to end, and what each the
+    /// test closed itself started (its own limit kills what will not), then for their background work to land. A window left
+    /// open leaves no warm server for the next test: the one it would keep is ended with the rest. Whether it all landed:
+    /// work that never does, the next window test lets go of as it starts.</summary>
     public static bool CloseAll()
     {
         if (!Dispatcher.UIThread.CheckAccess())
@@ -756,6 +769,10 @@ public static class OpenWindows
             Open.RemoveAt(Open.Count - 1);
             if (last.IsVisible)
             {
+                if (last is Passenger.App.MainWindow left)
+                {
+                    left.Autosaves = false;
+                }
                 last.Close();
                 if (last is Passenger.App.MainWindow { Ended: { } ended } closed)
                 {
@@ -839,6 +856,61 @@ public sealed class EditorRig
 
     /// <summary>Adds a caret where an alt+shift click on that offset would, there being none there, as the primary.</summary>
     public void AddCaret(int offset) => Editor.Selections = Editor.Selections.Add(Selection.At(offset));
+}
+
+/// <summary>The folders the .NET SDK keeps a file-based program's own records in (its build's and run's, the compiler's
+/// command line), each named for the program's C# file, in the user's local data folder (the temporary folder on Windows)
+/// whatever the program's ArtifactsPath says: a test folder's go with it (<see cref="TestFolders.Delete(string, bool)"/>), so
+/// a run leaves the person's as it found them.</summary>
+public static class RunFiles
+{
+    /// <summary>Where the SDK the run's programs are built by keeps them.</summary>
+    private static string Folder => Path.Combine(OperatingSystem.IsWindows() ? Path.GetTempPath() : Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "dotnet", "runfile");
+
+    /// <summary>Those there as the run began, which it leaves.</summary>
+    private static HashSet<string> before = [];
+
+    public static void Begin() => before = Listed();
+
+    /// <summary>Removes the SDK's folders of the C# files under a folder about to go, those the run made: each named for its
+    /// file, its name then the SHA-256 of its full path in capitals.</summary>
+    public static void Forget(string folder)
+    {
+        HashSet<string> made = Listed();
+        made.ExceptWith(before);
+        if (made.Count == 0 || !Directory.Exists(folder))
+        {
+            return;
+        }
+        foreach (string program in Directory.EnumerateFiles(folder, "*.cs", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true }))
+        {
+            string name = $"{Path.GetFileNameWithoutExtension(program)}-{Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(program.ToUpperInvariant())))}";
+            if (made.Contains(name))
+            {
+                try
+                {
+                    Directory.Delete(Path.Combine(Folder, name), recursive: true);
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    Console.Error.WriteLine($"The .NET SDK's records of {program} could not be removed from {Folder}: {error.Message}");
+                }
+            }
+        }
+    }
+
+    private static HashSet<string> Listed()
+    {
+        try
+        {
+            return Directory.Exists(Folder) ? [.. Directory.EnumerateDirectories(Folder).Select(Path.GetFileName).OfType<string>()] : [];
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
 }
 
 /// <summary>A test's temporary folders, in the run's own (<see cref="TestRun.Root"/>), deleted as Windows lets them be: git
@@ -1015,6 +1087,7 @@ public static class TestFolders
     {
         // A settings folder's log lines still queued would make its logs folder again once it was gone.
         Passenger.App.IdeErrors.Flush();
+        RunFiles.Forget(path);
         bool deleted = Waiting.Until(() =>
         {
             try
@@ -1169,6 +1242,33 @@ public static class Ui
         {
             Settle();
         }
+    }
+
+    /// <summary>A key that types pressed on Windows as <see cref="Type"/> presses it, its press carrying which Ctrl and Alt
+    /// keys Windows says hold it, as Avalonia's Win32 key info gives them (console flags: <paramref name="held"/> 0x1 the
+    /// right Alt, 0x2 the left, 0x4 the right Ctrl, 0x8 the left): AltGr is the right Alt with the left Ctrl Windows adds to
+    /// it, so on a Polish layout both AltGr+L and Ctrl+Alt+L come as Ctrl+Alt+L carrying "ł".</summary>
+    public static void TypeHeld(TopLevel window, string keys, string text, ulong held)
+    {
+        Keystroke stroke = Keystroke.Parse(keys.Replace('+', ' '));
+        // The focused element is where Avalonia's keyboard raises a key, the window when nothing has the focus.
+        Avalonia.Interactivity.Interactive target = window.FocusManager?.GetFocusedElement() as Avalonia.Interactivity.Interactive ?? window;
+        KeyEventArgs press = new()
+        {
+            RoutedEvent = InputElement.KeyDownEvent,
+            Key = stroke.Key,
+            KeyModifiers = stroke.Modifiers,
+            KeySymbol = text,
+            KeyText = text,
+            PlatformKeyInfo = new PlatformKeyInfo(KnownPlatformKeyInfoFormats.Win32) { Modifiers = held },
+        };
+        target.RaiseEvent(press);
+        if (!press.Handled)
+        {
+            window.KeyTextInput(text);
+        }
+        window.KeyRelease(stroke.Key, Raw(stroke.Modifiers), PhysicalKey.None, text);
+        Settle();
     }
 
     /// <summary>Long enough for the language server to start and load a small project, on a developer's machine.</summary>
@@ -1488,12 +1588,13 @@ public static class Ui
     private static InvalidOperationException NotEnded(string what) => new($"The wait for {what} came back before it ended");
 
     /// <summary>Waits for a launch the window started (Run, Debug, Profile, a test run) as <see cref="Await"/> does, and
-    /// fails unless it started, with its refusal and the build's own errors (<see cref="BuildErrors"/>).</summary>
+    /// fails unless it started, with its refusal, the build's own errors (<see cref="BuildErrors"/>) and, in a test of
+    /// minutes, where its time went (<see cref="Limits.WhereTheTimeWent"/>).</summary>
     public static void Launched(Passenger.App.MainWindow window, Task<string?> launch, string what, TimeSpan? limit = null)
     {
         if (Await(launch, what, limit) is { } refused)
         {
-            throw new Xunit.Sdk.XunitException($"Waiting for {what}, the window refused: {refused}{BuildErrors(window)}");
+            throw new Xunit.Sdk.XunitException($"Waiting for {what}, the window refused: {refused}{BuildErrors(window)}{Limits.WhereTheTimeWent()}");
         }
     }
 
@@ -2969,7 +3070,11 @@ public static class TestSshKeys
     }
 }
 
-/// <summary>GPG keys a test signs its commits with, made by gpg in the run's own keyring (GNUPGHOME), never the person's.</summary>
+/// <summary>GPG keys a test signs its commits with, put in the run's own keyring (GNUPGHOME), never the person's. Each is
+/// carried in SigningKeys/, by its passphrase, as gpg-agent stored it, never made in a run: GnuPG 2.5.24's agent writes a
+/// salt or nonce of printable random bytes inside quotes, dropping a space that follows "(", ")" or another space there,
+/// so about one key in twenty thousand it makes reads back a byte short, its first use failing with "Corrupted
+/// protection". A carried key's salt and nonce are written in hex, which the agent keeps whole.</summary>
 public static class TestGpgKeys
 {
     private static readonly TimeSpan Limit = TimeSpan.FromMinutes(1);
@@ -2980,22 +3085,47 @@ public static class TestGpgKeys
     /// <summary>Why a test that signs with GPG cannot run here, or null.</summary>
     public static string? WhyNot => Gpg is null ? "gpg is not on the PATH, so no commit can be signed with a GPG key here" : null;
 
-    /// <summary>A new key for <paramref name="user"/> (tests@passenger.invalid's where none is given) guarded by
-    /// <paramref name="passphrase"/>, given gpg on its input, never its command line; its id, the agent ended after so the
-    /// passphrase is asked for again.</summary>
-    public static async Task<string> MakeAsync(string passphrase, string? gpg = null, string user = "Passenger Tests <tests@passenger.invalid>")
+    /// <summary>The carried key of <paramref name="user"/> (tests@passenger.invalid's where none is given) guarded by
+    /// <paramref name="passphrase"/>, put in the run's keyring and trusted there as gpg trusts a key it makes; its id, the
+    /// agent ended after, so the passphrase is asked for as a person's first signature asks it.</summary>
+    public static async Task<string> PutAsync(string passphrase, string? gpg = null, string user = "Passenger Tests <tests@passenger.invalid>")
     {
         gpg ??= Gpg!;
         string log = AgentLogged(gpg);
-        Passenger.Core.ChildResult made = await Passenger.Core.ChildProcesses.RunAsync(Of(gpg,
-            ["--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--quick-gen-key", user, "ed25519", "sign", "never"]),
-            passphrase + "\n", Limit.Scaled());
-        Assert.True(made.Succeeded, $"gpg made no key to sign with, exiting {made.ExitCode}: {made.Error}{AgentSaid(log)}");
+        string carried = Carried(passphrase);
+        Passenger.Core.ChildResult imported = await Passenger.Core.ChildProcesses.RunAsync(Of(gpg, ["--batch", "--import"]),
+            await File.ReadAllTextAsync(Path.Combine(carried, "public.asc")), Limit.Scaled());
+        Assert.True(imported.Succeeded, $"gpg did not import the test's key, exiting {imported.ExitCode}: {imported.Error}{AgentSaid(log)}");
         Passenger.Core.ChildResult listed = await Passenger.Core.ChildProcesses.RunAsync(Of(gpg, ["--list-secret-keys", "--with-colons", $"={user}"]),
             limit: Limit.Scaled());
-        string id = listed.Output.Split('\n').Select(l => l.Split(':')).First(f => f[0] == "sec")[4];
+        string[][] lines = [.. listed.Output.Split('\n').Select(l => l.Split(':'))];
+        Assert.True(lines.Any(f => f[0] == "sec") && lines.Any(f => f[0] == "fpr"), $"gpg lists no secret key of {user} once given the carried key:\n{listed.Output}{listed.Error}{AgentSaid(log)}");
+        Passenger.Core.ChildResult trusted = await Passenger.Core.ChildProcesses.RunAsync(Of(gpg, ["--batch", "--import-ownertrust"]),
+            $"{lines.First(f => f[0] == "fpr")[9]}:6:\n", Limit.Scaled());
+        Assert.True(trusted.Succeeded, $"gpg did not trust the test's key, exiting {trusted.ExitCode}: {trusted.Error}");
         await EndAgentAsync(gpg);
-        return id;
+        return lines.First(f => f[0] == "sec")[4];
+    }
+
+    /// <summary>The folder of the key carried for <paramref name="passphrase"/>, its key files put in the run's
+    /// private-keys-v1.d as they are, where gpg-agent finds a key by its keygrip.</summary>
+    internal static string Carried(string passphrase)
+    {
+        string carried = Path.Combine(AppContext.BaseDirectory, "SigningKeys", passphrase);
+        string keys = Path.Combine(Environment.GetEnvironmentVariable("GNUPGHOME")!, "private-keys-v1.d");
+        if (OperatingSystem.IsWindows())
+        {
+            Directory.CreateDirectory(keys);
+        }
+        else
+        {
+            Directory.CreateDirectory(keys, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        foreach (string key in Directory.EnumerateFiles(carried, "*.key"))
+        {
+            File.Copy(key, Path.Combine(keys, Path.GetFileName(key)), overwrite: true);
+        }
+        return carried;
     }
 
     /// <summary>Git for Windows' own gpg, where git's is the only one: on Windows with no gpg on the PATH; else null.</summary>
@@ -3014,7 +3144,8 @@ public static class TestGpgKeys
     }
 
     /// <summary>The run's gpg-agent, as <paramref name="program"/> starts it next, logging what it does to a file in the run's
-    /// GnuPG home, named in the form the program reads a path; that file, which a failed key's making quotes.</summary>
+    /// GnuPG home, named in the form the program reads a path; that file, which a key's failure quotes with the keys stored
+    /// there.</summary>
     internal static string AgentLogged(string program)
     {
         string home = Environment.GetEnvironmentVariable("GNUPGHOME")!;
@@ -3024,18 +3155,28 @@ public static class TestGpgKeys
         return log;
     }
 
-    /// <summary>What the run's gpg-agent logged, to follow a failure's words.</summary>
+    /// <summary>What the run's gpg-agent logged and the keys it stored, to follow a failure's words: its log says only that
+    /// a protection is corrupted, where the key's file shows how the agent wrote its salt and nonce.</summary>
     internal static string AgentSaid(string log)
     {
+        string keys = Path.Combine(Path.GetDirectoryName(log)!, "private-keys-v1.d");
         try
         {
-            return $"\nThe run's gpg-agent logged:\n{File.ReadAllText(log)}";
+            string stored = Directory.Exists(keys)
+                ? string.Concat(Directory.EnumerateFiles(keys, "*.key").Select(key => $"\n{Path.GetFileName(key)}:\n{KeyText(File.ReadAllBytes(key))}"))
+                : " no key";
+            return $"\nThe run's gpg-agent logged:\n{File.ReadAllText(log)}\nIt stored:{stored}";
         }
         catch (Exception unread) when (unread is IOException or UnauthorizedAccessException)
         {
-            return $"\nThe run's gpg-agent's log was not read: {unread.Message}";
+            return $"\nThe run's gpg-agent's log or keys were not read: {unread.Message}";
         }
     }
+
+    /// <summary>A key file's bytes as text, each byte but printable ASCII and a line break as \xHH: the agent writes a salt or
+    /// nonce of printable bytes raw, inside quotes.</summary>
+    private static string KeyText(byte[] file) =>
+        string.Concat(file.Select(b => b is (>= 0x20 and < 0x7f) or (byte)'\n' ? ((char)b).ToString() : $"\\x{b:X2}"));
 
     /// <summary>A GnuPG program's start, its home the run's in the form the program reads it (Git for Windows' own MSYS one
     /// takes only /c/…).</summary>
@@ -3047,8 +3188,9 @@ public static class TestGpgKeys
     }
 }
 
-/// <summary>X.509 keys a test signs its commits with, made by gpgsm in the run's own keyring (GNUPGHOME), never the person's:
-/// a self-signed certificate trusted there as a root, CRLs left unchecked, as no authority issues it.</summary>
+/// <summary>X.509 keys a test signs its commits with, put in the run's own keyring (GNUPGHOME), never the person's: a
+/// self-signed certificate, carried with its key as <see cref="TestGpgKeys"/> carries its keys, trusted there as a root,
+/// CRLs left unchecked, as no authority issues it.</summary>
 public static class TestX509Keys
 {
     private static readonly TimeSpan Limit = TimeSpan.FromMinutes(1);
@@ -3059,27 +3201,23 @@ public static class TestX509Keys
     /// <summary>Why a test that signs with X.509 cannot run here, or null.</summary>
     public static string? WhyNot => Gpgsm is null ? "gpgsm is not on the PATH, so no commit can be signed with an X.509 certificate here" : null;
 
-    /// <summary>A new self-signed certificate for tests@passenger.invalid, its key guarded by <paramref name="passphrase"/>
-    /// given gpgsm on its input, never its command line, imported and trusted in the run's keyring; its fingerprint (0x…),
-    /// the agent ended after so the passphrase is asked for again.</summary>
-    public static async Task<string> MakeAsync(string passphrase, string folder)
+    /// <summary>The carried certificate for tests@passenger.invalid, its key guarded by <paramref name="passphrase"/>,
+    /// imported and trusted in the run's keyring; its fingerprint (0x…), the agent ended after, so the passphrase is asked
+    /// for as a person's first signature asks it.</summary>
+    public static async Task<string> PutAsync(string passphrase)
     {
         string home = Environment.GetEnvironmentVariable("GNUPGHOME")!;
         await File.AppendAllTextAsync(Path.Combine(home, "gpgsm.conf"), "disable-crl-checks\ndisable-policy-checks\n");
-        string parameters = Path.Combine(folder, "x509.txt");
-        string certificate = Path.Combine(folder, "x509.pem");
-        await File.WriteAllTextAsync(parameters, "Key-Type: RSA\nKey-Length: 2048\nKey-Usage: sign\nSerial: random\nName-DN: CN=Passenger Tests,O=Passenger\n"
-            + "Name-Email: tests@passenger.invalid\n");
         string log = TestGpgKeys.AgentLogged(Gpgsm!);
-        Passenger.Core.ChildResult made = await Passenger.Core.ChildProcesses.RunAsync(TestGpgKeys.Of(Gpgsm!,
-            ["--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--armor", "--output", certificate, "--gen-key", parameters]), passphrase + "\n", Limit.Scaled());
-        Assert.True(made.Succeeded, $"gpgsm made no certificate to sign with, exiting {made.ExitCode}: {made.Error}{TestGpgKeys.AgentSaid(log)}");
-        Passenger.Core.ChildResult imported = await Passenger.Core.ChildProcesses.RunAsync(TestGpgKeys.Of(Gpgsm!, ["--batch", "--import", certificate]),
-            limit: Limit.Scaled());
-        Assert.True(imported.Succeeded, $"gpgsm did not import the test's certificate, exiting {imported.ExitCode}: {imported.Error}");
+        string carried = TestGpgKeys.Carried(passphrase);
+        Passenger.Core.ChildResult imported = await Passenger.Core.ChildProcesses.RunAsync(TestGpgKeys.Of(Gpgsm!, ["--batch", "--import"]),
+            await File.ReadAllTextAsync(Path.Combine(carried, "certificate.pem")), Limit.Scaled());
+        Assert.True(imported.Succeeded, $"gpgsm did not import the test's certificate, exiting {imported.ExitCode}: {imported.Error}{TestGpgKeys.AgentSaid(log)}");
         Passenger.Core.ChildResult listed = await Passenger.Core.ChildProcesses.RunAsync(TestGpgKeys.Of(Gpgsm!,
             ["--with-colons", "--list-secret-keys", "tests@passenger.invalid"]), limit: Limit.Scaled());
-        string fingerprint = listed.Output.Split('\n').Select(l => l.Split(':')).First(f => f[0] == "fpr")[9];
+        string[][] lines = [.. listed.Output.Split('\n').Select(l => l.Split(':'))];
+        Assert.True(lines.Any(f => f[0] == "fpr"), $"gpgsm lists no secret key of tests@passenger.invalid once given the carried key:\n{listed.Output}{listed.Error}{TestGpgKeys.AgentSaid(log)}");
+        string fingerprint = lines.First(f => f[0] == "fpr")[9];
         await File.AppendAllTextAsync(Path.Combine(home, "trustlist.txt"), $"{fingerprint} S relax\n");
         await TestGpgKeys.EndAgentAsync(Gpgsm);
         return $"0x{fingerprint}";
@@ -3604,6 +3742,23 @@ public readonly struct OwnProcess
         Assert.True(Libc.Signal(Id, OperatingSystem.IsMacOS() ? 17 : 19) == 0, $"{what} could not be stopped (errno {System.Runtime.InteropServices.Marshal.GetLastPInvokeError()})");
     }
 
+    /// <summary>Lets it run on from where <see cref="Suspend"/> stopped it: SIGCONT on macOS and Linux, and on Windows every
+    /// thread resumed (NtResumeProcess).</summary>
+    public void Resume(string what)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Process? held = Held();
+            Assert.True(held is not null, $"{what} (process {Id}) had ended before it could be resumed");
+            using Process process = held;
+            int status = NtResumeProcess(process.Handle);
+            Assert.True(status == 0, $"{what} could not be resumed (NTSTATUS 0x{status:X8})");
+            return;
+        }
+        Assert.True(Runs(), $"{what} (process {Id}) had ended before it could be let run on");
+        Assert.True(Libc.Signal(Id, OperatingSystem.IsMacOS() ? 19 : 18) == 0, $"{what} could not be let run on (errno {System.Runtime.InteropServices.Marshal.GetLastPInvokeError()})");
+    }
+
     /// <summary>Asks it to end (SIGTERM), as the system asks a program, while it is still the process the test knew: on
     /// macOS and Linux, which have the signal. One that ends meanwhile is as good.</summary>
     public void Terminate()
@@ -3728,6 +3883,9 @@ public readonly struct OwnProcess
 
     [System.Runtime.InteropServices.DllImport("ntdll.dll")]
     private static extern int NtSuspendProcess(IntPtr process);
+
+    [System.Runtime.InteropServices.DllImport("ntdll.dll")]
+    private static extern int NtResumeProcess(IntPtr process);
 }
 
 /// <summary>Where a process's threads wait, as macOS's sample sees them (it may read any of the user's processes): each

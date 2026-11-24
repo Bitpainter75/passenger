@@ -308,6 +308,11 @@ public partial class MainWindow : IdeWindow
         assist.FollowKeys = () => actions?.ShortcutsShown(AppActions.GoToDeclaration);
         assist.Play += (_, file) => IdeErrors.Observe(PlaySoundAsync(file));
         assist.FilesChanging = FollowingAsync;
+        assist.Chosen = ChosenCode;
+        // The wait an agent's run over a project takes, so the window's over the Explorer's choice is the same.
+        assist.WholeCode = cancel => new Mcp.PassengerTools(this).WholeCodeAsync(cancel);
+        assist.History = () => session.LocalHistory;
+        assist.DotnetFormat = DotnetFormatAsync;
         assist.KeepsPlaces = () => settings.FindResultsIn() == FindResults.FindWindow;
         assist.HttpRouteTargets = HttpRouteTargets;
         assist.RouteCallers = RouteCallers;
@@ -358,6 +363,8 @@ public partial class MainWindow : IdeWindow
         // The session as each call finds it.
         assist.ConfiguredCodeOf = path => session.ConfiguredCodeOf(path);
         assist.ConfiguredBy = path => session.ConfiguredBy(path);
+        assist.IndexedFiles = () => session.Folder is { } folder ? (folder, session.Index.Files) : null;
+        assist.Repository = () => session.Vcs.Repository;
         assist.AddActions(actions!);
         usages.AddActions(actions!);
         DebugController.AddActions(actions!, () => session.Debug);
@@ -675,7 +682,7 @@ public partial class MainWindow : IdeWindow
 
     /// <summary>Builds as Build does, and says how it ended once it has: built, failed, stopped, refused or unable to start.
     /// Canceled, the build is stopped as the Build window's Stop stops it.</summary>
-    public Task<BuildOutcome> BuildAsync(CancellationToken cancel = default) => buildRun.BuildAsync(BuildCause.Explicit, cancel);
+    public Task<BuildOutcome> BuildAsync(CancellationToken cancel = default) => buildRun.BuildAsync(cancel);
 
     /// <summary>The status bar's text, which says what the last action came to, for the person. What an operation came to
     /// is its own answer (a build's outcome, a commit's), never this, which anything may have replaced since.</summary>

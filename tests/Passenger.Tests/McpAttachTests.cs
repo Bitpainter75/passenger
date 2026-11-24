@@ -384,7 +384,7 @@ public sealed class McpAttachTests : McpRig, IClassFixture<RestoredFolders>
         SettingsDialog dialog = DialogButtonsTests.Check(window.ShowSettings());
         try
         {
-            dialog.Query = "claude";
+            dialog.Query = "claude desktop";
             Ui.Settle();
             Assert.Equal([SettingsDialog.McpPage], dialog.Pages);
             dialog.Query = string.Empty;

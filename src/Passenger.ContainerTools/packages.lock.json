@@ -170,7 +170,7 @@
       "passenger.dap": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.2, )"
+          "Passenger.Core": "[0.4.4, )"
         }
       },
       "passenger.debugger": {
@@ -182,9 +182,9 @@
           "Microsoft.CodeAnalysis.VisualBasic": "[5.12.0, )",
           "Microsoft.Diagnostics.DbgShim": "[10.0.750501, )",
           "Microsoft.Diagnostics.NETCore.Client": "[0.2.750501, )",
-          "Passenger.Core": "[0.4.2, )",
-          "Passenger.Dap": "[0.4.2, )",
-          "Passenger.Debugger.Interop": "[0.4.2, )",
+          "Passenger.Core": "[0.4.4, )",
+          "Passenger.Dap": "[0.4.4, )",
+          "Passenger.Debugger.Interop": "[0.4.4, )",
           "ZLinq": "[1.6.1, )"
         }
       },
@@ -197,7 +197,7 @@
           "Microsoft.Diagnostics.NETCore.Client": "[0.2.750501, )",
           "Microsoft.Diagnostics.Runtime": "[4.2.751201, )",
           "Microsoft.Diagnostics.Tracing.TraceEvent": "[4.0.0, )",
-          "Passenger.Core": "[0.4.2, )"
+          "Passenger.Core": "[0.4.4, )"
         }
       },
       "ICSharpCode.Decompiler": {

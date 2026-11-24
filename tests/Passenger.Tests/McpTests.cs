@@ -68,14 +68,15 @@ public sealed class McpTests : McpRig, IClassFixture<RestoredFolders>
 
     /// <summary>An agent's test runs as one flow, each step one test's check in an instance of its own: a passing run
     /// after a failure answering no failure it did not run, the Tests actions answering what the run came to, a test
-    /// written and run at once by its class's name, a failing test's 200,000 lines held to its last, one failing row
-    /// among 500 named, and a test reading standard input reaching its end.</summary>
+    /// written and run at once by its class's name, one of two solutions' tests built alone, a failing test's 200,000
+    /// lines held to its last, one failing row among 500 named, and a test reading standard input reaching its end.</summary>
     [Fact]
     public async Task An_agents_test_runs_answer_what_each_came_to_held_to_what_an_answer_carries()
     {
         await Flow.StepApartAsync("an agents run of a passing test after a failure answers no failure of a test it did not run", () => new McpTests(restored), t => t.An_agents_run_of_a_passing_test_after_a_failure_answers_no_failure_of_a_test_it_did_not_run());
         await Flow.StepApartAsync("an agents unit test actions answer what the run came to", () => new McpTests(restored), t => t.An_agents_unit_test_actions_answer_what_the_run_came_to());
         await Flow.StepApartAsync("an agents test written and run at once by its classs name runs and its failure is told", () => new McpTests(restored), t => t.An_agents_test_written_and_run_at_once_by_its_classs_name_runs_and_its_failure_is_told());
+        await Flow.StepApartAsync("an agents run of one test in a folder of two solutions builds its project and what it references alone", () => new McpTests(restored), t => t.An_agents_run_of_one_test_in_a_folder_of_two_solutions_builds_its_project_and_what_it_references_alone());
         await Flow.StepApartAsync("an agents run of a failing test that wrote 200000 lines answers its last lines and says the rest was left out", () => new McpTests(restored), t => t.An_agents_run_of_a_failing_test_that_wrote_200000_lines_answers_its_last_lines_and_says_the_rest_was_left_out());
         await Flow.StepApartAsync("an agents run of a theory with one failing row among 500 names that row and counts the rest", () => new McpTests(restored), t => t.An_agents_run_of_a_theory_with_one_failing_row_among_500_names_that_row_and_counts_the_rest());
         await Flow.StepApartAsync("an agents test that reads standard input reads its end and the agents next call is answered", () => new McpTests(restored), t => t.An_agents_test_that_reads_standard_input_reads_its_end_and_the_agents_next_call_is_answered());
@@ -623,6 +624,25 @@ public sealed class McpTests : McpRig, IClassFixture<RestoredFolders>
         Assert.True(run.GetProperty("summary").GetString()!.StartsWith("Tests passed: 2, failed: 1 of 3", StringComparison.Ordinal),
             $"A run by its class's name of a test written just before it left the test out: {run}");
         Assert.Equal("Sums.Tests.SumTests.Written_just_now", Assert.Single(run.GetProperty("failures").EnumerateArray()).GetProperty("test").GetString());
+    }
+
+    /// <summary>tests_run of one test by its name in a folder of two solutions builds that test's project and the library it
+    /// references alone: the other solution's projects are left unbuilt.</summary>
+    private async Task An_agents_run_of_one_test_in_a_folder_of_two_solutions_builds_its_project_and_what_it_references_alone()
+    {
+        string folder = PathNames.Canonical(TestFolders.Create("mcp-two-solutions-"));
+        DeleteAtEnd(folder);
+        await TestFolders.PrepareAsync(async () =>
+        {
+            foreach (string project in UnitTestsFolders.WriteTwoSolutions(folder))
+            {
+                await Restore.RunAsync(project);
+            }
+        }, folder);
+        await using McpClient client = await Start(["--mcp", folder], languageServer: false);
+        JsonElement run = await Call(client, McpTools.TestsRun, new() { ["filter"] = "Doubles_two" });
+        Assert.StartsWith("Tests passed: 1, failed: 0 of 1", run.GetProperty("summary").GetString(), StringComparison.Ordinal);
+        UnitTestsFolders.BuiltOneAlone(folder, "An agent's tests_run of one test");
     }
 
     /// <summary>A failing test that wrote 200,000 lines is answered with its message and stack whole and its output's last
@@ -1773,9 +1793,10 @@ public sealed class McpTests : McpRig, IClassFixture<RestoredFolders>
             $"Check for Updates… with no release feed to ask answered: {Text(updates)}");
     }
 
-    /// <summary>A renamed file's diff names where it was and where it is; vcs_commit takes a folder's path as every change
-    /// under it, the untracked folder vcs_status lists as one entry and a tracked folder's new file among them, the rest
-    /// left; and Push run as an action where the repository has no remote answers why it did not push.</summary>
+    /// <summary>A renamed file's diff names where it was and where it is, a new file's and a deleted one's are git's own,
+    /// from /dev/null and to it, as are those of files whose last line has no break; vcs_commit takes a folder's path as every change under it, the untracked folder vcs_status
+    /// lists as one entry and a tracked folder's new file among them, the rest left; and Push run as an action where the
+    /// repository has no remote answers why it did not push.</summary>
     private async Task An_agent_reads_a_renames_two_paths_commits_a_folders_changes_by_its_path_and_hears_why_push_did_not_go()
     {
         string repository = TestFolders.Create("mcp-folders-");
@@ -1783,7 +1804,13 @@ public sealed class McpTests : McpRig, IClassFixture<RestoredFolders>
         TestFolders.Write(repository, "Notes.txt", "notes\n");
         TestFolders.Write(repository, "Old.txt", "old\n");
         TestFolders.Write(repository, "Lib/Shelf.txt", "shelf\n");
+        TestFolders.Write(repository, "Gone.txt", "one\ntwo\nthree\n");
+        TestFolders.Write(repository, "Open.txt", "one\ntwo");
+        TestFolders.Write(repository, "Kept.txt", "first\nlast");
         await TestGit.InitAsync(repository);
+        File.WriteAllText(Path.Combine(repository, "Open.txt"), "one\ntwo\nthree");
+        File.WriteAllText(Path.Combine(repository, "Kept.txt"), "First\nlast");
+        File.Delete(Path.Combine(repository, "Gone.txt"));
         await TestGit.RunAsync(repository, "mv", "Old.txt", "Renamed.txt");
         File.WriteAllText(Path.Combine(repository, "Renamed.txt"), "renamed\n");
         File.WriteAllText(Path.Combine(repository, "Notes.txt"), "notes, changed\n");
@@ -1795,6 +1822,18 @@ public sealed class McpTests : McpRig, IClassFixture<RestoredFolders>
         await using McpClient client = await Start(["--mcp", repository]);
         string diff = (await Call(client, McpTools.VcsStatus, new() { ["path"] = "Renamed.txt" })).GetString()!;
         Assert.True(diff.Contains("--- a/Old.txt\n+++ b/Renamed.txt\n", StringComparison.Ordinal), $"The diff of Old.txt renamed Renamed.txt named it so:\n{diff}");
+        // Git applies a deletion's diff only as one to /dev/null: to b/Gone.txt it leaves the file there, empty.
+        string gone = (await Call(client, McpTools.VcsStatus, new() { ["path"] = "Gone.txt" })).GetString()!;
+        string gitsGone = GitsDiff(await TestGit.RunAsync(repository, "diff", "--", "Gone.txt"));
+        Assert.True(gone == gitsGone, $"The diff of Gone.txt deleted, which git apply is to take as its deletion, is not git's own:\n{gone}\ngit's:\n{gitsGone}");
+        string added = (await Call(client, McpTools.VcsStatus, new() { ["path"] = "Lib/Added.txt" })).GetString()!;
+        // Git applies a diff touching a last line with no break only where it says so after the line, changed or not.
+        foreach (string open in (string[])["Open.txt", "Kept.txt"])
+        {
+            string ours = (await Call(client, McpTools.VcsStatus, new() { ["path"] = open })).GetString()!;
+            string gits = GitsDiff(await TestGit.RunAsync(repository, "diff", "--", open));
+            Assert.True(ours == gits, $"The diff of {open}, whose last line has no break, which git apply is to take, is not git's own:\n{ours}\ngit's:\n{gits}");
+        }
         // An agent's paths are the system's, as every tool answers them.
         JsonElement fresh = Assert.Single((await Call(client, McpTools.VcsStatus)).GetProperty("changes").EnumerateArray(),
             c => c.GetProperty("path").GetString() == "Fresh" + Path.DirectorySeparatorChar);
@@ -1804,7 +1843,9 @@ public sealed class McpTests : McpRig, IClassFixture<RestoredFolders>
         Assert.Equal("A\tFresh/a.txt\nA\tFresh/b.txt", (await TestGit.RunAsync(repository, "show", "--name-status", "--format=", "HEAD")).Trim());
         await Call(client, McpTools.VcsCommit, new() { ["message"] = "Lib", ["paths"] = new[] { "Lib" } });
         Assert.Equal("A\tLib/Added.txt\nM\tLib/Shelf.txt", (await TestGit.RunAsync(repository, "show", "--name-status", "--format=", "HEAD")).Trim());
-        Assert.Equal(["Notes.txt modified", "Renamed.txt renamed"], (await Call(client, McpTools.VcsStatus)).GetProperty("changes").EnumerateArray()
+        string gitsAdded = GitsDiff(await TestGit.RunAsync(repository, "show", "--format=", "HEAD", "--", "Lib/Added.txt"));
+        Assert.True(added == gitsAdded, $"The diff of Lib/Added.txt, new, which git apply is to take as making it, is not git's own:\n{added}\ngit's:\n{gitsAdded}");
+        Assert.Equal(["Gone.txt deleted", "Kept.txt modified", "Notes.txt modified", "Open.txt modified", "Renamed.txt renamed"], (await Call(client, McpTools.VcsStatus)).GetProperty("changes").EnumerateArray()
             .Select(c => $"{c.GetProperty("path").GetString()} {c.GetProperty("kind").GetString()}").Order(StringComparer.Ordinal));
         CallToolResult nothing = await Result(client, McpTools.VcsCommit, new() { ["message"] = "Nothing", ["paths"] = new[] { "Lib" } });
         Assert.True(nothing.IsError == true && Text(nothing).Contains("Lib has no changes to commit", StringComparison.Ordinal),
@@ -1814,6 +1855,11 @@ public sealed class McpTests : McpRig, IClassFixture<RestoredFolders>
         Assert.True(pushed.IsError == true && Text(pushed).Contains("the repository has none", StringComparison.Ordinal),
             $"Push where the repository has no remote answered an agent: {Text(pushed)}");
     }
+
+    /// <summary>Git's diff of one file from its "---" line on, as vcs_status answers it: what comes before (its "diff --git",
+    /// mode and index lines) left out.</summary>
+    private static string GitsDiff(string said) =>
+        said.IndexOf("--- ", StringComparison.Ordinal) is >= 0 and int at ? said[at..] : throw new Xunit.Sdk.XunitException($"Git wrote no diff: {said}");
 
     /// <summary>A rebase stopped on a conflict that the agent resolves is still said by vcs_status, and vcs_commit refuses to
     /// commit beside it, naming Continue Rebase and Abort Rebase by the ids ide_action runs: no commit of the agent's takes
@@ -2014,8 +2060,8 @@ public sealed class McpTests : McpRig, IClassFixture<RestoredFolders>
     }
 
     /// <summary>vcs_status with the path of a file whose only change is its line separators says which changed on how many
-    /// lines, and of one whose only change is its mode (where git keeps modes) says the mode as git's diff does, where each
-    /// answered no changes.</summary>
+    /// lines, then git's own diff, each CR in it, where git stores the breaks as they are, and of one whose only change is
+    /// its mode (where git keeps modes) says the mode as git's diff does, where each answered no changes.</summary>
     private async Task An_agents_diff_of_a_file_changed_only_in_its_line_separators_or_its_mode_says_what_changed()
     {
         string repository = TestFolders.Create("mcp-separators-");
@@ -2030,7 +2076,11 @@ public sealed class McpTests : McpRig, IClassFixture<RestoredFolders>
         }
 
         await using McpClient client = await Start(["--mcp", repository], languageServer: false);
-        Assert.Equal("Line separators changed: 3 lines from LF to CRLF", (await Call(client, McpTools.VcsStatus, new() { ["path"] = "lines.txt" })).GetString());
+        // Git applies a diff of lines a CR ends only where it holds each CR.
+        string gits = GitsDiff(await TestGit.RunAsync(repository, "diff", "--", "lines.txt"));
+        string said = (await Call(client, McpTools.VcsStatus, new() { ["path"] = "lines.txt" })).GetString()!;
+        Assert.True(said == $"Line separators changed: 3 lines from LF to CRLF\n{gits}",
+            $"vcs_status of lines.txt, its LF breaks now CRLF, which git stores as they are, is not its words then git's own diff:\n{said}\ngit's:\n{gits}");
         if (!OperatingSystem.IsWindows())
         {
             Assert.Equal("old mode 100644\nnew mode 100755", (await Call(client, McpTools.VcsStatus, new() { ["path"] = "run.sh" })).GetString());

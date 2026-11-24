@@ -17,6 +17,7 @@ public static class Handlers
     public const string DescribeHierarchy = "Passenger.Roslyn.Extension.DescribeHierarchy";
     public const string PullMembersUp = "Passenger.Roslyn.Extension.PullMembersUp";
     public const string PushMembersDown = "Passenger.Roslyn.Extension.PushMembersDown";
+    public const string InterfacesLacking = "Passenger.Roslyn.Extension.InterfacesLacking";
     public const string DocumentTexts = "Passenger.Roslyn.Extension.DocumentTexts";
     public const string DocumentsWritten = "Passenger.Roslyn.Extension.DocumentsWritten";
     public const string ReferencesRead = "Passenger.Roslyn.Extension.ReferencesRead";
@@ -58,15 +59,17 @@ public static class Handlers
     public const string MauiExpressionHover = "Passenger.Roslyn.Extension.MauiExpressionHover";
     public const string CompletionCall = "Passenger.Roslyn.Extension.CompletionCall";
     public const string StepBindings = "Passenger.Roslyn.Extension.StepBindings";
+    public const string EditorConfigKeys = "Passenger.Roslyn.Extension.EditorConfigKeys";
+    public const string EditorConfigValues = "Passenger.Roslyn.Extension.EditorConfigValues";
 
     public static readonly IReadOnlyList<string> All =
     [
         DescribeSignature, ChangeSignature, DescribeInterface, ExtractInterface, DescribeType, MoveTypeToFile, MoveTypeToNamespace,
-        DescribeHierarchy, PullMembersUp, PushMembersDown, DocumentTexts, DocumentsWritten, ReferencesRead, ReferencedFiles, GeneratorsRun, AspireProjectDeclaration, AspireCodeHelp, AspireReferenceFix, AspireRunResources,
+        DescribeHierarchy, PullMembersUp, PushMembersDown, InterfacesLacking, DocumentTexts, DocumentsWritten, ReferencesRead, ReferencedFiles, GeneratorsRun, AspireProjectDeclaration, AspireCodeHelp, AspireReferenceFix, AspireRunResources,
         AspireRename, AspireParameters, ConnectionReads, WebRoutes, RouteBody, LocalizedReads, SymbolsNamed, SymbolAt, SymbolContainers, WrittenPlaces,
         ComponentClass, GeneratedTexts, GeneratedNamed, PartialHalf, GeneratedParts, GeneratedDocuments, JsInteropCalls, GodotCode, GodotNames, GodotPaths, GodotKindStrings, GodotNameStrings, GodotFix, ToolkitRenames, GeneratedMembers,
         MauiExpressionCompletion, MauiExpressionSymbol, MauiXamlChecks, MauiExpressionUses, MauiExpressionHover,
-        CompletionCall, StepBindings,
+        CompletionCall, StepBindings, EditorConfigKeys, EditorConfigValues,
     ];
 }
 
@@ -194,8 +197,9 @@ public sealed record ReferencedAsked([property: JsonPropertyName("paths")] IRead
 /// <summary>The paths asked of that a project references, as an assembly or an analyzer.</summary>
 public sealed record ReferencedFound([property: JsonPropertyName("paths")] IReadOnlyList<string> Paths);
 
-/// <summary>A load of projects ended: the source generators' runs it queued are waited for.</summary>
-public sealed record GeneratorsAsked;
+/// <summary>A load of projects ended: the source generators' runs it queued are waited for, and nothing read under the
+/// folders about to go or move (<paramref name="Passing"/>).</summary>
+public sealed record GeneratorsAsked([property: JsonPropertyName("passing")] IReadOnlyList<string> Passing);
 
 /// <summary>The source generators' runs queued when asked have run; the files a project's builds write that the server
 /// holds otherwise than the disk, which they read as the server holds them.</summary>
@@ -1310,6 +1314,18 @@ public sealed record Hierarchy(
     [property: JsonPropertyName("bases")] IReadOnlyList<Member> Bases,
     [property: JsonPropertyName("derived")] IReadOnlyList<Member> Derived);
 
+/// <summary>The member of a class whose name the caret is on, by its name, and the interfaces in the solution the class
+/// implements that could declare it but do not, which Pull Members Up could declare it in; no member where the caret is on
+/// none.</summary>
+public sealed record MemberPull(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("member")] Member? Member,
+    [property: JsonPropertyName("interfaces")] IReadOnlyList<Member> Interfaces)
+{
+    public static readonly MemberPull None = new(string.Empty, string.Empty, null, []);
+}
+
 /// <summary>Pull Members Up's or Push Members Down's request: these members of the class at the caret moved into the base
 /// type named by its id (up), or into each derived class whose id is a line of the target (down); those listed as abstract
 /// made abstract where they stay.</summary>
@@ -1328,3 +1344,55 @@ public sealed record CallFound([property: JsonPropertyName("call")] bool Call, [
 {
     public static readonly CallFound None = new(false, false);
 }
+
+/// <summary>The .editorconfig at a path whose keys are asked for: those of the projects that read it, else of every project.</summary>
+public sealed record EditorConfigKeysAsked([property: JsonPropertyName("path")] string Path);
+
+/// <summary>An option Roslyn's server reads from .editorconfig for C#: its key, the feature and groups it stands in, what
+/// its value is (<see cref="EditorConfigValueKinds"/>), the values it takes where they are few (or the words a list of
+/// them is made of), its default as written, and whether a severity may follow its value (<c>true:warning</c>).</summary>
+public sealed record EditorConfigOption(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("feature")] string Feature,
+    [property: JsonPropertyName("group")] string Group,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("values")] IReadOnlyList<string> Values,
+    [property: JsonPropertyName("default")] string? Default,
+    [property: JsonPropertyName("severity")] bool Severity);
+
+/// <summary>What an .editorconfig option's value is.</summary>
+public static class EditorConfigValueKinds
+{
+    public const string Choice = "choice";
+    public const string List = "list";
+    public const string Number = "number";
+    public const string Text = "text";
+}
+
+/// <summary>A diagnostic an analyzer the projects run reports (the compiler's warnings among them), whose severity
+/// <c>dotnet_diagnostic.ID.severity</c> sets: its id, title, category, default severity as .editorconfig writes it,
+/// whether it is on by default, the assembly reporting it and its help page.</summary>
+public sealed record EditorConfigDiagnostic(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("severity")] string Severity,
+    [property: JsonPropertyName("enabled")] bool Enabled,
+    [property: JsonPropertyName("from")] string From,
+    [property: JsonPropertyName("help")] string? Help);
+
+/// <summary>What the server reads of an .editorconfig: its C# options, the diagnostics the projects' analyzers report, the
+/// severities a code style option or a diagnostic takes, and the projects read; none while no project is loaded.</summary>
+public sealed record EditorConfigKeysFound(
+    [property: JsonPropertyName("options")] IReadOnlyList<EditorConfigOption> Options,
+    [property: JsonPropertyName("diagnostics")] IReadOnlyList<EditorConfigDiagnostic> Diagnostics,
+    [property: JsonPropertyName("severities")] IReadOnlyList<string> Severities,
+    [property: JsonPropertyName("projects")] IReadOnlyList<string> Projects);
+
+/// <summary>Values an .editorconfig gives the server's C# options, each a key in lower case and its value as written.</summary>
+public sealed record EditorConfigValuesAsked([property: JsonPropertyName("pairs")] IReadOnlyList<EditorConfigPair> Pairs);
+
+public sealed record EditorConfigPair([property: JsonPropertyName("key")] string Key, [property: JsonPropertyName("value")] string Value);
+
+/// <summary>Which of the values asked about, by their place in the request, their option's own reading refuses.</summary>
+public sealed record EditorConfigValuesRefused([property: JsonPropertyName("refused")] IReadOnlyList<int> Refused);

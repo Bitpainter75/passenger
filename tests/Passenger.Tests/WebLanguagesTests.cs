@@ -187,7 +187,8 @@ public sealed class WebLanguagesTests : IClassFixture<BlazorShop>
 
     /// <summary>TypeScript's refactorings, which its server makes by commands of its own that hand the window their edits:
     /// Extract to function writes the function, its new name then offered to rename, and Move to a new file makes the file
-    /// and imports from it in both files, one command that Undo takes back whole, the new file with it.</summary>
+    /// and imports from it in both files, one command that Undo takes back whole, the new file with it. C#'s own
+    /// refactorings grey there, saying the file is not C#.</summary>
     private void TypeScripts_refactorings_extract_a_function_offering_its_name_and_move_a_declaration_to_a_new_file_that_undo_takes_back()
     {
         SkipWithoutNode(typescript: true);
@@ -195,6 +196,10 @@ public sealed class WebLanguagesTests : IClassFixture<BlazorShop>
         CodeEditor editor = window.EditorArea.CodeEditor;
         OpenDocument cart = window.EditorArea.Active!;
         Ui.WaitFor(() => window.Session.Web?.For(cart) is { Lsp: not null }, "TypeScript's document of cart.ts");
+        ActionContext context = window.Actions.Context();
+        string[] offered = [.. ((string[])[AppActions.ChangeSignature, AppActions.ExtractInterface, AppActions.Move, AppActions.SafeDelete, AppActions.PullMembersUp, AppActions.PushMembersDown])
+            .Where(id => window.Actions.WhyNot(id, context) != Refusals.NotCSharp).Select(id => $"{id} ({window.Actions.WhyNot(id, context) ?? "enabled"})")];
+        Assert.True(offered.Length == 0, $"In a TypeScript file these refactorings of C# alone, which fail there, are not greyed as C#'s: {string.Join(", ", offered)}");
         int call = BlazorShop.Cart.IndexOf("total(items)", StringComparison.Ordinal);
         editor.Selections = SelectionSet.Single(new Selection(call, call + "total(items)".Length));
         Ui.Run(window, AppActions.QuickFix);
@@ -430,7 +435,7 @@ public sealed class WebLanguagesTests : IClassFixture<BlazorShop>
     }
 
     /// <summary>File Structure on a JSON file lists its keys, nested under the objects they are in, as its server outlines
-    /// them, and a key chosen is where the caret goes.</summary>
+    /// them, each with the badge of its value's kind, and a key chosen is where the caret goes.</summary>
     private void File_structure_lists_a_JSON_files_keys_and_goes_to_the_one_chosen()
     {
         SkipWithoutNode();
@@ -443,7 +448,10 @@ public sealed class WebLanguagesTests : IClassFixture<BlazorShop>
         Ui.WaitFor(() => structure.IsSettled && structure.Rows.Any(r => r.Name == "build"), "package.json's outline, its scripts' keys among it");
         SymbolRow scripts = structure.Rows.First(r => r.Name == "scripts");
         Assert.Equal(0, scripts.Depth);
-        Assert.Equal(1, structure.Rows.First(r => r.Name == "build").Depth);
+        SymbolRow build = structure.Rows.First(r => r.Name == "build");
+        Assert.Equal(1, build.Depth);
+        Assert.True(SymbolPopup.Badge(build.Kind) != SymbolPopup.Badge(SymbolRow.HeadingKind),
+            $"The build script's key, a string, wears a Markdown heading's badge ({SymbolPopup.Badge(build.Kind).Letter}) in File Structure and the navigation bar");
         window.KeyTextInput("build");
         Ui.WaitFor(() => structure.IsSettled && structure.Rows.Select(r => r.Name).SequenceEqual(["scripts", "build"]), () => $"the outline filtered to the build script in its object, not [{string.Join(", ", structure.Rows.Select(r => r.Name))}]");
         Ui.Press(window, "DOWN");

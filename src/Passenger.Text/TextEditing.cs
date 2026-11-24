@@ -43,12 +43,11 @@ public static class TextEditing
         return Build(replacements, selections, kind);
     }
 
-    /// <summary>Typing with the editor's help: a bracket or quote typed over a selection wraps it, an
-    /// opener before a space gets its closer, and a closer typed in front of the same closer steps
-    /// over it; where only white space and a line break stand before that closer, and the code takes it for the
-    /// closer of what the caret is in, every bracket around paired (<paramref name="closesWhole"/>, by its place), it
-    /// types over it all the same (<see cref="OverWritten"/>). Anything else is <see cref="Insert"/>, a quote that starts
-    /// the language's line <paramref name="comment"/> (Visual Basic's ') too: it opens no pair.</summary>
+    /// <summary>Typing with the editor's help: a bracket or quote typed over a selection wraps it, an opener before a
+    /// space gets its closer, and a closer typed in front of the same closer steps over it; where only white space and a
+    /// line break stand before that closer, and the code takes it for the closer of what the caret is in, every bracket
+    /// around paired (<paramref name="closesWhole"/>), it types over it all the same (<see cref="OverWritten"/>). Anything
+    /// else is <see cref="Insert"/>, a quote starting a line <paramref name="comment"/> (Visual Basic's ') too.</summary>
     public static EditPlan Type(TextSnapshot text, SelectionSet selections, string typed, Func<int, bool>? closesWhole = null, string? comment = null)
     {
         if (typed.Length != 1 || typed == comment)
