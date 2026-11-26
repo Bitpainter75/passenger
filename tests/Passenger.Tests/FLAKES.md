@@ -28,6 +28,17 @@ the gate until it is rewritten, and a report-lane failure is an issue (`ci-repor
   - Outside the code: 7 (the runner, GitHub, xunit, Rosetta).
   - Unlabelled: 7.
 
+## 2026-11-25
+
+- `AspireStandInTests`' `Aspire_services_are_debugged_and_hot_reloaded_or_run_on_saying_why_the_debugger_could_not_reach_them`,
+  CI 45640821202 (Windows report shard 3), at 4001e6ff7: "The API's console does not say the one apply its edit took: …
+  A line of Hot Reload: C# changes applied in 1742 ms: Program.cs (1 method updated)". **A bug in the IDE**: its own words
+  were put on the end of a program's unfinished line. Since 9adcb549c (#2254) the stand-in service writes a line in two
+  writes, and the step's Hot Reload update held it between them past the moment an unfinished line shows as it stands,
+  so the update's words joined "A line of " and the rest of the line came below. OutputView.Append begins the IDE's words
+  on a line of their own there, and a Run's Hot Reload words go through it rather than into the program's output
+  (66b0afdd0); ConsoleSinkTests holds it, and the class passes on the Mac and the Windows VM.
+
 ## 2026-11-24
 
 - `MauiSimulatorTests`' `A_maui_apps_ios_head_debugged_on_a_simulator_stops_steps_evaluates_and_takes_a_hot_reload_edit`,
@@ -39,8 +50,10 @@ the gate until it is rewritten, and a report-lane failure is an issue (`ci-repor
   about 3 minutes and 1 minute after the boot ended, the IDE logging nothing between; the runner has three processors
   and kept at least 0.8 GB of its 7 free. The Mac boots the simulator in 8 s and installs in 17. McpIosSimulatorTests,
   which boots and installs again after it, passed in 4:58 and 5:31. No change in the IDE shortens the simulator's boot or
-  install; booting it once before the shard's device classes, outside any test's minutes, is the deal's to weigh
-  (b98279487).
+  install. A macOS mobile shard now boots that simulator once, keeps it up two minutes and shuts it down again after its
+  other classes and before its device classes, outside any test's minutes and beside no window class
+  (tools/simulator-first-boot.sh, run by test-shards.py; 4dcc98ca2): its words in the shard's log say what the first
+  boot took there.
 - `EslintPrettierTests`' `Eslint_checks_and_fixes_as_its_server_says`, CI 45453743296 (Windows report shard 1), at
   329200ec7: "Waited 225 s for the problem from the ESLint the project's .pnp.cjs places". **A bug in the IDE, on
   Windows**: Yarn writes a Plug'n'Play package's location from the project's folder on its portable paths, which climb
@@ -479,6 +492,20 @@ the gate until it is rewritten, and a report-lane failure is an issue (`ci-repor
   pipes; the test reads each program's files while it runs and takes them once it has gone (47f44728e, #2103).
 
 ## 2026-11-21
+
+- `StuckEvaluationTests`' `An_evaluation_a_continue_leaves_waiting_on_a_lock_past_its_time_runs_to_its_end_once_the_lock_is_free`,
+  the Windows ARM64 VM in one round of two while #2001 was fixed: "waited 150 s for output". Its `Locks.Taken` evaluation,
+  the program's first use of Console, stood in native code under `Console.get_Out`, the lock's holder and an unnamed
+  background thread with no managed frame held, the tiering worker left running (it ended 4.8 s in). **A race in the
+  IDE, on Windows**: the engine's log counts three threads announced (the main thread, the holder, and that unnamed one
+  1 ms before the stop) and the tiering worker, which is never announced; so the thread held was announced in the go
+  before the stop and stood, at the stop, in the runtime's own code it had not yet left for managed code. An evaluation
+  let past a thread standing where it was announced only at its first instruction, so this one was held where the
+  runtime may count it as standing where no collection can run, and Console's first use, which allocates, waited on it.
+  An evaluation now also leaves running a thread announced in the go before the stop that has no managed frame yet,
+  holding it once it has run one or after 16 short goes (#2073). Not reproduced in about 140 sessions on the VM before
+  the fix; the order (an announcement in the go before a stop, the thread still in the runtime's code) can't be forced
+  from the debugger, which first sees a thread at its announcement.
 
 - `McpAspireStandInTests`' `An_agent_reads_a_services_request_duration_through_telemetry_metrics`, CI 44962354408
   (Windows, report shard 1, at 85366e457): "The agent was not told the web service's request duration", its last reading

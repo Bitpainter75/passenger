@@ -673,20 +673,20 @@
           "NLayer": "[3.0.1, )",
           "NVorbis": "[0.10.5, )",
           "NuGet.Configuration": "[8.0.0, )",
-          "Passenger.Agents": "[0.4.4, )",
-          "Passenger.Core": "[0.4.4, )",
-          "Passenger.Dap": "[0.4.4, )",
-          "Passenger.Editor": "[0.4.4, )",
-          "Passenger.Languages": "[0.4.4, )",
-          "Passenger.Lsp": "[0.4.4, )",
-          "Passenger.Packages": "[0.4.4, )",
-          "Passenger.Profiler": "[0.4.4, )",
-          "Passenger.Sql": "[0.4.4, )",
-          "Passenger.Terminal": "[0.4.4, )",
-          "Passenger.Text": "[0.4.4, )",
-          "Passenger.Vcs": "[0.4.4, )",
-          "Passenger.Workspace": "[0.4.4, )",
-          "Passenger.Xaml": "[0.4.4, )",
+          "Passenger.Agents": "[0.4.5, )",
+          "Passenger.Core": "[0.4.5, )",
+          "Passenger.Dap": "[0.4.5, )",
+          "Passenger.Editor": "[0.4.5, )",
+          "Passenger.Languages": "[0.4.5, )",
+          "Passenger.Lsp": "[0.4.5, )",
+          "Passenger.Packages": "[0.4.5, )",
+          "Passenger.Profiler": "[0.4.5, )",
+          "Passenger.Sql": "[0.4.5, )",
+          "Passenger.Terminal": "[0.4.5, )",
+          "Passenger.Text": "[0.4.5, )",
+          "Passenger.Vcs": "[0.4.5, )",
+          "Passenger.Workspace": "[0.4.5, )",
+          "Passenger.Xaml": "[0.4.5, )",
           "SkiaSharp": "[4.157.0, )",
           "SkiaSharp.NativeAssets.Linux": "[4.157.0, )",
           "Svg.Skia": "[5.2.3, )",
@@ -696,7 +696,7 @@
       "passenger.agents": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.4, )"
+          "Passenger.Core": "[0.4.5, )"
         }
       },
       "passenger.core": {
@@ -708,33 +708,33 @@
       "passenger.dap": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.4, )"
+          "Passenger.Core": "[0.4.5, )"
         }
       },
       "passenger.editor": {
         "type": "Project",
         "dependencies": {
           "Avalonia": "[12.2.0, )",
-          "Passenger.Core": "[0.4.4, )",
-          "Passenger.Text": "[0.4.4, )"
+          "Passenger.Core": "[0.4.5, )",
+          "Passenger.Text": "[0.4.5, )"
         }
       },
       "passenger.languages": {
         "type": "Project",
         "dependencies": {
           "Microsoft.CodeAnalysis.CSharp": "[5.12.0, )",
-          "Passenger.Editor": "[0.4.4, )",
-          "Passenger.Lsp": "[0.4.4, )",
-          "Passenger.Text": "[0.4.4, )",
-          "Passenger.Workspace": "[0.4.4, )",
+          "Passenger.Editor": "[0.4.5, )",
+          "Passenger.Lsp": "[0.4.5, )",
+          "Passenger.Text": "[0.4.5, )",
+          "Passenger.Workspace": "[0.4.5, )",
           "Tint": "[0.3.0, )"
         }
       },
       "passenger.lsp": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.4, )",
-          "Passenger.Text": "[0.4.4, )",
+          "Passenger.Core": "[0.4.5, )",
+          "Passenger.Text": "[0.4.5, )",
           "StreamJsonRpc": "[2.26.150, )"
         }
       },
@@ -742,9 +742,9 @@
         "type": "Project",
         "dependencies": {
           "NuGet.Configuration": "[8.0.0, )",
-          "Passenger.Core": "[0.4.4, )",
-          "Passenger.Text": "[0.4.4, )",
-          "Passenger.Workspace": "[0.4.4, )"
+          "Passenger.Core": "[0.4.5, )",
+          "Passenger.Text": "[0.4.5, )",
+          "Passenger.Workspace": "[0.4.5, )"
         }
       },
       "passenger.profiler": {
@@ -753,7 +753,7 @@
           "Microsoft.Diagnostics.NETCore.Client": "[0.2.750501, )",
           "Microsoft.Diagnostics.Runtime": "[4.2.751201, )",
           "Microsoft.Diagnostics.Tracing.TraceEvent": "[4.0.0, )",
-          "Passenger.Core": "[0.4.4, )"
+          "Passenger.Core": "[0.4.5, )"
         }
       },
       "passenger.sql": {
@@ -761,28 +761,28 @@
         "dependencies": {
           "Microsoft.Data.SqlClient": "[7.1.2, )",
           "Microsoft.SqlServer.DacFx": "[170.5.96, )",
-          "Passenger.Core": "[0.4.4, )"
+          "Passenger.Core": "[0.4.5, )"
         }
       },
       "passenger.terminal": {
         "type": "Project",
         "dependencies": {
           "Avalonia": "[12.2.0, )",
-          "Passenger.Editor": "[0.4.4, )",
+          "Passenger.Editor": "[0.4.5, )",
           "Porta.Pty": "[2.2.4, )"
         }
       },
       "passenger.text": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.4, )"
+          "Passenger.Core": "[0.4.5, )"
         }
       },
       "passenger.vcs": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.4, )",
-          "Passenger.Text": "[0.4.4, )"
+          "Passenger.Core": "[0.4.5, )",
+          "Passenger.Text": "[0.4.5, )"
         }
       },
       "passenger.workspace": {
@@ -790,8 +790,8 @@
         "dependencies": {
           "Cucumber.CucumberExpressions": "[17.1.0, )",
           "Gherkin": "[35.0.0, )",
-          "Passenger.Core": "[0.4.4, )",
-          "Passenger.Text": "[0.4.4, )"
+          "Passenger.Core": "[0.4.5, )",
+          "Passenger.Text": "[0.4.5, )"
         }
       },
       "passenger.xaml": {
@@ -799,9 +799,9 @@
         "dependencies": {
           "Microsoft.CodeAnalysis.CSharp": "[5.12.0, )",
           "Microsoft.CodeAnalysis.VisualBasic": "[5.12.0, )",
-          "Passenger.Core": "[0.4.4, )",
-          "Passenger.Packages": "[0.4.4, )",
-          "Passenger.Text": "[0.4.4, )"
+          "Passenger.Core": "[0.4.5, )",
+          "Passenger.Packages": "[0.4.5, )",
+          "Passenger.Text": "[0.4.5, )"
         }
       },
       "Avalonia": {

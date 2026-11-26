@@ -168,14 +168,16 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
     }
 
     /// <summary>Fixes and context actions do what they offer: Fix All in the solution undone in every file at once, a
-    /// fix the server will not make saying why, an agent's action with choices; Escape closes their lists wherever the
-    /// keys are; live and postfix templates expand and end as their editor moves on; Extend Selection grows and
-    /// shrinks; and type and parameter hints show and go with Settings.</summary>
+    /// fix the server will not make saying why, the using of an extension method a call bound to another receiver's
+    /// takes, an agent's action with choices; Escape closes their lists wherever the keys are; live and postfix templates
+    /// expand and end as their editor moves on; Extend Selection grows and shrinks; and type and parameter hints show and
+    /// go with Settings.</summary>
     [AvaloniaFact]
     public void Fixes_context_actions_templates_and_selection_do_what_they_offer_and_take_back_whole()
     {
         Flow.StepApart("Fix All in the solution reaching a file not open is undone in every file it changed at once", () => new CodeAssistTests(project), t => t.Fix_all_in_the_solution_reaching_a_file_not_open_is_undone_in_every_file_it_changed_at_once());
         Flow.StepApart("a fix the language server will not make, once chosen, says why in the status bar", () => new CodeAssistTests(project), t => t.A_fix_the_language_server_will_not_make_once_chosen_says_why_in_the_status_bar());
+        Flow.StepApart("a call bound only to another receiver's extension method is offered the using of one that takes its own", () => new CodeAssistTests(project), t => t.A_call_bound_only_to_another_receivers_extension_method_is_offered_the_using_of_one_that_takes_its_own());
         Flow.StepApart("through MCP an action with choices lists them, asks for one and applies the one named", () => new CodeAssistTests(project), t => t.Through_mcp_an_action_with_choices_lists_them_asks_for_one_and_applies_the_one_named());
         Flow.StepApart("Escape closes the lists of choices and the rename box wherever the keys are", () => new CodeAssistTests(project), t => t.Escape_closes_the_lists_of_choices_and_the_rename_box_wherever_the_keys_are());
         Flow.StepApart("live and postfix templates expand where they belong, fill their variables and wrap what they follow", () => new CodeAssistTests(project), t => t.Live_and_postfix_templates_expand_where_they_belong_fill_their_variables_and_wrap_what_they_follow());
@@ -186,9 +188,9 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
     }
 
     /// <summary>What the window says of the code around the caret, in one window on Program.cs: the status bar's path names
-    /// the file and the member the caret is in; resting the pointer on a method shows a card with its signature; File
-    /// Structure lists the file's members, opens on the caret's and filters keeping their type; and Go to Symbol finds a
-    /// member in another file by name and goes to it.</summary>
+    /// the file and the member the caret is in; resting the pointer on a method shows a card with its signature, which the
+    /// pointer reaches and copies from; File Structure lists the file's members, opens on the caret's and filters keeping
+    /// their type; and Go to Symbol finds a member in another file by name and goes to it.</summary>
     private void The_path_a_hover_card_file_structure_and_go_to_symbol_name_the_code_and_go_to_it()
     {
         MainWindow window = WithoutNavigationBar(project.Open("Program.cs"));
@@ -205,6 +207,7 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
         window.MouseMove(point, Avalonia.Input.RawInputModifiers.None);
         Ui.WaitFor(() => window.Assist.HoverText is not null, "the hover card");
         Assert.Contains("int Helper.Twice(int value)", window.Assist.HoverText, StringComparison.Ordinal);
+        TheCardIsReachedSelectedAndCopied(window, editor, point);
         window.MouseMove(new Point(1, 1), Avalonia.Input.RawInputModifiers.None);
         Ui.Settle();
 
@@ -233,6 +236,42 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
         Assert.Equal(PathNames.Canonical(project.PathOf("Helper.cs")), window.EditorArea.Active?.Path);
         Assert.Equal(2, window.EditorArea.CodeEditor.CaretPosition.Line);
         window.Close();
+    }
+
+    /// <summary>The hover card under the word at <paramref name="word"/> takes the pointer: crossed to from its word, it
+    /// stays past the pause it waits before going; its code dragged over is selected and Copy's keys copy that, its menu
+    /// offers Copy while the card stays, and Escape takes the card away, the editor having its keys back (#2259).</summary>
+    private static void TheCardIsReachedSelectedAndCopied(MainWindow window, CodeEditor editor, Point word)
+    {
+        Border card = window.Assist.HoverCard!;
+        SelectableTextBlock code = card.GetVisualDescendants().OfType<ColouredCode>().Single(c => c.Code.Contains("Twice", StringComparison.Ordinal))
+            .GetVisualDescendants().OfType<SelectableTextBlock>().Single();
+        Point from = code.TranslatePoint(new Point(1, code.Bounds.Height / 2), window)!.Value;
+        Point to = code.TranslatePoint(new Point(code.Bounds.Width - 1, code.Bounds.Height / 2), window)!.Value;
+        // Across the gap between the word's line and the card, onto it.
+        window.MouseMove(new Point(word.X, card.TranslatePoint(default, window)!.Value.Y - 1), Avalonia.Input.RawInputModifiers.None);
+        window.MouseMove(from, Avalonia.Input.RawInputModifiers.None);
+        Ui.Hold(TimeSpan.FromMilliseconds(600), "past the pause a card waits once the pointer left its word");
+        Assert.True(window.Assist.HoverCard == card, "The hover card went as the pointer crossed from its word onto it, so nothing on it can be selected");
+
+        Ui.Drag(window, from, to);
+        string selected = code.SelectedText;
+        Assert.True(selected.Length > 0 && "int Helper.Twice(int value)".Contains(selected, StringComparison.Ordinal) && window.Assist.HoverCard == card,
+            $"A drag over the card's code selected [{selected}], the card {(window.Assist.HoverCard == card ? "still" : "no longer")} shown");
+        Ui.Press(window, Ui.Command("C"));
+        Assert.True(Ui.Clipboard(window) == selected, $"Copy's keys on the card's selected [{selected}] left [{Ui.Clipboard(window)}] on the clipboard");
+
+        Ui.RightClick(code, new Point(code.Bounds.Width / 2, code.Bounds.Height / 2));
+        MenuFlyout menu = Assert.IsType<MenuFlyout>(code.ContextFlyout);
+        Assert.True(menu.IsOpen && menu.Items.OfType<MenuItem>().Any(item => item.Header as string == "Copy" && item.IsEffectivelyEnabled),
+            $"A right click on the card's selected code opened [{string.Join(", ", menu.Items.OfType<MenuItem>().Select(i => $"{i.Header}{(i.IsEffectivelyEnabled ? string.Empty : " (greyed)")}"))}], open: {menu.IsOpen}");
+        Ui.Hold(TimeSpan.FromMilliseconds(600), "past the pause a card waits once the pointer and the keys left it");
+        Assert.True(window.Assist.HoverCard == card, "The hover card went while its menu was open");
+        menu.Hide();
+        Ui.Settle();
+        Ui.Press(window, "ESCAPE");
+        Ui.WaitFor(() => window.Assist.HoverCard is null, "the card gone at Escape");
+        Assert.True(editor.IsKeyboardFocusWithin, $"Escape on the hover card left the editor without its keys, which {window.FocusManager?.GetFocusedElement()?.GetType().Name ?? "nothing"} has");
     }
 
     /// <summary>Where the status bar's path is drawn.</summary>
@@ -776,23 +815,9 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
         window.KeyTextInput("int[] numbers = [3, 1, 2];");
         Ui.Press(window, "ENTER");
         window.KeyTextInput("int largest = numbers");
-        // Roslyn lists the methods of namespaces not imported once it has indexed them, so the dot is typed again until it has.
-        Ui.WaitFor(() =>
-        {
-            if (window.Assist.CompletionLabels.Contains("Max"))
-            {
-                return true;
-            }
-            Ui.Press(window, "ESCAPE");
-            if (editor.Document.Snapshot.ToString().Contains("numbers.", StringComparison.Ordinal))
-            {
-                Ui.Press(window, "BACK_SPACE");
-            }
-            Ui.Hold(TimeSpan.FromMilliseconds(250), "a pause before the dot is typed again, as a person retries");
-            window.KeyTextInput(".");
-            Ui.Settle();
-            return false;
-        }, "LINQ's Max, of a namespace Program.cs does not import, among the array's members");
+        // One dot: the list's later part waits for Roslyn's index of the namespaces not imported, never answering without it.
+        window.KeyTextInput(".");
+        Ui.WaitFor(() => window.Assist.CompletionLabels.Contains("Max"), "LINQ's Max, of a namespace Program.cs does not import, among the array's members after one dot");
         for (int down = window.Assist.CompletionLabels.ToList().IndexOf("Max"); down > 0; down--)
         {
             Ui.Press(window, "DOWN");
@@ -813,7 +838,8 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
     }
 
     /// <summary>A method chosen by Enter is written with its call's brackets: the caret between them where an overload
-    /// takes arguments, its signature shown, and after them where none does, its name typed whole too; a method given where
+    /// takes arguments, its signature shown, and after them where none does, its name typed whole too, a '(' or ')' typed
+    /// straight after as a hand used to typing them does taken as typed already, never doubling them; a method given where
     /// a delegate is asked for (an Action, a System.Delegate) stays a method group, without them.</summary>
     private void A_method_chosen_from_the_list_is_written_called_the_caret_inside_its_brackets_when_it_takes_arguments()
     {
@@ -832,6 +858,9 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
         Ui.Settle();
         Assert.True(Line() == "        int doubled = Helper.Twice()" && editor.CaretPosition.Column == Line().Length - 1,
             $"Twice, which takes a value, was not written called with the caret between its brackets: '{Line()}', the caret at {editor.CaretPosition.Column}");
+        window.KeyTextInput("(");
+        Assert.True(Line() == "        int doubled = Helper.Twice()" && editor.CaretPosition.Column == Line().Length - 1,
+            $"A '(' typed straight after Twice's own was not taken as typed already: '{Line()}', the caret at {editor.CaretPosition.Column}");
         Ui.WaitFor(() => window.Assist.SignatureText?.Contains("int value", StringComparison.Ordinal) == true, "Twice's signature");
         window.KeyTextInput("3");
         window.KeyTextInput(")");
@@ -847,7 +876,10 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
         Ui.Settle();
         Assert.True(Line() == "        System.Console.Clear()" && editor.CaretPosition.Column == Line().Length,
             $"Clear, which takes nothing, was not written called with the caret after its brackets: '{Line()}', the caret at {editor.CaretPosition.Column}");
+        window.KeyTextInput("(");
+        window.KeyTextInput(")");
         window.KeyTextInput(";");
+        Assert.True(Line() == "        System.Console.Clear();", $"'()' typed straight after Clear's own were not taken as typed already: '{Line()}'");
 
         Ui.Press(window, "ENTER");
         window.KeyTextInput("System.Action clear = System.Console.");
@@ -881,6 +913,9 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
         Ui.Settle();
         Assert.True(Line() == "        System.Console.Clear()" && editor.CaretPosition.Column == Line().Length,
             $"Clear, typed whole and chosen, was not written called with the caret after its brackets: '{Line()}', the caret at {editor.CaretPosition.Column}");
+        window.KeyTextInput(")");
+        window.KeyTextInput(")");
+        Assert.True(Line() == "        System.Console.Clear())", $"A ')' typed straight after Clear's own was not taken as typed already, or the next one was too: '{Line()}'");
         window.Close();
     }
 
@@ -2212,6 +2247,28 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
         window.Close();
     }
 
+    /// <summary>Under System.Linq's using, FirstOrDefaultAsync on an IQueryable binds to .NET's AsyncEnumerable, which takes
+    /// no IQueryable (CS0411), as EF Core's does without its using: Quick Fix offers the using of the namespace whose
+    /// extension method takes it, and choosing it ends the error.</summary>
+    private void A_call_bound_only_to_another_receivers_extension_method_is_offered_the_using_of_one_that_takes_its_own()
+    {
+        MainWindow window = project.Open("Queried.cs");
+        CodeEditor editor = window.EditorArea.CodeEditor;
+        OpenDocument queried = window.EditorArea.Active!;
+        Ui.PlaceAfter(editor, "n > 1).FirstOrDefault");
+        window.KeyTextInput("Async");
+        bool Uninferred() => window.CSharpService!.For(queried)!.Diagnostics.Any(d => d.Code?.ToString() == "CS0411");
+        Ui.WaitFor(Uninferred, "FirstOrDefaultAsync's error, AsyncEnumerable's taking no IQueryable");
+        Ui.Run(window, AppActions.QuickFix);
+        Ui.WaitFor(() => window.Assist.Offered.Contains("using Queries;"),
+            () => $"Quick Fix to offer Queries' using, whose FirstOrDefaultAsync takes an IQueryable, where it offers only {string.Join("; ", window.Assist.Offered)}");
+        Choose(window, "using Queries;");
+        Ui.WaitFor(() => editor.Document.Snapshot.ToString().StartsWith("using System.Linq;\nusing Queries;\n", StringComparison.Ordinal),
+            () => $"Queries' using to be written under System.Linq's:\n{editor.Document.Snapshot}");
+        Ui.WaitFor(() => !Uninferred(), "the call to bind to Queries' FirstOrDefaultAsync once its using is written");
+        window.Close();
+    }
+
     private void A_fix_the_language_server_will_not_make_once_chosen_says_why_in_the_status_bar()
     {
         MainWindow window = project.Open("Program.cs");
@@ -3430,6 +3487,9 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
             File.WriteAllText(PathOf("Greeters.cs"), "class Greeter(string name, int times)\n{\n    public string Name => name;\n\n    public int Times => times;\n\n"
                 + "    public static Greeter Of(string name)\n    {\n        Greeter made = new(name, 2);\n        return made;\n    }\n}\n");
             File.WriteAllText(PathOf("Releases.cs"), "record Release(string Version, int Downloads);\n");
+            File.WriteAllText(PathOf("Queried.cs"), "using System.Linq;\n\nnamespace Queries\n{\n    public static class QueryFirsts\n    {\n"
+                + "        public static T FirstOrDefaultAsync<T>(this IQueryable<T> source) => source.FirstOrDefault();\n    }\n}\n\n"
+                + "static class Queried\n{\n    public static int First(IQueryable<int> numbers) => numbers.Where(n => n > 1).FirstOrDefault();\n}\n");
             File.WriteAllText(PathOf("ReleaseReaders.cs"), "static class ReleaseReaders\n{\n    public static string Of(Release release) => release.Version;\n\n"
                 + "    public static Release Next(Release release) => release with { Version = \"2.0\" };\n}\n");
             File.WriteAllText(PathOf("Mixed.cs"), "static class Mixed\n{\n    /* Pasted:\u2028one,\r\ntwo,\u0085three. */\n    public static int Value()\n    {\n        int total = 1;\n          return total;\n    }\n}\n");
