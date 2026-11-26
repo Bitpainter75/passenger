@@ -54,6 +54,11 @@ just godot-shader-types | godot-theme                                          #
 The app icons, generated themes, icon sets, terminal widths, Aspire's protocol code, and Godot's shader table and
 default theme come only from their recipes.
 
+**The fork's Linux machine** (Arch/CachyOS) has global.json's SDK (11.0.100) only in `~/.dotnet11` (the system's
+`/usr/share/dotnet` and `~/.dotnet` hold .NET 10): `export DOTNET_ROOT=$HOME/.dotnet11 PATH=$HOME/.dotnet11:$PATH` first.
+`just` is not installed (`sudo pacman -S just`); without it run a recipe's command from the justfile with its exports
+(`AVALONIA_TELEMETRY_OPTOUT=1 DOTNET_CLI_USE_MSBUILD_SERVER=0 MSBUILDUSESERVER=0 dotnet build -nodeReuse:false`).
+
 **Use Passenger on itself.** `.mcp.json` starts Passenger's MCP server over this repository (`tools/mcp.sh`, an APFS
 clone of the last Debug build: reconnect to pick up a new one). Ask Roslyn with `diagnostics`, `find_symbol`, `outline`
 and `usages`, debug the IDE's projects, and look at the window with `app_screenshot` (`app` ide). Lines and columns
