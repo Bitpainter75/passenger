@@ -171,6 +171,18 @@ public sealed class SizeSetting(Func<AppSettings, double> get, Func<AppSettings,
     public override AppSettings Clamp(AppSettings settings) => set(settings, Math.Clamp(get(settings), sizes[0], sizes[^1]));
 
     public override AppSettings Other(AppSettings settings) => set(settings, get(settings) == sizes[0] ? sizes[^1] : sizes[0]);
+
+    /// <summary>The settings at the next size of the list above the one set (<paramref name="up"/>), or below it, a size off
+    /// the list stepping to the nearest on that side; null where none is.</summary>
+    public AppSettings? Stepped(AppSettings settings, bool up)
+    {
+        double now = get(settings);
+        double[] beyond = [.. sizes.Where(size => up ? size > now : size < now)];
+        return beyond.Length == 0 ? null : set(settings, up ? beyond.Min() : beyond.Max());
+    }
+
+    /// <summary>The settings at the size set by nobody.</summary>
+    public AppSettings Unset(AppSettings settings) => set(settings, get(new AppSettings()));
 }
 
 /// <summary>One of an enum's values, edited by a drop-down of the names Settings gives them, in <paramref name="choices"/>'
@@ -331,8 +343,8 @@ public sealed class VimKeysSetting(string property, Func<AppSettings, string> ge
 }
 
 /// <summary>A program to start and its arguments, written as one command line (<see cref="Run.CommandLine"/>), or null for
-/// the one Passenger finds, <paramref name="found"/>'s, which an empty box shows; a line naming no program (quotes round
-/// nothing) is refused, saying why under the box. Where it is given <paramref name="described"/>, what the line in force
+/// the one Passenger finds, <paramref name="found"/>'s, which an empty box shows once found off the UI thread; a line naming
+/// no program (quotes round nothing) is refused, saying why under the box. Where it is given <paramref name="described"/>, what the line in force
 /// runs (its version, say) is said under the box as it is typed, once found off the UI thread.</summary>
 public sealed class ProgramSetting(Func<AppSettings, string?> get, Func<AppSettings, string?, AppSettings> set, Func<string> found, SettingRow row,
     Func<string?, Task<string>>? described = null) : Setting(row)
@@ -342,11 +354,12 @@ public sealed class ProgramSetting(Func<AppSettings, string?> get, Func<AppSetti
 
     public override Control Editor(AppSettings now, Action<Func<AppSettings, AppSettings>> change)
     {
-        TextBox line = new() { Text = get(now) ?? string.Empty, PlaceholderText = found() };
+        TextBox line = new() { Text = get(now) ?? string.Empty };
         TextBlock problem = new() { TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Left };
         problem.Classes.Add(StyleClasses.Error);
         TextBlock runs = new() { Classes = { StyleClasses.Muted }, TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Left, IsVisible = described is not null };
         int asked = 0;
+        IdeErrors.Observe(FoundAsync());
         Said();
         line.TextChanged += (_, _) =>
         {
@@ -354,6 +367,9 @@ public sealed class ProgramSetting(Func<AppSettings, string?> get, Func<AppSetti
             Said();
         };
         return new StackPanel { Spacing = Gaps.Tight, MaxWidth = OptionRow.EditorWidth, Children = { line, problem, runs } };
+
+        // The program an empty line runs, looked for off the window's thread: a search may walk every PATH folder.
+        async Task FoundAsync() => line.PlaceholderText = await BackgroundWork.Run(found);
 
         // What the line runs, the last asked winning.
         async Task DescribeAsync(string? typed)
@@ -549,7 +565,8 @@ public abstract class FontChoices
 
         public override string? WhyNot(string name) => CodeFonts.WhyNot(name);
 
-        public override string Unusable(string name) => CodeFonts.IsInstalled(name) ? "not monospaced" : "not installed";
+        public override string Unusable(string name) => !CodeFonts.IsInstalled(name) ? "not installed"
+            : CodeFonts.IsReadable(name.Trim()) ? "not monospaced" : "unreadable";
     }
 
     private sealed class WindowChoices : FontChoices
@@ -567,6 +584,6 @@ public abstract class FontChoices
 
         public override string? WhyNot(string name) => WindowFonts.WhyNot(name);
 
-        public override string Unusable(string name) => "not installed";
+        public override string Unusable(string name) => WindowFonts.Choice(name) is { Kind: WindowFontKind.Installed } ? "unreadable" : "not installed";
     }
 }

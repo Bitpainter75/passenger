@@ -452,8 +452,8 @@
       },
       "ShimSkiaSharp": {
         "type": "Transitive",
-        "resolved": "5.2.3",
-        "contentHash": "BBmIvh70WduWEF8C9HeU12LmHkg6+h2SRwJzey/tmztRk4ttAxhyu9eAD/jlsNGlqquYpoCQyyTx+QynavyfVA=="
+        "resolved": "5.2.4",
+        "contentHash": "Z93KLAD96oq2dgSBPr47WlnmsziOcUoGPzndHIuBuespqaPaQCqtieDlpqKCYMHNYBaUMM1dubMB/fyu49c6sw=="
       },
       "SkiaSharp.NativeAssets.macOS": {
         "type": "Transitive",
@@ -472,40 +472,40 @@
       },
       "Svg.Animation": {
         "type": "Transitive",
-        "resolved": "5.2.3",
-        "contentHash": "mlbLFKzSVL2wMvDxnlMKLbdbbCbZBjDwSgmCZ7dHE4l0DtVUX5kHixngZlUP8AuBoikzqsXZt4+IXJhbeJjAdA==",
+        "resolved": "5.2.4",
+        "contentHash": "ZvhT4dU2FlARvc8qsoCj4JG9dYpeuenQqoQQqGul7NxdrgCeEHxX7x7+UfZn2VNKOAJW2+PQXoVws2g3/57XJQ==",
         "dependencies": {
-          "ShimSkiaSharp": "5.2.3",
-          "SkiaSharp": "4.148.0",
-          "Svg.Custom": "5.2.3",
-          "Svg.Model": "5.2.3"
+          "ShimSkiaSharp": "5.2.4",
+          "SkiaSharp": "4.151.1",
+          "Svg.Custom": "5.2.4",
+          "Svg.Model": "5.2.4"
         }
       },
       "Svg.Custom": {
         "type": "Transitive",
-        "resolved": "5.2.3",
-        "contentHash": "epicuKTb55l7Y6c3f9pdP0RkoifVieS9sWvA9HsppTfYyV7RFZg89+fUA9TTPcuccqi0GUGwiPEi+9b881zlDw==",
+        "resolved": "5.2.4",
+        "contentHash": "MNHaY7BHZPJaE8zzKq4ldf9kxW1uvB91EnObHPxiRr+GTCBGgjoAu13od0q+5uChezKFlAaSVJAUsw6ukHRZ3w==",
         "dependencies": {
           "ExCSS": "4.3.1"
         }
       },
       "Svg.Model": {
         "type": "Transitive",
-        "resolved": "5.2.3",
-        "contentHash": "iZInP4/48rIkpFxVJNMmxDDjIBaUcGOHrzancQ3cmneHXrtH4MYkm6bzggL9hCiS2dxfLhk3JCiERoGf8j0MlA==",
+        "resolved": "5.2.4",
+        "contentHash": "x1OiQDO2qLgH/Pwt19o/JpYlTmerlkWfU/RcsyOEUYbjgImcoQ+FAjzc70HzVyzmZA1A+v389gYpDveuYq6kLQ==",
         "dependencies": {
-          "ShimSkiaSharp": "5.2.3",
-          "Svg.Custom": "5.2.3"
+          "ShimSkiaSharp": "5.2.4",
+          "Svg.Custom": "5.2.4"
         }
       },
       "Svg.SceneGraph": {
         "type": "Transitive",
-        "resolved": "5.2.3",
-        "contentHash": "t9HrB1n499YCvziq+sdapDjMvgY7iSzyldEDalWnoZCP3cncu92gEktBqzhUgo8A+r9mfow2TNf0u5jgV5FvlQ==",
+        "resolved": "5.2.4",
+        "contentHash": "A/h8VC7TrEN3EL66sb9VMqbJfNJvt13x+FhS1X1lIU2owxBtuskRaSjDqAjJ1/+sj+6LDmcnb4XKozjx5Ek/eA==",
         "dependencies": {
-          "ShimSkiaSharp": "5.2.3",
-          "Svg.Custom": "5.2.3",
-          "Svg.Model": "5.2.3"
+          "ShimSkiaSharp": "5.2.4",
+          "Svg.Custom": "5.2.4",
+          "Svg.Model": "5.2.4"
         }
       },
       "System.ClientModel": {
@@ -673,30 +673,30 @@
           "NLayer": "[3.0.1, )",
           "NVorbis": "[0.10.5, )",
           "NuGet.Configuration": "[8.0.0, )",
-          "Passenger.Agents": "[0.4.5, )",
-          "Passenger.Core": "[0.4.5, )",
-          "Passenger.Dap": "[0.4.5, )",
-          "Passenger.Editor": "[0.4.5, )",
-          "Passenger.Languages": "[0.4.5, )",
-          "Passenger.Lsp": "[0.4.5, )",
-          "Passenger.Packages": "[0.4.5, )",
-          "Passenger.Profiler": "[0.4.5, )",
-          "Passenger.Sql": "[0.4.5, )",
-          "Passenger.Terminal": "[0.4.5, )",
-          "Passenger.Text": "[0.4.5, )",
-          "Passenger.Vcs": "[0.4.5, )",
-          "Passenger.Workspace": "[0.4.5, )",
-          "Passenger.Xaml": "[0.4.5, )",
+          "Passenger.Agents": "[0.4.6, )",
+          "Passenger.Core": "[0.4.6, )",
+          "Passenger.Dap": "[0.4.6, )",
+          "Passenger.Editor": "[0.4.6, )",
+          "Passenger.Languages": "[0.4.6, )",
+          "Passenger.Lsp": "[0.4.6, )",
+          "Passenger.Packages": "[0.4.6, )",
+          "Passenger.Profiler": "[0.4.6, )",
+          "Passenger.Sql": "[0.4.6, )",
+          "Passenger.Terminal": "[0.4.6, )",
+          "Passenger.Text": "[0.4.6, )",
+          "Passenger.Vcs": "[0.4.6, )",
+          "Passenger.Workspace": "[0.4.6, )",
+          "Passenger.Xaml": "[0.4.6, )",
           "SkiaSharp": "[4.157.0, )",
           "SkiaSharp.NativeAssets.Linux": "[4.157.0, )",
-          "Svg.Skia": "[5.2.3, )",
+          "Svg.Skia": "[5.2.4, )",
           "Velopack": "[1.2.161, )"
         }
       },
       "passenger.agents": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )"
         }
       },
       "passenger.core": {
@@ -708,33 +708,33 @@
       "passenger.dap": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )"
         }
       },
       "passenger.editor": {
         "type": "Project",
         "dependencies": {
           "Avalonia": "[12.2.0, )",
-          "Passenger.Core": "[0.4.5, )",
-          "Passenger.Text": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )",
+          "Passenger.Text": "[0.4.6, )"
         }
       },
       "passenger.languages": {
         "type": "Project",
         "dependencies": {
           "Microsoft.CodeAnalysis.CSharp": "[5.12.0, )",
-          "Passenger.Editor": "[0.4.5, )",
-          "Passenger.Lsp": "[0.4.5, )",
-          "Passenger.Text": "[0.4.5, )",
-          "Passenger.Workspace": "[0.4.5, )",
+          "Passenger.Editor": "[0.4.6, )",
+          "Passenger.Lsp": "[0.4.6, )",
+          "Passenger.Text": "[0.4.6, )",
+          "Passenger.Workspace": "[0.4.6, )",
           "Tint": "[0.3.0, )"
         }
       },
       "passenger.lsp": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.5, )",
-          "Passenger.Text": "[0.4.5, )",
+          "Passenger.Core": "[0.4.6, )",
+          "Passenger.Text": "[0.4.6, )",
           "StreamJsonRpc": "[2.26.150, )"
         }
       },
@@ -742,9 +742,9 @@
         "type": "Project",
         "dependencies": {
           "NuGet.Configuration": "[8.0.0, )",
-          "Passenger.Core": "[0.4.5, )",
-          "Passenger.Text": "[0.4.5, )",
-          "Passenger.Workspace": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )",
+          "Passenger.Text": "[0.4.6, )",
+          "Passenger.Workspace": "[0.4.6, )"
         }
       },
       "passenger.profiler": {
@@ -752,8 +752,8 @@
         "dependencies": {
           "Microsoft.Diagnostics.NETCore.Client": "[0.2.750501, )",
           "Microsoft.Diagnostics.Runtime": "[4.2.751201, )",
-          "Microsoft.Diagnostics.Tracing.TraceEvent": "[4.0.0, )",
-          "Passenger.Core": "[0.4.5, )"
+          "Microsoft.Diagnostics.Tracing.TraceEvent": "[4.0.2, )",
+          "Passenger.Core": "[0.4.6, )"
         }
       },
       "passenger.sql": {
@@ -761,28 +761,28 @@
         "dependencies": {
           "Microsoft.Data.SqlClient": "[7.1.2, )",
           "Microsoft.SqlServer.DacFx": "[170.5.96, )",
-          "Passenger.Core": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )"
         }
       },
       "passenger.terminal": {
         "type": "Project",
         "dependencies": {
           "Avalonia": "[12.2.0, )",
-          "Passenger.Editor": "[0.4.5, )",
+          "Passenger.Editor": "[0.4.6, )",
           "Porta.Pty": "[2.2.4, )"
         }
       },
       "passenger.text": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )"
         }
       },
       "passenger.vcs": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.5, )",
-          "Passenger.Text": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )",
+          "Passenger.Text": "[0.4.6, )"
         }
       },
       "passenger.workspace": {
@@ -790,8 +790,8 @@
         "dependencies": {
           "Cucumber.CucumberExpressions": "[17.1.0, )",
           "Gherkin": "[35.0.0, )",
-          "Passenger.Core": "[0.4.5, )",
-          "Passenger.Text": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )",
+          "Passenger.Text": "[0.4.6, )"
         }
       },
       "passenger.xaml": {
@@ -799,9 +799,9 @@
         "dependencies": {
           "Microsoft.CodeAnalysis.CSharp": "[5.12.0, )",
           "Microsoft.CodeAnalysis.VisualBasic": "[5.12.0, )",
-          "Passenger.Core": "[0.4.5, )",
-          "Passenger.Packages": "[0.4.5, )",
-          "Passenger.Text": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )",
+          "Passenger.Packages": "[0.4.6, )",
+          "Passenger.Text": "[0.4.6, )"
         }
       },
       "Avalonia": {
@@ -992,9 +992,9 @@
       },
       "Microsoft.Diagnostics.Tracing.TraceEvent": {
         "type": "CentralTransitive",
-        "requested": "[4.0.0, )",
-        "resolved": "4.0.0",
-        "contentHash": "uqiUXrXzIuVqm7h3G9Sr+HuwY8LNKqRDt/yHMOAOFGvzySX7ZVTgFiO0LUKFO+c92qYCn0Gml838quCOfai7RA==",
+        "requested": "[4.0.2, )",
+        "resolved": "4.0.2",
+        "contentHash": "HW3sc0BS/snPlvvdtXWu7YloANo1dXbTb0vOqDXKvmCl7Xg1fGwEtKIjSKfE56PG+GvMD1Mvy2v+DjTMauKwwQ==",
         "dependencies": {
           "Microsoft.Diagnostics.NETCore.Client": "0.2.661903"
         }
@@ -1100,19 +1100,19 @@
       },
       "Svg.Skia": {
         "type": "CentralTransitive",
-        "requested": "[5.2.3, )",
-        "resolved": "5.2.3",
-        "contentHash": "slGSy5Aje/30Ou2a5aezbGGWLZspBIBYlEzqgtaIVex4FUYAR3mxaYrvMZj1tHy+ESDFCGY7+2FjF6UzqGUZew==",
+        "requested": "[5.2.4, )",
+        "resolved": "5.2.4",
+        "contentHash": "UlSMkLCfxDrXz+knWqdYewoXmHr1/M5rO8WnxGZMFStf3TgZjq2YXrtMIITri7wkuCtag7b+aitB5DAdODm0VA==",
         "dependencies": {
-          "HarfBuzzSharp": "14.2.0",
-          "HarfBuzzSharp.NativeAssets.Linux": "14.2.0",
-          "HarfBuzzSharp.NativeAssets.Win32": "14.2.0",
-          "HarfBuzzSharp.NativeAssets.macOS": "14.2.0",
-          "SkiaSharp": "4.148.0",
-          "Svg.Animation": "5.2.3",
-          "Svg.Custom": "5.2.3",
-          "Svg.Model": "5.2.3",
-          "Svg.SceneGraph": "5.2.3"
+          "HarfBuzzSharp": "14.4.0",
+          "HarfBuzzSharp.NativeAssets.Linux": "14.4.0",
+          "HarfBuzzSharp.NativeAssets.Win32": "14.4.0",
+          "HarfBuzzSharp.NativeAssets.macOS": "14.4.0",
+          "SkiaSharp": "4.151.1",
+          "Svg.Animation": "5.2.4",
+          "Svg.Custom": "5.2.4",
+          "Svg.Model": "5.2.4",
+          "Svg.SceneGraph": "5.2.4"
         }
       },
       "Tint": {

@@ -15,6 +15,18 @@ public static class Refusals
     /// <summary>No tool window is open, for an action on the one open last.</summary>
     public const string NoToolWindowOpen = "No tool window is open";
 
+    /// <summary>No tool window's view has had the keys yet, for Jump to Last Tool Window.</summary>
+    public const string NoToolWindowHadKeys = "No tool window has had the keys yet";
+
+    /// <summary>What has the keys holds no tabs, for Close Tool Window Tab.</summary>
+    public const string NoToolTabs = "No tool window with tabs has the keys";
+
+    /// <summary>The tab shown has no ×, for Close Tool Window Tab.</summary>
+    public const string ToolTabStays = "The tab shown has no close: it stays open";
+
+    /// <summary>The window's scale is at the end of Settings' Display scale, for Zoom In and Zoom Out.</summary>
+    public static string ZoomedAsFarAsItGoes(bool up) => up ? "The window is as large as it goes" : "The window is as small as it goes";
+
     /// <summary>Closed tool windows keep their stripe icons or tabs, so Close is Hide.</summary>
     public static readonly string ClosedKeepIcons =
         $"Closed tool windows keep their icons or tabs: Hide closes them ({SettingsDialog.PlaceOfPage(SettingsDialog.Appearance)} | Closed tool windows)";
@@ -873,6 +885,13 @@ public static class Refusals
 
     /// <summary>An iOS app's simulators asked for on a system other than macOS.</summary>
     public const string IosOnMacAlone = "iOS apps run on simulators only on a Mac, with Xcode";
+
+    /// <summary>A Mac Catalyst app run on a system other than macOS.</summary>
+    public const string MacCatalystOnMacAlone = "a Mac Catalyst app runs only on a Mac";
+
+    /// <summary>An Android test project's tests asked to run where its app starts through no instrumentation, which runs them.</summary>
+    public static string NoInstrumentation(string project) =>
+        $"{project}'s tests cannot run on Android: its app starts through no instrumentation, which runs an Android app's tests (androidtest's template declares one)";
 
     /// <summary>The iOS workload could not list simulators (no workload, no Xcode), with how to get them.</summary>
     public static string NoIos(string problem) =>

@@ -677,7 +677,7 @@
       "passenger.agents": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )"
         }
       },
       "passenger.analyzers": {
@@ -692,7 +692,7 @@
       "passenger.dap": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )"
         }
       },
       "passenger.debugger": {
@@ -704,9 +704,9 @@
           "Microsoft.CodeAnalysis.VisualBasic": "[5.12.0, )",
           "Microsoft.Diagnostics.DbgShim": "[10.0.750501, )",
           "Microsoft.Diagnostics.NETCore.Client": "[0.2.750501, )",
-          "Passenger.Core": "[0.4.5, )",
-          "Passenger.Dap": "[0.4.5, )",
-          "Passenger.Debugger.Interop": "[0.4.5, )",
+          "Passenger.Core": "[0.4.6, )",
+          "Passenger.Dap": "[0.4.6, )",
+          "Passenger.Debugger.Interop": "[0.4.6, )",
           "ZLinq": "[1.6.1, )"
         }
       },
@@ -717,8 +717,8 @@
         "type": "Project",
         "dependencies": {
           "Avalonia": "[12.2.0, )",
-          "Passenger.Core": "[0.4.5, )",
-          "Passenger.Text": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )",
+          "Passenger.Text": "[0.4.6, )"
         }
       },
       "passenger.nodepackages": {
@@ -728,9 +728,9 @@
         "type": "Project",
         "dependencies": {
           "NuGet.Configuration": "[8.0.0, )",
-          "Passenger.Core": "[0.4.5, )",
-          "Passenger.Text": "[0.4.5, )",
-          "Passenger.Workspace": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )",
+          "Passenger.Text": "[0.4.6, )",
+          "Passenger.Workspace": "[0.4.6, )"
         }
       },
       "passenger.profiler": {
@@ -738,8 +738,8 @@
         "dependencies": {
           "Microsoft.Diagnostics.NETCore.Client": "[0.2.750501, )",
           "Microsoft.Diagnostics.Runtime": "[4.2.751201, )",
-          "Microsoft.Diagnostics.Tracing.TraceEvent": "[4.0.0, )",
-          "Passenger.Core": "[0.4.5, )"
+          "Microsoft.Diagnostics.Tracing.TraceEvent": "[4.0.2, )",
+          "Passenger.Core": "[0.4.6, )"
         }
       },
       "passenger.sql": {
@@ -747,28 +747,28 @@
         "dependencies": {
           "Microsoft.Data.SqlClient": "[7.1.2, )",
           "Microsoft.SqlServer.DacFx": "[170.5.96, )",
-          "Passenger.Core": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )"
         }
       },
       "passenger.terminal": {
         "type": "Project",
         "dependencies": {
           "Avalonia": "[12.2.0, )",
-          "Passenger.Editor": "[0.4.5, )",
+          "Passenger.Editor": "[0.4.6, )",
           "Porta.Pty": "[2.2.4, )"
         }
       },
       "passenger.text": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )"
         }
       },
       "passenger.vcs": {
         "type": "Project",
         "dependencies": {
-          "Passenger.Core": "[0.4.5, )",
-          "Passenger.Text": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )",
+          "Passenger.Text": "[0.4.6, )"
         }
       },
       "passenger.workspace": {
@@ -776,8 +776,8 @@
         "dependencies": {
           "Cucumber.CucumberExpressions": "[17.1.0, )",
           "Gherkin": "[35.0.0, )",
-          "Passenger.Core": "[0.4.5, )",
-          "Passenger.Text": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )",
+          "Passenger.Text": "[0.4.6, )"
         }
       },
       "passenger.xaml": {
@@ -785,9 +785,9 @@
         "dependencies": {
           "Microsoft.CodeAnalysis.CSharp": "[5.12.0, )",
           "Microsoft.CodeAnalysis.VisualBasic": "[5.12.0, )",
-          "Passenger.Core": "[0.4.5, )",
-          "Passenger.Packages": "[0.4.5, )",
-          "Passenger.Text": "[0.4.5, )"
+          "Passenger.Core": "[0.4.6, )",
+          "Passenger.Packages": "[0.4.6, )",
+          "Passenger.Text": "[0.4.6, )"
         }
       },
       "Avalonia": {
@@ -899,9 +899,9 @@
       },
       "Microsoft.Diagnostics.Tracing.TraceEvent": {
         "type": "CentralTransitive",
-        "requested": "[4.0.0, )",
-        "resolved": "4.0.0",
-        "contentHash": "uqiUXrXzIuVqm7h3G9Sr+HuwY8LNKqRDt/yHMOAOFGvzySX7ZVTgFiO0LUKFO+c92qYCn0Gml838quCOfai7RA==",
+        "requested": "[4.0.2, )",
+        "resolved": "4.0.2",
+        "contentHash": "HW3sc0BS/snPlvvdtXWu7YloANo1dXbTb0vOqDXKvmCl7Xg1fGwEtKIjSKfE56PG+GvMD1Mvy2v+DjTMauKwwQ==",
         "dependencies": {
           "Microsoft.Diagnostics.NETCore.Client": "0.2.661903"
         }

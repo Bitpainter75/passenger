@@ -19,6 +19,12 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // Velopack's Update.exe runs the version it is about to replace with this as current\ is renamed: ended first.
+        if (Installation.Obsolete(args))
+        {
+            LeaveStartingFolder();
+            return 0;
+        }
         StartedAt = Stopwatch.GetTimestamp();
         // Run by git to ask for a login: the window answers, and nothing of the IDE starts.
         if (Passenger.Vcs.GitAskPass.Answer(args) is int asked)
@@ -42,6 +48,8 @@ internal static class Program
         }
         // Before anything reads the state folder, or leaves the folder a relative PASSENGER_SETTINGS is read from.
         State.StateStore.NameWhole();
+        // What the IDE runs of the .NET SDK keeps its temporary files in the state's own folder for this process, named as first asked.
+        SdkTemporary.State = () => State.StateStore.DefaultRoot;
         // Before anything of the IDE starts, so a start that fails before its log is set up still leaves why.
         CrashFile.Watch();
         // First, as Velopack asks; an update never installs as a second Passenger starts, which would end the first.
@@ -159,14 +167,17 @@ internal static class Program
     }
 
     /// <summary>A screenshot keeps nothing of the person's: unless PASSENGER_SETTINGS names a folder, its state and logs
-    /// (Roslyn's server's among them) go to a temporary one, a portable copy's too, removed when it ends, and its
-    /// terminal's shell never reads or writes the person's history or startup files.</summary>
+    /// (Roslyn's server's among them) go to a temporary one, a portable copy's too, removed when it ends with the state's
+    /// own folders in the user's temporary folder (<see cref="UserTemporary.LetGoOf"/>), and by the watchdog once it and
+    /// its children have gone, however it ended and whatever wrote there last; its terminal's shell never reads or writes
+    /// the person's history or startup files.</summary>
     private static int Apart(Func<int> run)
     {
         string? scratch = null;
         if (State.StateStore.Named is not { } root)
         {
             scratch = Directory.CreateTempSubdirectory("passenger-screenshot-").FullName;
+            ChildProcesses.AtIdeEnd(nameof(Apart), $"rm -rf -- {Terminal.ShellWords.Quoted(scratch, ShellKind.Posix)}");
             root = scratch;
             Environment.SetEnvironmentVariable(State.StateStore.Variable, scratch);
         }
@@ -183,6 +194,7 @@ internal static class Program
             {
                 // The log is written off a queue: what it still holds would make the folder again after it went.
                 IdeLog.Flush();
+                UserTemporary.LetGoOf([scratch, CSharp.CSharpService.ServerCache]);
                 try
                 {
                     Directory.Delete(scratch, recursive: true);

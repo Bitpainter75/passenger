@@ -17,9 +17,10 @@ namespace Passenger.Tests;
 /// OnCreate through Passenger's relay in the app, its locals shown, and Stop ends it; Run and Debug with Hot Reload take
 /// an edit of its code through the relay, its update handler called after it, and under Debug a method the edit added is
 /// evaluated; a start whose app run-as does not know is refused as its relay or inspector goes in; MAUI's and Avalonia's
-/// heads (<see cref="MauiAndroidTests"/>, <see cref="AvaloniaAndroidTests"/>) are steps too. The emulator is the one ANDROID_SERIAL names where several run, and every
-/// adb call names it. Skips, saying why, without the Android workload, its SDK and Java, an emulator or the relays.
-/// Debugged through the window, so run alone.</summary>
+/// heads (<see cref="MauiAndroidTests"/>, <see cref="AvaloniaAndroidTests"/>) are steps too, and the tests of the project
+/// <c>dotnet new androidtest</c> makes, run through its instrumentation there and debugged through the relay. The emulator is the one ANDROID_SERIAL names
+/// where several run, and every adb call names it. Skips, saying why, without the Android workload, its SDK and Java, an
+/// emulator or the relays. Debugged through the window, so run alone.</summary>
 [Collection(Alone.Name)]
 public sealed class AndroidDeviceTests
 {
@@ -27,13 +28,20 @@ public sealed class AndroidDeviceTests
 
     private const string Package = "net.passengeride.tests.androidapp";
 
-    /// <summary>An app on an emulator: run and stopped at a breakpoint, its locals shown, an edit taken by Run and by Debug
-    /// with Hot Reload and its update handler called, a MAUI app's live tree and an Avalonia app's shared code stopped in.
-    /// The steps that need more than the emulator (MAUI's workload, Avalonia's packages) come first, so a skip ends the
-    /// flow before any step ran.</summary>
+    /// <summary>The application id <c>dotnet new androidtest</c> gives the device test project it makes.</summary>
+    private const string DeviceTestsPackage = "com.companyname.DeviceTests";
+
+    /// <summary>A device test project's tests run on an emulator; then an app there: run and stopped at a breakpoint, its
+    /// locals shown, an edit taken by Run and by Debug with Hot Reload and its update handler called, a MAUI app's live tree
+    /// and an Avalonia app's shared code stopped in. The steps that need more than the emulator (the test project's packages,
+    /// MAUI's workload, Avalonia's packages) come first, so a skip ends the flow before any step ran.</summary>
     [AvaloniaFact]
-    public void An_app_on_an_emulator_runs_debugs_and_takes_hot_reload_edits_and_its_live_tree_and_shared_code_are_reached()
+    public void A_device_test_projects_tests_run_on_an_emulator_and_an_app_there_runs_debugs_and_takes_hot_reload_edits_and_its_live_tree_and_shared_code_are_reached()
     {
+        Flow.Step("an androidtest project's tests run through its instrumentation on the emulator chosen beside its configuration, each told, and the app ends there",
+            An_androidtest_projects_tests_run_through_its_instrumentation_on_the_emulator_chosen_beside_its_configuration_each_told_and_the_app_ends_there);
+        Flow.Step("an androidtest project's tests debugged from the Tests window stop at a breakpoint in one on the emulator, then each test is told and nothing of it is left there",
+            An_androidtest_projects_tests_debugged_from_the_tests_window_stop_at_a_breakpoint_in_one_on_the_emulator_then_each_test_is_told_and_nothing_of_it_is_left_there);
         Flow.Step("an Avalonia app's Android head runs and stops at a breakpoint in its shared code on an emulator",
             AvaloniaAndroidTests.An_avalonia_apps_android_head_runs_and_stops_at_a_breakpoint_in_its_shared_code_on_an_emulator);
         Flow.Step("a MAUI app's Android head debugged on an emulator shows its main page's label and button in the live tree",
@@ -61,10 +69,90 @@ public sealed class AndroidDeviceTests
             A_run_stopped_once_its_relay_is_in_the_app_never_starts_the_app_on_the_emulator);
         Flow.Step("Passenger ending while a debugged app's end on the emulator is held waits until nothing of it is left there",
             Passenger_ending_while_a_debugged_apps_end_on_the_emulator_is_held_waits_until_nothing_of_it_is_left_there);
-        Flow.Step("a relay a vanished end left in the app is out before its next run starts it",
-            A_relay_a_vanished_end_left_in_the_app_is_out_before_its_next_run_starts_it);
+        Flow.Step("a relay a vanished end left in the app, and the forwards and reverses a Passenger no longer running left, are out before its next run starts it",
+            A_relay_a_vanished_end_left_in_the_app_and_the_forwards_and_reverses_a_passenger_no_longer_running_left_are_out_before_its_next_run_starts_it);
         Flow.Step("a debugged app started from its launcher while its end is held loads no relay",
             A_debugged_app_started_from_its_launcher_while_its_end_is_held_loads_no_relay);
+    }
+
+    /// <summary>The template's three tests run as the Tests window's Run All runs them: built and installed on the emulator,
+    /// the app's instrumentation run there, each test told as it ends and again with what the results file it wrote says,
+    /// brought beside its build; the app then ends there.</summary>
+    private static void An_androidtest_projects_tests_run_through_its_instrumentation_on_the_emulator_chosen_beside_its_configuration_each_told_and_the_app_ends_there()
+    {
+        string folder = PathNames.Canonical(TestFolders.Create("android-device-tests"));
+        try
+        {
+            (string project, string? unmade) = Ui.AwaitPumped(Waiting.Apart(() => MauiApp.CreateDeviceTestsAsync(folder, "androidtest")), "dotnet new androidtest and its restore", Slow);
+            if (unmade is not null)
+            {
+                Assert.Skip(unmade);
+            }
+            (DeviceTarget target, AndroidTools tools) = Listed(project);
+            MainWindow window = Ui.OpenFolder(folder, languageServer: false);
+            try
+            {
+                Choose(window, project, target, MauiApp.DeviceTests);
+                Assert.True(window.Perform(AppActions.RunAllTests));
+                Ui.WaitFor(() => !window.Tests.IsBusy && window.Tests.Tree.Roots.SelectMany(r => r.Methods).Any(m => m.State != Passenger.App.Testing.TestState.NotRun),
+                    () => $"the run of the tests through their instrumentation on {target.Name}: {window.BottomPanel.Tests.Status}\n{Ui.Said(window)}", Slow);
+                Assert.True(System.Text.RegularExpressions.Regex.Replace(window.BottomPanel.Tests.Status, $" in {SaidWhile.Pattern}$", string.Empty) == MauiApp.DeviceTestsRan,
+                    $"The tests did not run through their instrumentation on {target.Name}, each told: {window.BottomPanel.Tests.Status}\n{Ui.Said(window)}");
+                Passenger.App.Testing.TestNode failed = window.Tests.Tree.Roots.SelectMany(r => r.Methods).Single(m => m.State == Passenger.App.Testing.TestState.Failed);
+                Assert.True(failed.Details.Contains("This test is expected to fail", StringComparison.Ordinal),
+                    $"The failed test's message from the results file the instrumentation wrote was not told: {failed.Details}");
+                string built = Path.Combine(Path.GetDirectoryName(project)!, "bin");
+                Assert.True(Directory.EnumerateFiles(built, "*.trx", SearchOption.AllDirectories).Any(), $"The tests' results were not brought beside their build in {built}");
+                string serial = Serial(target, project);
+                Ui.WaitFor(() => Pid(tools, serial, DeviceTestsPackage).Length == 0,
+                    () => $"the tests' app to end on the emulator once their run was over; it runs as {Pid(tools, serial, DeviceTestsPackage)}", TimeSpan.FromSeconds(30));
+            }
+            finally
+            {
+                window.Close();
+            }
+        }
+        finally
+        {
+            TestFolders.Delete(folder);
+        }
+    }
+
+    /// <summary>The tests of the project <c>dotnet new androidtest</c> makes, debugged from the Tests window (<see cref="MauiApp.DebugDeviceTests"/>):
+    /// the app started on the emulator through Passenger's relay in it as Debug starts an app there, its instrumentation
+    /// stopping at a breakpoint in its first test; once it goes on each test is told as a run tells it, and the app, the relay and
+    /// its port are gone from the emulator.</summary>
+    private static void An_androidtest_projects_tests_debugged_from_the_tests_window_stop_at_a_breakpoint_in_one_on_the_emulator_then_each_test_is_told_and_nothing_of_it_is_left_there()
+    {
+        string folder = PathNames.Canonical(TestFolders.Create("android-device-tests-debugged"));
+        try
+        {
+            (string project, string? unmade) = Ui.AwaitPumped(Waiting.Apart(() => MauiApp.CreateDeviceTestsAsync(folder, "androidtest")), "dotnet new androidtest and its restore", Slow);
+            if (unmade is not null)
+            {
+                Assert.Skip(unmade);
+            }
+            Relayed();
+            (DeviceTarget target, AndroidTools tools) = Listed(project);
+            MainWindow window = Ui.OpenFolder(folder, languageServer: false);
+            try
+            {
+                Choose(window, project, target, MauiApp.DeviceTests);
+                MauiApp.DebugDeviceTests(window, project, $"on {target.Name}", Slow);
+                string serial = Serial(target, project);
+                Ui.WaitFor(() => Pid(tools, serial, DeviceTestsPackage).Length == 0 && Left(tools, serial, DeviceTestsPackage).Length == 0,
+                    () => $"the debugged app and its relay to be gone from the emulator; it runs as {Pid(tools, serial, DeviceTestsPackage)}, and has {Left(tools, serial, DeviceTestsPackage)}",
+                    TimeSpan.FromSeconds(30));
+            }
+            finally
+            {
+                window.Close();
+            }
+        }
+        finally
+        {
+            TestFolders.Delete(folder);
+        }
     }
 
     private static void An_android_app_runs_and_stops_at_a_breakpoint_on_an_emulator_chosen_beside_its_configuration()
@@ -408,23 +496,43 @@ public sealed class AndroidDeviceTests
 
     /// <summary>The relay and an environment naming it, left in the app by a start whose end never reached the emulator (its
     /// device gone as it ended), are out before the app's next Run starts it: the app starts at once without the relay,
-    /// where it loaded it and waited a minute for a debugger, and its environment is the build's link again.</summary>
-    private static void A_relay_a_vanished_end_left_in_the_app_is_out_before_its_next_run_starts_it()
+    /// where it loaded it and waited a minute for a debugger, and its environment is the build's link again. So are the
+    /// forwards and reverses to sockets a Passenger no longer running named (one killed, or on a system with no watchdog),
+    /// which stayed until adb's server or the device restarted; another program's and a running Passenger's stay.</summary>
+    private static void A_relay_a_vanished_end_left_in_the_app_and_the_forwards_and_reverses_a_passenger_no_longer_running_left_are_out_before_its_next_run_starts_it()
     {
         (string folder, string project, DeviceTarget target, AndroidTools tools) = Prepared();
         MainWindow window = Ui.OpenFolder(folder, languageServer: false);
+        string serial = string.Empty;
+        List<string[]> made = [];
         try
         {
             Choose(window, project, target);
             Ui.Launched(window, window.RunAsync(), "the build, the install and the start on the emulator", Slow);
             AndroidApp app = window.Session.RunPlan?.Device?.App as AndroidApp ?? throw new InvalidOperationException("The run on the emulator named no app there");
+            serial = app.Serial;
             Ui.Run(window, AppActions.Stop);
             Ui.WaitFor(() => window.Runner.Ended.IsCompleted, "the run to end once stopped");
             Ui.WaitFor(() => Pid(tools, app.Serial).Length == 0, () => $"the app to end on the emulator once stopped; it runs as {Pid(tools, app.Serial)}", TimeSpan.FromSeconds(30));
             string abi = LeaveRelay(tools, app);
             Assert.True(Left(tools, app.Serial).Contains("the relay in the app", StringComparison.Ordinal), "The relay was not left in the app as a vanished end leaves it");
+            // A Passenger of this process's id that started in 1970 is one no longer running.
+            string[] gone = [DeviceSockets.Address + DeviceSockets.Named("debug", Environment.ProcessId, 1), DeviceSockets.Address + DeviceSockets.Named("handlers", Environment.ProcessId, 1)];
+            string[] others = [DeviceSockets.Address + "another-program", DeviceSockets.Address + DeviceSockets.Named("inspector")];
+            foreach (string socket in (string[])[gone[0], .. others])
+            {
+                made.Add(["forward", "--remove", $"tcp:{Adb(tools, serial, "forward", "tcp:0", socket).Trim()}"]);
+            }
+            Adb(tools, serial, "reverse", gone[1], "tcp:9");
+            made.Add(["reverse", "--remove", gone[1]]);
+            string before = Rules(tools, serial);
+            Assert.True(gone.Concat(others).All(rule => before.Contains(rule, StringComparison.Ordinal)), $"adb did not make the rules a step needs:\n{before}");
 
             Ui.Launched(window, window.RunAsync(), "the next run's start on the emulator", Slow);
+            string rules = Rules(tools, serial);
+            Assert.False(gone.Any(rule => rules.Contains(rule, StringComparison.Ordinal)),
+                $"The next run started with the forward and reverse of a Passenger no longer running still on the emulator, which stay until adb's server or the device restarts:\n{rules}");
+            Assert.True(others.All(rule => rules.Contains(rule, StringComparison.Ordinal)), $"The next run took out another program's or a running Passenger's rule:\n{rules}");
             Ui.WaitFor(() => Output(window).Contains("Hello from Passenger's test app, 42", StringComparison.Ordinal),
                 () => $"the app to start at once, its log in the Run window; it shows:\n{Output(window)}\n{Ui.Said(window)}", TimeSpan.FromSeconds(40));
             string pid = Pid(tools, app.Serial);
@@ -438,7 +546,13 @@ public sealed class AndroidDeviceTests
         finally
         {
             window.Close();
+            foreach (string[] rule in made)
+            {
+                Adb(tools, serial, rule);
+            }
         }
+
+        static string Rules(AndroidTools tools, string serial) => Adb(tools, serial, "forward", "--list") + Adb(tools, serial, "reverse", "--list");
     }
 
     /// <summary>A debugged app ended on the emulator and started from its launcher while its end there is held, as where the
@@ -522,6 +636,24 @@ public sealed class AndroidDeviceTests
             File.Copy(file, copy);
         }
         string project = PathNames.Canonical(Path.Combine(folder, "AndroidApp.csproj"));
+        (DeviceTarget target, AndroidTools tools) = Listed(project);
+        Relayed();
+        return (folder, project, target, tools);
+    }
+
+    /// <summary>A skip, saying why, where this build carries no Android debug relay.</summary>
+    private static void Relayed()
+    {
+        if (!((string[])["android-arm64", "android-x64"]).Any(runtime => File.Exists(CarriedFiles.Relay(runtime, AndroidApp.RelayFile))))
+        {
+            Assert.Skip("This build carries no Android debug relay, which `just debug-relay android` makes before a build carries it");
+        }
+    }
+
+    /// <summary>The emulator or device a project of Android runs on (<see cref="MauiApp.Target"/>) and the SDK's tools the
+    /// workload lists it with, or a skip saying why there is none.</summary>
+    private static (DeviceTarget Target, AndroidTools Tools) Listed(string project)
+    {
         (IReadOnlyList<DeviceTarget> targets, AndroidTools? tools, string? problem) = Ui.Await(Waiting.Apart(() =>
             AndroidDevices.ListAsync(project, "net11.0-android", new Dictionary<string, string>(), CancellationToken.None)), "the Android workload's devices", Slow);
         if (tools is null)
@@ -537,23 +669,19 @@ public sealed class AndroidDeviceTests
         {
             Assert.Skip("No Android device is connected and no emulator is made (an AVD of an installed system image), so there is nothing to run on");
         }
-        if (!((string[])["android-arm64", "android-x64"]).Any(runtime => File.Exists(CarriedFiles.Relay(runtime, AndroidApp.RelayFile))))
-        {
-            Assert.Skip("This build carries no Android debug relay, which `just debug-relay android` makes before a build carries it");
-        }
-        return (folder, project, target, tools);
+        return (target, tools);
     }
 
-    /// <summary>The window, once it lists the app's configuration, has it run on the target.</summary>
-    private static void Choose(MainWindow window, string project, DeviceTarget target)
+    /// <summary>The window, once it lists the configuration named <paramref name="name"/>, has it run on the target.</summary>
+    private static void Choose(MainWindow window, string project, DeviceTarget target, string name = "AndroidApp")
     {
-        Ui.WaitFor(() => window.Configurations.Any(c => c.Name == "AndroidApp"), () => $"AndroidApp's run configuration; the window has {Projects(window)}, "
+        Ui.WaitFor(() => window.Configurations.Any(c => c.Name == name), () => $"{name}'s run configuration; the window has {Projects(window)}, "
             + $"configurations {string.Join(", ", window.Configurations.Select(c => c.Name))}: {Ui.Said(window)}", Slow);
-        Assert.True(window.SelectConfiguration("AndroidApp"));
+        Assert.True(window.SelectConfiguration(name));
         ProjectModel model = window.Session.Projects.Single(p => PathNames.Same(p.Path, project));
         window.ChooseRunTarget(model, target);
         Ui.Settle();
-        Assert.True(window.Session.Targets.Of(model)?.Key == target.Key, $"{target.Name} was not kept as where AndroidApp runs");
+        Assert.True(window.Session.Targets.Of(model)?.Key == target.Key, $"{target.Name} was not kept as where {name} runs");
     }
 
     private static string Output(MainWindow window) => window.BottomPanel.Run.Document.Snapshot.ToString();
@@ -570,17 +698,17 @@ public sealed class AndroidDeviceTests
     /// <summary>What a start left on the emulator of <paramref name="serial"/>: a port forwarded to a session's relay, the
     /// update handlers' socket reversed to Passenger, the relay in the app, the app marked as debugged; empty once its end
     /// took them away.</summary>
-    private static string Left(AndroidTools tools, string serial)
+    private static string Left(AndroidTools tools, string serial, string package = Package)
     {
         string forwards = Adb(tools, serial, "forward", "--list");
         string reverses = Adb(tools, serial, "reverse", "--list");
-        string relay = Adb(tools, serial, "shell", $"run-as {Package} ls files/.__override__/arm64-v8a files/.__override__/x86_64 2>/dev/null");
+        string relay = Adb(tools, serial, "shell", $"run-as {package} ls files/.__override__/arm64-v8a files/.__override__/x86_64 2>/dev/null");
         string debugged = Adb(tools, serial, "shell", "dumpsys activity processes | grep mDebugApp=");
         return string.Join("; ", [.. forwards.Split('\n').Where(l => l.StartsWith(serial + " ", StringComparison.Ordinal) && l.Contains("localabstract:passenger-debug-", StringComparison.Ordinal))
                 .Select(l => l.Trim()),
             .. reverses.Split('\n').Where(l => l.Contains("localabstract:passenger-handlers-", StringComparison.Ordinal)).Select(l => l.Trim()),
             .. relay.Contains(AndroidApp.RelayFile, StringComparison.Ordinal) ? ["the relay in the app"] : (string[])[],
-            .. debugged.Contains($"mDebugApp={Package}/", StringComparison.Ordinal) ? [$"{Package} marked as debugged"] : (string[])[]]);
+            .. debugged.Contains($"mDebugApp={package}/", StringComparison.Ordinal) ? [$"{package} marked as debugged"] : (string[])[]]);
     }
 
     /// <summary>The serial of the emulator a test runs on: the target's own where it ran when listed, else the one its AVD
@@ -590,7 +718,7 @@ public sealed class AndroidDeviceTests
             .Targets.FirstOrDefault(t => t.Running && t.Avd == target.Avd)?.Id ?? throw new InvalidOperationException($"{target.Name} was not booted as an emulator the workload lists");
 
     /// <summary>The app's process on the emulator of <paramref name="serial"/>, as pidof says it: empty once it has ended.</summary>
-    private static string Pid(AndroidTools tools, string serial) => Adb(tools, serial, "shell", "pidof", Package).Trim();
+    private static string Pid(AndroidTools tools, string serial, string package = Package) => Adb(tools, serial, "shell", "pidof", package).Trim();
 
     /// <summary>What adb says to a command for the emulator of <paramref name="serial"/>.</summary>
     private static string Adb(AndroidTools tools, string serial, params string[] command) =>

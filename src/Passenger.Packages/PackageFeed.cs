@@ -13,6 +13,10 @@ namespace Passenger.Packages;
 public sealed record PackageSummary(string Id, string Version, string Description, string Authors, long Downloads)
 {
     public IReadOnlyList<string> Feeds { get; init; } = [];
+
+    /// <summary>Why a newer version than <see cref="Version"/> is not offered: the feeds' minimum publish age holds it back;
+    /// null where none is.</summary>
+    public string? HeldBack { get; init; }
 }
 
 /// <summary>Where packages are found: a v3 feed (nuget.org's protocol), a v2 feed (OData), or a folder of .nupkg files.</summary>
@@ -25,6 +29,15 @@ public interface IPackageFeed
 
     /// <summary>A package's versions that can be installed, newest first: none its owner unlisted.</summary>
     Task<IReadOnlyList<string>> VersionsAsync(string id, bool prerelease, CancellationToken cancel);
+
+    /// <summary>A package's versions as <see cref="VersionsAsync"/> gives them, each with when the feed says it was published;
+    /// null where the feed says nothing of it.</summary>
+    async Task<IReadOnlyList<(string Version, DateTimeOffset? Published)>> PublishedAsync(string id, bool prerelease, CancellationToken cancel) =>
+        [.. (await VersionsAsync(id, prerelease, cancel)).Select(version => (version, (DateTimeOffset?)null))];
+
+    /// <summary>A package's versions with those too new to be chosen for the person (<see cref="FeedVersions.TooNew"/>), the
+    /// one way every choice of a version for the person reads them; a feed of its own holds none back.</summary>
+    async Task<FeedVersions> VersionsEachAsync(string id, bool prerelease, CancellationToken cancel) => new(await VersionsAsync(id, prerelease, cancel), []);
 
     /// <summary>What a version of a package depends on, as its own metadata says, by target framework; null when the feed
     /// has no such version, or cannot say.</summary>
@@ -74,12 +87,28 @@ public sealed record DependencyGroup(string? Framework, IReadOnlyList<(string Id
 public sealed record FeedSearch(IReadOnlyList<PackageSummary> Packages, IReadOnlyList<(string Feed, string Problem)> Failed, int Unmapped);
 
 /// <summary>A package's versions and the feeds that could not answer, so a partial answer stays distinguishable.</summary>
-public sealed record FeedVersions(IReadOnlyList<string> Versions, IReadOnlyList<(string Feed, string Problem)> Failed);
+public sealed record FeedVersions(IReadOnlyList<string> Versions, IReadOnlyList<(string Feed, string Problem)> Failed)
+{
+    /// <summary>The versions too new to be chosen for the person, by version, each with why: published more recently than
+    /// the minimum publish age of every feed that has it (nuget.config's <c>minPublishAgeHours</c>), or on a feed that
+    /// gives no date where it asks one. Named on its own, such a version is taken.</summary>
+    public IReadOnlyDictionary<string, string> TooNew { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>The versions that may be chosen for the person, newest first: those not <see cref="TooNew"/>.</summary>
+    public IReadOnlyList<string> Chosen => TooNew.Count == 0 ? Versions : [.. Versions.Where(v => !TooNew.ContainsKey(v))];
+
+    /// <summary>Whether every feed asked failed, so the answer says nothing of the package.</summary>
+    public bool NoneAnswered { get; init; }
+
+    /// <summary>The answer, refused where no feed answered (<see cref="NoneAnswered"/>), saying why each failed.</summary>
+    public FeedVersions Answered() =>
+        NoneAnswered ? throw new HttpRequestException(string.Join("; ", Failed.Select(f => $"{f.Feed}: {f.Problem}"))) : this;
+}
 
 /// <summary>The feeds the NuGet window searches at once: All Feeds, or the one chosen. Each is asked in parallel; a
 /// package found in several is listed once, at its newest version; one the package source mapping keeps from a feed is
 /// not offered from it, since restore would never take it from there.</summary>
-public sealed class FeedSet(string name, IReadOnlyList<IPackageFeed> feeds, Func<string, string, bool> allows) : IPackageFeed
+public sealed class FeedSet(string name, IReadOnlyList<IPackageFeed> feeds, Func<string, string, bool> allows, Func<string, string, TimeSpan>? ages = null) : IPackageFeed
 {
     /// <summary>The chooser's every-feed choice.</summary>
     public const string All = "All Feeds";
@@ -141,36 +170,80 @@ public sealed class FeedSet(string name, IReadOnlyList<IPackageFeed> feeds, Func
         IReadOnlyList<PackageSummary> packages = [.. order.Select(id => merged[id])
             .OrderBy(p => feeds.Count > 1 ? Match(p.Id) : 0)
             .ThenByDescending(p => feeds.Count > 1 ? p.Downloads : 0)];
+        if (ages is not null && packages.Any(p => p.Feeds.Any(f => ages(f, p.Id) > TimeSpan.Zero)))
+        {
+            packages = await Task.WhenAll(packages.Select(async p => p.Feeds.Any(f => ages(f, p.Id) > TimeSpan.Zero) ? await OldEnoughAsync(p, prerelease, cancel) : p));
+        }
         return new FeedSearch(packages, [.. answers.Where(a => a.Problem is not null).Select(a => (a.Feed.Name, a.Problem!))], unmapped);
+    }
+
+    /// <summary>A package found at the newest version the feeds' minimum publish age lets be chosen for the person, saying
+    /// why a newer one is held back; as found where its versions cannot be read, or every one is too new.</summary>
+    private async Task<PackageSummary> OldEnoughAsync(PackageSummary found, bool prerelease, CancellationToken cancel)
+    {
+        FeedVersions versions = await VersionsEachAsync(found.Id, prerelease, cancel);
+        return versions.TooNew.TryGetValue(found.Version, out string? why) && versions.Chosen.FirstOrDefault() is { } chosen
+            ? found with { Version = chosen, HeldBack = $"{found.Version} {why}" }
+            : found;
     }
 
     public async Task<IReadOnlyList<string>> VersionsAsync(string id, bool prerelease, CancellationToken cancel)
     {
-        FeedVersions answer = await VersionsEachAsync(id, prerelease, cancel);
-        if (answer.Failed.Count > 0 && answer.Failed.Count == feeds.Count(f => allows(f.Name, id)))
-        {
-            throw new HttpRequestException(string.Join("; ", answer.Failed.Select(f => $"{f.Feed}: {f.Problem}")));
-        }
-        return answer.Versions;
+        return (await VersionsEachAsync(id, prerelease, cancel)).Answered().Versions;
     }
 
-    /// <summary>A package's versions from the allowed feeds, preserving failures beside successful answers.</summary>
+    /// <summary>A package's versions from the allowed feeds, preserving failures beside successful answers, with those too
+    /// new to be chosen for the person: a version is chosen where one feed that has it lets it be, as restore's own choice
+    /// takes it, a feed of a minimum publish age (<paramref name="ages"/>, none for a package its exceptions name) only once
+    /// that long has passed since it says the version was published.</summary>
     public async Task<FeedVersions> VersionsEachAsync(string id, bool prerelease, CancellationToken cancel)
     {
-        (IReadOnlyList<string> Found, string? Problem)[] answers = await Task.WhenAll(feeds.Where(f => allows(f.Name, id)).Select(async feed =>
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        (IReadOnlyList<string> Found, IReadOnlyDictionary<string, string> Young, string? Problem)[] answers = await Task.WhenAll(feeds.Where(f => allows(f.Name, id)).Select(async feed =>
         {
             try
             {
-                return (await feed.VersionsAsync(id, prerelease, cancel), (string?)null);
+                TimeSpan age = ages?.Invoke(feed.Name, id) ?? TimeSpan.Zero;
+                if (age <= TimeSpan.Zero)
+                {
+                    return (await feed.VersionsAsync(id, prerelease, cancel), (IReadOnlyDictionary<string, string>)new Dictionary<string, string>(), (string?)null);
+                }
+                IReadOnlyList<(string Version, DateTimeOffset? Published)> dated = await feed.PublishedAsync(id, prerelease, cancel);
+                Dictionary<string, string> young = new(StringComparer.OrdinalIgnoreCase);
+                foreach ((string version, DateTimeOffset? published) in dated)
+                {
+                    if (published is not { } at)
+                    {
+                        young[version] = $"has no publish date on {feed.Name}, which its minimum publish age of {Durations.Said(age)} needs";
+                    }
+                    else if (now - at < age)
+                    {
+                        young[version] = $"was published {Durations.Said(now - at)} ago, within {feed.Name}'s minimum publish age of {Durations.Said(age)}";
+                    }
+                }
+                return ([.. dated.Select(d => d.Version)], young, (string?)null);
             }
             catch (Exception failed) when (!cancel.IsCancellationRequested && IsFeedFailure(failed))
             {
-                return ((IReadOnlyList<string>)[], failed.Message);
+                return ((IReadOnlyList<string>)[], new Dictionary<string, string>(), failed.Message);
             }
         }));
         IPackageFeed[] asked = [.. feeds.Where(f => allows(f.Name, id))];
-        return new FeedVersions([.. answers.SelectMany(a => a.Found).Distinct(StringComparer.OrdinalIgnoreCase).OrderByDescending(v => v, VersionOrder.Instance)],
-            [.. answers.Select((a, i) => (Feed: asked[i].Name, a.Problem)).Where(a => a.Problem is not null).Select(a => (a.Feed, a.Problem!))]);
+        string[] versions = [.. answers.SelectMany(a => a.Found).Distinct(StringComparer.OrdinalIgnoreCase).OrderByDescending(v => v, VersionOrder.Instance)];
+        Dictionary<string, string> tooNew = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string version in versions)
+        {
+            string?[] why = [.. answers.Where(a => a.Found.Contains(version, StringComparer.OrdinalIgnoreCase)).Select(a => a.Young.GetValueOrDefault(version))];
+            if (why.All(w => w is not null))
+            {
+                tooNew[version] = why[0]!;
+            }
+        }
+        return new FeedVersions(versions, [.. answers.Select((a, i) => (Feed: asked[i].Name, a.Problem)).Where(a => a.Problem is not null).Select(a => (a.Feed, a.Problem!))])
+        {
+            TooNew = tooNew,
+            NoneAnswered = asked.Length > 0 && answers.All(a => a.Problem is not null),
+        };
     }
 
     /// <summary>A version's dependencies from the first feed the package source mapping allows that has it.</summary>
@@ -369,10 +442,15 @@ public sealed class V3Feed(FeedClient client) : IPackageFeed
         return [.. (found?.Data ?? []).Select(p => new PackageSummary(p.Id, p.Version, p.Description ?? string.Empty, Authors(p.Authors), p.TotalDownloads ?? 0) { Feeds = [Name] })];
     }
 
-    public async Task<IReadOnlyList<string>> VersionsAsync(string id, bool prerelease, CancellationToken cancel)
+    public async Task<IReadOnlyList<string>> VersionsAsync(string id, bool prerelease, CancellationToken cancel) =>
+        [.. (await PublishedAsync(id, prerelease, cancel)).Select(v => v.Version)];
+
+    /// <summary>A package's listed versions, newest first, each with when its registration says it was published; none
+    /// dated where the feed has only a flat container.</summary>
+    public async Task<IReadOnlyList<(string Version, DateTimeOffset? Published)>> PublishedAsync(string id, bool prerelease, CancellationToken cancel)
     {
         (_, Uri? registrations, Uri? flat, _) = await ServicesAsync(cancel);
-        IEnumerable<string> versions;
+        IEnumerable<(string Version, DateTimeOffset? Published)> versions;
         if (registrations is not null)
         {
             if (await client.GetJsonAsync<Registration>(new Uri(registrations, $"{id.ToLowerInvariant()}/index.json"), Json, cancel) is not { } registration)
@@ -382,17 +460,19 @@ public sealed class V3Feed(FeedClient client) : IPackageFeed
             // A package with many versions has its pages by reference, each fetched on its own.
             RegistrationPage[] pages = await Task.WhenAll((registration.Items ?? []).Select(async page =>
                 page.Items is null ? await client.GetJsonAsync<RegistrationPage>(new Uri(page.Id), Json, cancel) ?? page : page));
-            versions = pages.SelectMany(p => p.Items ?? []).Select(leaf => leaf.CatalogEntry).Where(entry => entry.Listed != false).Select(entry => entry.Version);
+            versions = pages.SelectMany(p => p.Items ?? []).Select(leaf => leaf.CatalogEntry).Where(entry => entry.Listed != false)
+                .Select(entry => (entry.Version, entry.Published));
         }
         else if (flat is not null)
         {
-            versions = (await client.GetJsonAsync<FlatVersions>(new Uri(flat, $"{id.ToLowerInvariant()}/index.json"), Json, cancel))?.Versions ?? [];
+            versions = ((await client.GetJsonAsync<FlatVersions>(new Uri(flat, $"{id.ToLowerInvariant()}/index.json"), Json, cancel))?.Versions ?? [])
+                .Select(version => (version, (DateTimeOffset?)null));
         }
         else
         {
             throw new InvalidOperationException($"{Name} offers neither registrations nor a flat container");
         }
-        return [.. versions.Where(v => prerelease || !VersionOrder.IsPrerelease(v)).OrderByDescending(v => v, VersionOrder.Instance)];
+        return [.. versions.Where(v => prerelease || !VersionOrder.IsPrerelease(v.Version)).OrderByDescending(v => v.Version, VersionOrder.Instance)];
     }
 
     /// <summary>A version's dependencies from its nuspec in the flat container, else from its registration's catalog entry.</summary>
@@ -552,7 +632,7 @@ public sealed class V3Feed(FeedClient client) : IPackageFeed
     private sealed record RegistrationLeaf(CatalogEntry CatalogEntry);
 
     /// <summary>A version as its registration has it; one with no listed flag is listed.</summary>
-    private sealed record CatalogEntry(string Version, bool? Listed);
+    private sealed record CatalogEntry(string Version, bool? Listed, DateTimeOffset? Published);
 
     private sealed record FlatVersions(IReadOnlyList<string>? Versions);
 }
@@ -580,17 +660,21 @@ public sealed class V2Feed(FeedClient client) : IPackageFeed
         return [.. Entries(found).Select(e => new PackageSummary(e.Id, e.Version, e.Description, e.Authors, e.Downloads) { Feeds = [Name] })];
     }
 
-    public async Task<IReadOnlyList<string>> VersionsAsync(string id, bool prerelease, CancellationToken cancel)
+    public async Task<IReadOnlyList<string>> VersionsAsync(string id, bool prerelease, CancellationToken cancel) =>
+        [.. (await PublishedAsync(id, prerelease, cancel)).Select(v => v.Version)];
+
+    /// <summary>A package's listed versions, newest first, each with its entry's Published date.</summary>
+    public async Task<IReadOnlyList<(string Version, DateTimeOffset? Published)>> PublishedAsync(string id, bool prerelease, CancellationToken cancel)
     {
-        List<string> versions = [];
+        List<(string Version, DateTimeOffset? Published)> versions = [];
         Uri? next = new($"{Root}/FindPackagesById()?id={Uri.EscapeDataString(Literal(id))}&semVerLevel=2.0.0");
         for (int page = 0; next is not null && page < MostPages; page++)
         {
             XDocument? found = await client.GetXmlAsync(next, cancel);
-            versions.AddRange(Entries(found).Where(e => e.Listed && (prerelease || !VersionOrder.IsPrerelease(e.Version))).Select(e => e.Version));
+            versions.AddRange(Entries(found).Where(e => e.Listed && (prerelease || !VersionOrder.IsPrerelease(e.Version))).Select(e => (e.Version, e.Published)));
             next = found?.Root?.Elements(Atom + "link").FirstOrDefault(l => (string?)l.Attribute("rel") == "next")?.Attribute("href") is { } href ? new Uri(client.Index, href.Value) : null;
         }
-        return [.. versions.Distinct(StringComparer.OrdinalIgnoreCase).OrderByDescending(v => v, VersionOrder.Instance)];
+        return [.. versions.DistinctBy(v => v.Version, StringComparer.OrdinalIgnoreCase).OrderByDescending(v => v.Version, VersionOrder.Instance)];
     }
 
     /// <summary>A version's dependencies from its entry's Dependencies field: "id:range:framework|…".</summary>
@@ -613,7 +697,7 @@ public sealed class V2Feed(FeedClient client) : IPackageFeed
     /// <summary>An OData string literal: in quotes, a quote in it doubled.</summary>
     private static string Literal(string value) => $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
 
-    private static IEnumerable<(string Id, string Version, string Description, string Authors, long Downloads, bool Listed)> Entries(XDocument? feed)
+    private static IEnumerable<(string Id, string Version, string Description, string Authors, long Downloads, bool Listed, DateTimeOffset? Published)> Entries(XDocument? feed)
     {
         foreach (XElement entry in feed?.Root?.Elements(Atom + "entry") ?? [])
         {
@@ -628,7 +712,9 @@ public sealed class V2Feed(FeedClient client) : IPackageFeed
             bool listed = !string.Equals(Field("Listed"), "false", StringComparison.OrdinalIgnoreCase) && Field("Published")?.StartsWith("1900", StringComparison.Ordinal) != true;
             yield return (id, version, Field("Description") ?? entry.Element(Atom + "summary")?.Value ?? string.Empty,
                 entry.Element(Atom + "author")?.Element(Atom + "name")?.Value ?? Field("Authors") ?? string.Empty,
-                long.TryParse(Field("DownloadCount"), System.Globalization.CultureInfo.InvariantCulture, out long downloads) ? downloads : 0, listed);
+                long.TryParse(Field("DownloadCount"), System.Globalization.CultureInfo.InvariantCulture, out long downloads) ? downloads : 0, listed,
+                DateTimeOffset.TryParse(Field("Published"), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out DateTimeOffset published)
+                    ? published : null);
         }
     }
 }
@@ -640,18 +726,24 @@ public sealed class FolderFeed(string folder, string? name = null) : IPackageFee
     public string Name => name ?? folder;
 
     public Task<IReadOnlyList<PackageSummary>> SearchAsync(string query, bool prerelease, CancellationToken cancel) => BackgroundWork.Run(() =>
-        (IReadOnlyList<PackageSummary>)[.. Read(prerelease)
+        (IReadOnlyList<PackageSummary>)[.. Read(prerelease).Select(p => p.Package)
             .Where(p => query.Trim().Length == 0 || p.Id.Contains(query.Trim(), StringComparison.OrdinalIgnoreCase))
             .GroupBy(p => p.Id, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.OrderByDescending(p => p.Version, VersionOrder.Instance).First() with { Feeds = [Name] })], cancel);
 
-    public Task<IReadOnlyList<string>> VersionsAsync(string id, bool prerelease, CancellationToken cancel) => BackgroundWork.Run(() =>
-        (IReadOnlyList<string>)[.. Read(prerelease).Where(p => p.Id.Equals(id, StringComparison.OrdinalIgnoreCase)).Select(p => p.Version)
-            .Distinct(StringComparer.OrdinalIgnoreCase).OrderByDescending(v => v, VersionOrder.Instance)], cancel);
+    public async Task<IReadOnlyList<string>> VersionsAsync(string id, bool prerelease, CancellationToken cancel) =>
+        [.. (await PublishedAsync(id, prerelease, cancel)).Select(v => v.Version)];
+
+    /// <summary>A package's versions, newest first, each published when its .nupkg file was last written, as NuGet dates a
+    /// folder's packages.</summary>
+    public Task<IReadOnlyList<(string Version, DateTimeOffset? Published)>> PublishedAsync(string id, bool prerelease, CancellationToken cancel) => BackgroundWork.Run(() =>
+        (IReadOnlyList<(string Version, DateTimeOffset? Published)>)[.. Read(prerelease).Where(p => p.Package.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
+            .Select(p => (p.Package.Version, (DateTimeOffset?)p.Written))
+            .DistinctBy(v => v.Version, StringComparer.OrdinalIgnoreCase).OrderByDescending(v => v.Version, VersionOrder.Instance)], cancel);
 
     public Task<PackageDependencies?> DependenciesAsync(string id, string version, CancellationToken cancel) => BackgroundWork.Run(() =>
     {
-        foreach (XElement metadata in Nuspecs())
+        foreach ((XElement metadata, _) in Nuspecs())
         {
             string Field(string field) => metadata.Elements().FirstOrDefault(e => e.Name.LocalName == field)?.Value ?? string.Empty;
             if (Field("id").Equals(id, StringComparison.OrdinalIgnoreCase) && VersionOrder.Instance.Compare(Field("version"), version) == 0)
@@ -662,9 +754,9 @@ public sealed class FolderFeed(string folder, string? name = null) : IPackageFee
         return (PackageDependencies?)null;
     }, cancel);
 
-    /// <summary>Each package's nuspec metadata, the flat layout's then NuGet's own (id/version/id.version.nupkg); a file
-    /// that is no package passed over.</summary>
-    private IEnumerable<XElement> Nuspecs()
+    /// <summary>Each package's nuspec metadata with its file, the flat layout's then NuGet's own (id/version/id.version.nupkg);
+    /// a file that is no package passed over.</summary>
+    private IEnumerable<(XElement Metadata, string File)> Nuspecs()
     {
         if (!Directory.Exists(folder))
         {
@@ -690,20 +782,21 @@ public sealed class FolderFeed(string folder, string? name = null) : IPackageFee
             }
             if (metadata is not null)
             {
-                yield return metadata;
+                yield return (metadata, file);
             }
         }
     }
 
-    private IEnumerable<PackageSummary> Read(bool prerelease)
+    /// <summary>Each package with when its file was last written.</summary>
+    private IEnumerable<(PackageSummary Package, DateTimeOffset Written)> Read(bool prerelease)
     {
-        foreach (XElement metadata in Nuspecs())
+        foreach ((XElement metadata, string file) in Nuspecs())
         {
             string Field(string field) => metadata.Elements().FirstOrDefault(e => e.Name.LocalName == field)?.Value ?? string.Empty;
             PackageSummary package = new(Field("id"), Field("version"), Field("description"), Field("authors"), 0);
             if (prerelease || !VersionOrder.IsPrerelease(package.Version))
             {
-                yield return package;
+                yield return (package, new DateTimeOffset(File.GetLastWriteTimeUtc(file), TimeSpan.Zero));
             }
         }
     }
